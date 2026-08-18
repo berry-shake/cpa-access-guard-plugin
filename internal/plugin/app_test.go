@@ -329,6 +329,13 @@ func TestManagementRegistrationDeclaresResource(t *testing.T) {
 	}
 }
 
+func TestNewAppDefersPersistentStateUntilLifecycleConfiguration(t *testing.T) {
+	app := NewApp()
+	if got := app.Store().StatePath(); got != "" {
+		t.Fatalf("state path initialized before lifecycle configuration: %q", got)
+	}
+}
+
 func TestHandleManagementServesResourceUI(t *testing.T) {
 	app := NewApp()
 	req, _ := json.Marshal(ManagementRequest{

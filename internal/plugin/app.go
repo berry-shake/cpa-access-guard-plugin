@@ -22,9 +22,11 @@ type App struct {
 const classifyCacheCapacity = 4096
 
 func NewApp() *App {
-	store := policy.NewStore()
-	_ = store.Configure(policy.DefaultConfig())
-	return &App{store: store, classifyCache: make(map[string][]string)}
+	// Defer persistent state initialization until the host sends the lifecycle
+	// configuration. Configuring defaults here would create a stray
+	// cpa-key-policy-state.json in the host process working directory before the
+	// configured state_file path is known.
+	return &App{store: policy.NewStore(), classifyCache: make(map[string][]string)}
 }
 
 func (a *App) HandleMethod(method string, request []byte) ([]byte, error) {
