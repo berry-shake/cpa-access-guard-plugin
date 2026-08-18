@@ -1,121 +1,119 @@
-/* "Quiet Paper" light theme — aligned with the CPA management panel.
- * Tokens mirror _panel_ref/src/styles/themes.scss (light) + variables.scss.
- * Component rules mirror _panel_ref/src/styles/components.scss and the
- * Table / ToggleSwitch / SelectionCheckbox modules. Class names are kept
- * so no component code changes are needed. */
+/* Light theme — adopts the Model Limiter plugin's palette so both plugin
+ * pages read as one family: warm paper surfaces + a clear blue accent.
+ * Token values mirror cpa-model-limiter-plugin/internal/plugin/page.html
+ * :root (light). Class names are kept so no component code changes are
+ * needed. */
 :root {
-  /* surfaces (panel light theme) */
-  --bg: #faf9f5;            /* page background (paper) */
-  --panel: #ffffff;          /* card / raised surface */
-  --panel-2: #f0eee8;        /* secondary container bg (panel --bg-primary) */
-  --muted-bg: #e9e6df;       /* tertiary / hover (panel --bg-tertiary) */
+  /* surfaces (model-limiter light) */
+  --bg: #f5f4ef;            /* page background (bg-base) */
+  --panel: #ffffff;          /* card / raised surface (bg-elevated) */
+  --panel-2: #f8f7f2;        /* secondary container bg (bg-inset) */
+  --muted-bg: #eeece6;       /* tertiary / hover (bg-muted) */
   /* borders */
   --border: #e3e1db;
-  --border-strong: #d5d2cb;
-  --border-hover: #cecac4;
+  --border-strong: #d1cec7;
+  --border-hover: #c2beb5;
   /* text */
-  --text: #2d2a26;
-  --muted: #6d6760;
-  /* primary (greige — NOT blue) */
-  --accent: #8b8680;
-  --accent-2: #7f7a74;
-  --accent-3: #726d67;
-  --accent-soft: rgba(139, 134, 128, 0.12);
-  --accent-ring: rgba(139, 134, 128, 0.18);
+  --text: #201f1c;
+  --muted: #6b665f;
+  /* primary (model-limiter blue) */
+  --accent: #2f6bff;
+  --accent-2: #245ae0;
+  --accent-3: #1c49bd;
+  --accent-soft: rgba(47, 107, 255, 0.10);
+  --accent-ring: rgba(47, 107, 255, 0.18);
   /* on-accent: text rendered on top of the accent fill (primary/danger btns,
    * toggle thumb). Kept as a token so dark theme can flip it. */
   --on-accent: #ffffff;
   /* row hover tint + modal scrim + placeholder, derived from the surface text
    * so dark theme stays legible instead of glowing white. */
-  --row-hover: rgba(139, 134, 128, 0.06);
-  --scrim: rgba(45, 42, 38, 0.35);
-  --placeholder: rgba(109, 103, 96, 0.55);
-  /* status */
-  --danger: #c65746;
-  --danger-soft: rgba(198, 87, 70, 0.08);
-  --danger-border: rgba(198, 87, 70, 0.35);
-  --ok: #10b981;
-  --ok-soft: rgba(16, 185, 129, 0.08);
-  --ok-border: rgba(16, 185, 129, 0.35);
-  --warn: #e0aa14;
+  --row-hover: rgba(24, 22, 20, 0.035);
+  --scrim: rgba(24, 22, 20, 0.40);
+  --placeholder: #96908a;
+  /* status (model-limiter danger/success/warning) */
+  --danger: #d0463b;
+  --danger-soft: rgba(208, 70, 59, 0.12);
+  --danger-border: rgba(208, 70, 59, 0.35);
+  --ok: #10a37f;
+  --ok-soft: rgba(16, 163, 127, 0.12);
+  --ok-border: rgba(16, 163, 127, 0.35);
+  --warn: #c9862c;
   /* radii (panel variables.scss) */
   --r-sm: 4px;
   --r-md: 8px;
   --r-lg: 12px;
   --r-full: 9999px;
   /* shadow (panel variables.scss) */
-  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1);
+  --shadow-sm: 0 1px 2px rgba(24, 22, 20, 0.05);
+  --shadow-lg: 0 6px 20px rgba(24, 22, 20, 0.10);
   font-family: "Source Sans 3", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color-scheme: light;
   --t-fast: 150ms ease;
 }
 
-/* Pure white theme — mirrors the CPA panel's [data-theme='white'].
- * Replaces the warm paper background with clean white surfaces, keeping the
- * greige accent for brand continuity. Token values verified against the
- * Stitch "white variant" preview. */
+/* Pure white theme — mirrors the Model Limiter [data-theme='light'] white
+ * variant: clean white surfaces with neutral gray borders, keeping the same
+ * blue accent and status colors as the default theme. */
 :root[data-theme="white"] {
-  --bg: #f5f5f5;
+  --bg: #ffffff;
   --panel: #ffffff;
   --panel-2: #fafafa;
-  --muted-bg: #efefef;
-  --border: #e6e6e6;
+  --muted-bg: #f4f4f4;
+  --border: #ececec;
   --border-strong: #d9d9d9;
   --border-hover: #cccccc;
-  --text: #1f1f1f;
-  --muted: #707070;
-  --accent: #8b8680;
-  --accent-2: #7f7a74;
-  --accent-3: #726d67;
-  --accent-soft: rgba(139, 134, 128, 0.10);
-  --accent-ring: rgba(139, 134, 128, 0.18);
+  --text: #201f1c;
+  --muted: #6b665f;
+  --accent: #2f6bff;
+  --accent-2: #245ae0;
+  --accent-3: #1c49bd;
+  --accent-soft: rgba(47, 107, 255, 0.10);
+  --accent-ring: rgba(47, 107, 255, 0.18);
   --on-accent: #ffffff;
   --row-hover: rgba(0, 0, 0, 0.03);
-  --scrim: rgba(0, 0, 0, 0.32);
-  --placeholder: rgba(112, 112, 112, 0.55);
-  --danger: #c65746;
-  --danger-soft: rgba(198, 87, 70, 0.08);
-  --danger-border: rgba(198, 87, 70, 0.35);
-  --ok: #10b981;
-  --ok-soft: rgba(16, 185, 129, 0.08);
-  --ok-border: rgba(16, 185, 129, 0.35);
-  --warn: #e0aa14;
+  --scrim: rgba(0, 0, 0, 0.35);
+  --placeholder: #96908a;
+  --danger: #d0463b;
+  --danger-soft: rgba(208, 70, 59, 0.12);
+  --danger-border: rgba(208, 70, 59, 0.35);
+  --ok: #10a37f;
+  --ok-soft: rgba(16, 163, 127, 0.12);
+  --ok-border: rgba(16, 163, 127, 0.35);
+  --warn: #c9862c;
   color-scheme: light;
 }
 
-/* Dark theme — mirrors the CPA panel's [data-theme='dark'].
- * Deep charcoal-coffee surfaces; the greige accent is lifted to #a3a09a and
- * paired with dark on-accent text so primary buttons stay legible. Token values
- * verified against the Stitch "dark variant" preview. */
+/* Dark theme — mirrors the Model Limiter [data-theme='dark'] palette: cool
+ * near-black surfaces with a lifted periwinkle-blue accent; on-accent text
+ * stays white as in model-limiter's primary buttons. */
 :root[data-theme="dark"] {
-  --bg: #1e1d1b;
-  --panel: #26241f;
-  --panel-2: #2f2d28;
-  --muted-bg: #35332e;
-  --border: #3a3833;
-  --border-strong: #46433d;
-  --border-hover: #504c45;
-  --text: #ede9e3;
-  --muted: #9a948c;
-  --accent: #a3a09a;
-  --accent-2: #b3b0aa;
-  --accent-3: #8d8a85;
-  --accent-soft: rgba(163, 160, 154, 0.14);
-  --accent-ring: rgba(163, 160, 154, 0.24);
-  --on-accent: #1e1d1b;
+  --bg: #16151a;
+  --panel: #1e1d23;
+  --panel-2: #1a1920;
+  --muted-bg: #262530;
+  --border: #302f38;
+  --border-strong: #45434f;
+  --border-hover: #55525f;
+  --text: #f2f1ee;
+  --muted: #b6b1a8;
+  --accent: #6a92ff;
+  --accent-2: #86a5ff;
+  --accent-3: #5479e6;
+  --accent-soft: rgba(106, 146, 255, 0.16);
+  --accent-ring: rgba(106, 146, 255, 0.26);
+  --on-accent: #ffffff;
   --row-hover: rgba(255, 255, 255, 0.04);
   --scrim: rgba(0, 0, 0, 0.55);
-  --placeholder: rgba(154, 148, 140, 0.55);
-  --danger: #e07a6a;
-  --danger-soft: rgba(224, 122, 106, 0.12);
-  --danger-border: rgba(224, 122, 106, 0.38);
-  --ok: #34d399;
-  --ok-soft: rgba(52, 211, 153, 0.12);
-  --ok-border: rgba(52, 211, 153, 0.38);
-  --warn: #f0c050;
-  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
-  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.4);
+  --placeholder: #7f7a70;
+  --danger: #ef6f60;
+  --danger-soft: rgba(239, 111, 96, 0.18);
+  --danger-border: rgba(239, 111, 96, 0.40);
+  --ok: #22c39a;
+  --ok-soft: rgba(34, 195, 154, 0.18);
+  --ok-border: rgba(34, 195, 154, 0.40);
+  --warn: #e0a144;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 6px 20px rgba(0, 0, 0, 0.45);
   color-scheme: dark;
 }
 
@@ -189,7 +187,7 @@ a:hover { color: var(--accent-2); text-decoration: underline; }
 .btn.primary { background-color: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .btn.primary:hover { background-color: var(--accent-2); border-color: var(--accent-2); }
 .btn.danger { background-color: var(--danger); color: var(--on-accent); border-color: var(--danger); }
-.btn.danger:hover { background-color: var(--accent-3); filter: brightness(0.95); }
+.btn.danger:hover { background-color: var(--danger); border-color: var(--danger); filter: brightness(0.92); }
 .btn.sm { padding: 8px 10px; font-size: 13px; }
 /* danger-outline: transparent bg, red text + border (for destructive actions
  * that shouldn't compete with the primary save button, e.g. 删除 Key). */
@@ -520,7 +518,7 @@ td.strong { font-weight: 600; color: var(--text); }
   background: var(--accent); color: var(--on-accent);
   border: none; cursor: pointer;
   font-size: 26px; line-height: 1; font-weight: 300;
-  box-shadow: 0 4px 20px rgba(139, 134, 128, 0.28);
+  box-shadow: 0 4px 20px var(--accent-ring);
   align-items: center; justify-content: center;
   transition: transform var(--t-fast), box-shadow var(--t-fast);
 }
@@ -1198,8 +1196,8 @@ td.strong { font-weight: 600; color: var(--text); }
 }
 .map-dispatch-btn.active {
   border-color: var(--accent);
-  background: var(--accent-soft, rgba(139, 134, 128, .12));
-  box-shadow: 0 0 0 3px var(--accent-ring, rgba(139, 134, 128, .18));
+  background: var(--accent-soft, rgba(47, 107, 255, .10));
+  box-shadow: 0 0 0 3px var(--accent-ring, rgba(47, 107, 255, .18));
 }
 .map-dispatch-title {
   font-size: 14px;
