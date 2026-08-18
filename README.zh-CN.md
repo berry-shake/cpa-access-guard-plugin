@@ -160,7 +160,9 @@ CPA 原生鉴权成功后会产生稳定、不可逆的 `caller_scope`。插件�
 要求与行为：
 
 - 需要 CLIProxyAPI **v7.2.101 或更高版本**，因为 Scheduler 必须收到 `Options.Metadata.caller_scope`。
-- 创建绑定时在管理页面/API 粘贴原生 Key 一次；明文只用于计算 scope 和预览，不会写入 state，也不会在 API 响应中回显。
+- 网页通过受 Management Key 保护的 `GET /v0/management/api-keys` 读取 CPA 当前顶层列表，默认以脱敏形式列出每一把 Key，包括尚未绑定的 Key；已经从宿主删除、但 state 中仍有绑定的 Key 会保留为“孤立绑定”供检查。
+- 从未绑定行直接创建时无需手动复制粘贴。明文只停留在页面内存，并且只通过受 Management 鉴权的 JSON 请求体用于精确 scope 匹配和创建绑定；不会渲染到页面、放进 URL、写入浏览器存储或插件 state，也不会由插件 API 返回。
+- 仍可手动新建绑定：粘贴原生 Key 一次；明文只用于计算 scope 和预览，不会写入 state，也不会在 API 响应中回显。
 - Key 必须仍然存在于 CPA 顶层 `api-keys`；绑定本身不负责认证。
 - 已绑定且启用的 Key 如果找不到组内可用凭证，会返回 `auth_not_found`（503），不会退回组外文件。
 - `caller_scope` 命中启用的原生绑定时，绑定组优先于通用 Scheduler `group` 元数据。
@@ -266,7 +268,7 @@ http://<你的-cpa-主机>:<api端口>/v0/resource/plugins/cpa-access-guard/inde
 | Keys | 创建/编辑/轮换/删除 key；绑模型或别名；RPM 与额度 |
 | 映射 → 别名 | 全局多目标别名、调度方式、定价 |
 | 映射 → 凭证归类 | 自定义分组规则与命中预览 |
-| 映射 → 原生 Key 绑定 | 将 CPA 顶层 Key 绑定到内置档或 `classify:` 文件组 |
+| 映射 → 原生 Key 绑定 | 列出全部 CPA 顶层 Key；配置内置档或 `classify:` 文件组；保留孤立绑定供检查 |
 | 选模型 | 提供商目录；内置档 / **自定义 · …** 子组 |
 
 不重编 `.so` 时开发前端：
@@ -293,7 +295,10 @@ VITE_CPA_BASE=http://127.0.0.1:8317 npm run dev
 - `POST …/classify-preview` — 返回去重后的组并集 `groups`，以及每条规则自己的 `rule_matches`；显式 draft 规则由服务端 Go/RE2 严格校验
 - `POST …/catalog` — 前端提交 auth-file + 模型列表，返回带 `classify:` 的选择器条目  
 
-**CPA 顶层原生 Key 绑定：** `GET/POST/PATCH/DELETE …/native-key-bindings`
+**CPA 顶层原生 Key 绑定：**
+
+- `GET/POST/PATCH/DELETE …/native-key-bindings`
+- `POST …/native-key-bindings/catalog` — 管理网页辅助接口：通过 JSON 请求体接收当前 `api_keys` 数组，按精确 `caller_scope` 关联绑定，只返回脱敏条目与孤立绑定；绝不返回传入的 Key 或 caller scope。
 
 创建绑定（Key 明文只在请求中出现一次；响应不返回明文或完整 caller scope）：
 

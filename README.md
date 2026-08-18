@@ -162,7 +162,9 @@ top-level api-key → CPA native auth → caller_scope
 Requirements and behavior:
 
 - Requires CLIProxyAPI **v7.2.101 or newer**, where Scheduler metadata includes `caller_scope`.
-- Paste the existing native key once when creating a binding. The plaintext is used only to derive the scope/preview; it is not stored or returned.
+- The Web UI loads the current top-level list from CPA's Management-key-protected `GET /v0/management/api-keys` endpoint and shows every key as a redacted row, including keys with no binding. A binding whose key was removed from the host remains visible as an orphan record.
+- Selecting an unbound row avoids manual copy/paste. The plaintext stays in page memory, is sent only in Management-authenticated JSON request bodies for exact scope matching and binding creation, and is never rendered, placed in a URL, stored in browser storage, persisted, or returned by plugin APIs.
+- Manual creation remains available: paste the existing native key once. The plaintext is used only to derive the scope/preview; it is not stored or returned.
 - The key must remain in CPA's top-level `api-keys`; a binding is authorization metadata, not authentication.
 - A bound, enabled key with no usable candidate in its group fails closed with `auth_not_found` (503). It never falls back outside the group.
 - When a caller scope matches an enabled native binding, that binding takes precedence over generic Scheduler `group` metadata.
@@ -271,7 +273,7 @@ UI areas:
 | Keys | Create / edit / rotate / delete keys; bind models or aliases; RPM & budgets |
 | Mapping → Aliases | Global multi-target aliases, dispatch, pricing |
 | Mapping → Classification | Custom credential groups + match preview |
-| Mapping → Native key bindings | Bind CPA top-level keys to built-in or `classify:` auth-file groups |
+| Mapping → Native key bindings | List every CPA top-level key; configure built-in or `classify:` auth-file groups; retain orphan bindings for review |
 | Model picker | Catalog of providers; tier / **Custom · …** subgroups |
 
 Dev UI without rebuilding the `.so`:
@@ -310,6 +312,7 @@ Exact paths (no path templates). Auth: CPA management bearer token.
 **CPA-native key bindings**
 
 - `GET/POST/PATCH/DELETE …/native-key-bindings`
+- `POST …/native-key-bindings/catalog` — Management-UI helper: accepts the current `api_keys` array in a JSON body, matches bindings by exact `caller_scope`, and returns only redacted entries plus orphan bindings. It never returns the supplied keys or caller scopes.
 
 Create a binding (the plaintext key appears only in this request; neither it nor the full caller scope is returned):
 

@@ -7,7 +7,8 @@ import { _resetLocale } from "../i18n";
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const apiMocks = vi.hoisted(() => ({
-  fetchNativeKeyBindings: vi.fn(),
+  fetchTopLevelAPIKeys: vi.fn(),
+  fetchNativeKeyBindingCatalog: vi.fn(),
   fetchClassifyRules: vi.fn(),
   createNativeKeyBinding: vi.fn(),
   updateNativeKeyBinding: vi.fn(),
@@ -26,6 +27,8 @@ const existing: NativeKeyBinding = {
   group: "team",
 };
 
+const existingSecret = "sk-existing-native-secret-0123456789";
+
 let container: HTMLDivElement;
 let root: ReturnType<typeof createRoot> | null = null;
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -43,7 +46,11 @@ beforeEach(() => {
   vi.spyOn(window, "confirm").mockReturnValue(true);
   container = document.createElement("div");
   document.body.appendChild(container);
-  apiMocks.fetchNativeKeyBindings.mockResolvedValue([existing]);
+  apiMocks.fetchTopLevelAPIKeys.mockResolvedValue([existingSecret]);
+  apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValue({
+    entries: [{ key_index: 0, key_preview: existing.key_preview, binding: existing }],
+    orphan_bindings: [],
+  });
   apiMocks.fetchClassifyRules.mockResolvedValue([
     { name: "vip", field: "filename", pattern: "vip", group: "VIP", enabled: true },
   ] satisfies ClassifyRule[]);
@@ -99,7 +106,10 @@ describe("NativeKeyBindingsTab", () => {
   });
 
   it("re-enables a disabled binding without a confirmation prompt", async () => {
-    apiMocks.fetchNativeKeyBindings.mockResolvedValue([{ ...existing, enabled: false }]);
+    apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValue({
+      entries: [{ key_index: 0, key_preview: existing.key_preview, binding: { ...existing, enabled: false } }],
+      orphan_bindings: [],
+    });
     await act(async () => {
       root = createRoot(container);
       root.render(<NativeKeyBindingsTab />);
@@ -240,5 +250,112 @@ describe("NativeKeyBindingsTab", () => {
       key: "sk-client-b-secret",
       group: "classify:manual",
     });
+  });
+
+  it("lists every host key as a redacted row even when none has a binding", async () => {
+    const secrets = [
+      "sk-first-top-level-secret-0123456789",
+      "sk-second-top-level-secret-9876543210",
+      "sk-third-top-level-secret-abcdefghij",
+    ];
+    const previews = ["sk-firs...56789", "sk-seco...43210", "sk-thir...fghij"];
+    apiMocks.fetchTopLevelAPIKeys.mockResolvedValue(secrets);
+    apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValue({
+      entries: previews.map((key_preview, key_index) => ({ key_index, key_preview })),
+      orphan_bindings: [],
+    });
+
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<NativeKeyBindingsTab />);
+      await tick();
+    });
+
+    expect(container.querySelectorAll('[data-testid="native-key-row-unbound"]')).toHaveLength(3);
+    expect(container.textContent).toContain("共 3 个顶层 Key · 0 个已配置绑定");
+    for (const preview of previews) expect(container.textContent).toContain(preview);
+    for (const secret of secrets) {
+      expect(container.textContent).not.toContain(secret);
+      expect(container.innerHTML).not.toContain(secret);
+    }
+    expect(apiMocks.fetchNativeKeyBindingCatalog).toHaveBeenCalledWith(secrets);
+  });
+
+  it("creates a binding directly from a selected host row without rendering its plaintext", async () => {
+    const secret = "sk-selected-top-level-secret-0123456789";
+    const preview = "sk-sele...56789";
+    apiMocks.fetchTopLevelAPIKeys.mockResolvedValue([secret]);
+    apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValue({
+      entries: [{ key_index: 0, key_preview: preview }],
+      orphan_bindings: [],
+    });
+
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<NativeKeyBindingsTab />);
+      await tick();
+    });
+
+    const bindButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("配置绑定"));
+    expect(bindButton).toBeTruthy();
+    await act(async () => { bindButton!.click(); });
+
+    expect((container.querySelector("#native-binding-id") as HTMLInputElement).value).toBe("native-key-1");
+    expect((container.querySelector("#native-binding-name") as HTMLInputElement).value).toBe("顶层 API Key 1");
+    expect(container.textContent).toContain(preview);
+    expect(container.querySelector("#native-binding-key")).toBeNull();
+    expect(container.innerHTML).not.toContain(secret);
+
+    await act(async () => {
+      change(container.querySelector("#native-binding-group") as HTMLInputElement, "classify:vip");
+    });
+    const form = container.querySelector(".native-binding-editor form") as HTMLFormElement;
+    await act(async () => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await tick();
+    });
+
+    expect(apiMocks.createNativeKeyBinding).toHaveBeenCalledWith({
+      id: "native-key-1",
+      name: "顶层 API Key 1",
+      enabled: true,
+      key: secret,
+      group: "classify:vip",
+    });
+  });
+
+  it("keeps bindings whose top-level key was removed visible as orphan records", async () => {
+    apiMocks.fetchTopLevelAPIKeys.mockResolvedValue([]);
+    apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValue({
+      entries: [],
+      orphan_bindings: [existing],
+    });
+
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<NativeKeyBindingsTab />);
+      await tick();
+    });
+
+    expect(container.querySelectorAll('[data-testid="native-key-row-orphan"]')).toHaveLength(1);
+    expect(container.textContent).toContain("顶层已删除");
+    expect(container.textContent).toContain("已不在 CPA 顶层 api-keys 中");
+    expect(container.textContent).toContain("Client A");
+  });
+
+  it("reports a host key load failure instead of claiming the host has no keys", async () => {
+    apiMocks.fetchTopLevelAPIKeys.mockRejectedValue(new Error("management unavailable"));
+
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<NativeKeyBindingsTab />);
+      await tick();
+    });
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("management unavailable");
+    expect(container.textContent).toContain("顶层 Key 列表加载失败");
+    expect(container.textContent).not.toContain("CPA 尚未配置顶层 API Key");
+    expect(apiMocks.fetchNativeKeyBindingCatalog).not.toHaveBeenCalled();
   });
 });

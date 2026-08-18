@@ -5,6 +5,7 @@ import type {
   CredentialDescriptor,
   ClassifyPreviewResponse,
   NativeKeyBinding,
+  NativeKeyBindingCatalog,
   NativeKeyBindingCreateRequest,
   NativeKeyBindingUpdateRequest,
 } from "../types";
@@ -160,6 +161,43 @@ export async function fetchCredentialDescriptors(): Promise<CredentialDescriptor
 }
 
 // --- CPA top-level API-key binding CRUD ---
+
+// Read the host's current in-memory api-keys list through CPA's Management
+// API. Keep plaintext values in component memory only: callers must never
+// render them, put them in URLs, or persist them in browser storage.
+export async function fetchTopLevelAPIKeys(): Promise<string[]> {
+  const c = apiClient();
+  const { data } = await c.get<{ "api-keys"?: unknown }>("/v0/management/api-keys");
+  const raw = data?.["api-keys"];
+  if (!Array.isArray(raw)) return [];
+
+  const keys: string[] = [];
+  const seen = new Set<string>();
+  for (const value of raw) {
+    if (typeof value !== "string") continue;
+    const key = value.trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    keys.push(key);
+  }
+  return keys;
+}
+
+// Ask the plugin to correlate host keys with persisted bindings by exact
+// caller_scope. Sending the keys in a Management-authenticated JSON body
+// avoids the collision risk of matching redacted previews and keeps secrets
+// out of URLs and responses.
+export async function fetchNativeKeyBindingCatalog(apiKeys: string[]): Promise<NativeKeyBindingCatalog> {
+  const c = apiClient();
+  const { data } = await c.post<Partial<NativeKeyBindingCatalog>>(
+    pluginPath("/native-key-bindings/catalog"),
+    { api_keys: apiKeys },
+  );
+  return {
+    entries: Array.isArray(data.entries) ? data.entries : [],
+    orphan_bindings: Array.isArray(data.orphan_bindings) ? data.orphan_bindings : [],
+  };
+}
 
 export async function fetchNativeKeyBindings(): Promise<NativeKeyBinding[]> {
   const c = apiClient();

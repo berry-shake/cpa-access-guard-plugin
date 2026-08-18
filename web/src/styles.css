@@ -909,6 +909,8 @@ td.strong { font-weight: 600; color: var(--text); }
   margin-top: 9px; padding-top: 9px; color: var(--danger); font-weight: 600;
   border-top: 1px solid var(--danger-border);
 }
+.native-binding-toolbar { align-items: center; gap: 8px; }
+.native-binding-summary { margin-right: auto; font-size: 13px; }
 .native-binding-empty {
   display: flex; flex-direction: column; align-items: center; gap: 4px;
   padding: 36px 20px; text-align: center;
@@ -924,6 +926,8 @@ td.strong { font-weight: 600; color: var(--text); }
 }
 .native-binding-card:hover { border-color: var(--border-hover); }
 .native-binding-card.disabled { opacity: .72; }
+.native-binding-card.unbound { border-style: dashed; }
+.native-binding-card.orphan { border-color: var(--danger-border); }
 .native-binding-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .native-binding-identity { display: flex; flex-direction: column; min-width: 0; }
 .native-binding-identity strong { font-size: 15px; overflow-wrap: anywhere; }
@@ -934,6 +938,8 @@ td.strong { font-weight: 600; color: var(--text); }
 }
 .native-binding-status.enabled { color: var(--ok); background: var(--ok-soft); border-color: var(--ok-border); }
 .native-binding-status.disabled { color: var(--muted); background: var(--muted-bg); border-color: var(--border); }
+.native-binding-status.unbound { color: var(--muted); background: var(--muted-bg); border-color: var(--border); }
+.native-binding-status.orphan { color: var(--danger); background: var(--danger-soft); border-color: var(--danger-border); }
 .native-binding-meta { display: grid; gap: 9px; margin: 16px 0; }
 .native-binding-meta > div { min-width: 0; }
 .native-binding-meta dt {
@@ -945,14 +951,23 @@ td.strong { font-weight: 600; color: var(--text); }
   display: inline-block; padding: 2px 8px; background: var(--panel-2);
   border: 1px solid var(--border); border-radius: var(--r-sm); font-size: 12px;
 }
+.native-binding-group.unrestricted { color: var(--muted); border-style: dashed; }
+.native-binding-orphan-note {
+  margin: -6px 0 12px; color: var(--danger); font-size: 12px; line-height: 1.45;
+}
 .native-binding-actions {
   display: flex; align-items: center; gap: 8px; padding-top: 12px;
   border-top: 1px solid var(--border);
 }
 .native-binding-actions .switch { margin-right: auto; }
+.native-binding-free-hint { margin-right: auto; font-size: 12px; }
 .native-binding-editor .map-form-row input { box-sizing: border-box; background: var(--panel); }
 .native-binding-editor .map-form-row input:disabled { opacity: .65; cursor: not-allowed; }
 .native-binding-field-hint { margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.native-binding-selected-key {
+  padding: 9px 12px; background: var(--muted-bg); border: 1px solid var(--border);
+  border-radius: var(--r-sm); color: var(--text); overflow-wrap: anywhere;
+}
 
 /* Alias cards grid */
 .alias-grid {

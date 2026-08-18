@@ -569,6 +569,7 @@ func (a *App) managementRegistration() ManagementRegistrationResponse {
 			{Method: http.MethodPost, Path: base + "/native-key-bindings", Description: "Bind one CPA-native downstream API key to an auth-file group."},
 			{Method: http.MethodPatch, Path: base + "/native-key-bindings", Description: "Update, rotate, enable, or disable one CPA-native key binding."},
 			{Method: http.MethodDelete, Path: base + "/native-key-bindings", Description: "Delete one CPA-native key binding by id."},
+			{Method: http.MethodPost, Path: base + "/native-key-bindings/catalog", Description: "Match CPA-native downstream API keys to current bindings without returning secrets."},
 			{Method: http.MethodGet, Path: base + "/aliases", Description: "List the global alias mapping table."},
 			{Method: http.MethodPost, Path: base + "/aliases", Description: "Create or update a global alias mapping."},
 			{Method: http.MethodDelete, Path: base + "/aliases", Description: "Delete a global alias mapping by name."},
@@ -626,6 +627,8 @@ func (a *App) handleManagement(raw []byte) ([]byte, error) {
 		return OKEnvelope(a.patchNativeKeyBinding(req.Body))
 	case req.Method == http.MethodDelete && path == base+"/native-key-bindings":
 		return OKEnvelope(a.deleteNativeKeyBinding(idFromRequest(req.Query, req.Body)))
+	case req.Method == http.MethodPost && path == base+"/native-key-bindings/catalog":
+		return OKEnvelope(a.catalogNativeKeyBindings(req.Body))
 	case req.Method == http.MethodGet && path == base+"/aliases":
 		return OKEnvelope(jsonResponse(http.StatusOK, map[string]any{"aliases": a.store.AliasesSnapshot()}))
 	case req.Method == http.MethodPost && path == base+"/aliases":

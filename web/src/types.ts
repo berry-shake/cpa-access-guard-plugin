@@ -225,3 +225,18 @@ export interface NativeKeyBindingUpdateRequest {
   key?: string;
   group?: string;
 }
+
+// NativeKeyCatalogEntry correlates one CPA top-level api-keys item with an
+// existing Access Guard binding. The plaintext key is deliberately absent;
+// key_index points back to the in-memory list returned by CPA Management.
+export interface NativeKeyCatalogEntry {
+  key_index: number;
+  key_preview: string;
+  binding?: NativeKeyBinding | null;
+}
+
+export interface NativeKeyBindingCatalog {
+  entries: NativeKeyCatalogEntry[];
+  // Bindings whose key is no longer present in CPA's top-level api-keys.
+  orphan_bindings: NativeKeyBinding[];
+}

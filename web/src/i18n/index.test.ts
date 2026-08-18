@@ -59,6 +59,26 @@ describe("translate", () => {
     },
   );
 
+  it.each(["zh-CN", "zh-TW", "en", "ru"] as const)(
+    "fully translates the top-level key catalog UI in %s",
+    (locale) => {
+      _resetLocale(locale);
+      for (const key of [
+        "mapping.native.catalogNotice",
+        "mapping.native.refresh",
+        "mapping.native.unbound",
+        "mapping.native.orphan",
+        "mapping.native.defaultScheduling",
+        "mapping.native.bindThisKey",
+        "mapping.native.selectedKeyHint",
+      ]) {
+        expect(translate(key)).not.toBe(key);
+      }
+      expect(translate("mapping.native.summary", { total: 6, bound: 2 })).toContain("6");
+      expect(translate("mapping.native.summary", { total: 6, bound: 2 })).toContain("2");
+    },
+  );
+
   it.each([
     ["zh-CN", "仍然有效", "默认/自由调度"],
     ["zh-TW", "仍然有效", "預設/自由調度"],

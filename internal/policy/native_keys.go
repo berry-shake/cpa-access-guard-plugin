@@ -65,9 +65,9 @@ func NativeCallerScope(rawAPIKey string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// nativeKeyPreview gives operators enough context to identify a normal API
-// key without ever storing a short key verbatim.
-func nativeKeyPreview(rawAPIKey string) string {
+// NativeKeyPreview gives operators enough context to identify a normal API
+// key without ever exposing a short key verbatim.
+func NativeKeyPreview(rawAPIKey string) string {
 	rawAPIKey = strings.TrimSpace(rawAPIKey)
 	if rawAPIKey == "" {
 		return ""
@@ -151,7 +151,7 @@ func (s *Store) CreateNativeKeyBinding(input CreateNativeKeyBindingInput) (Nativ
 		Name:        input.Name,
 		Enabled:     input.Enabled,
 		CallerScope: callerScope,
-		KeyPreview:  nativeKeyPreview(rawAPIKey),
+		KeyPreview:  NativeKeyPreview(rawAPIKey),
 		Group:       input.Group,
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -228,7 +228,7 @@ func (s *Store) UpdateNativeKeyBinding(id string, input UpdateNativeKeyBindingIn
 	}
 	if rawAPIKey := strings.TrimSpace(input.APIKey); rawAPIKey != "" {
 		candidate.CallerScope = NativeCallerScope(rawAPIKey)
-		candidate.KeyPreview = nativeKeyPreview(rawAPIKey)
+		candidate.KeyPreview = NativeKeyPreview(rawAPIKey)
 	}
 	candidate.UpdatedAt = time.Now().UTC()
 	existing[index] = candidate

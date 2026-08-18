@@ -18,7 +18,9 @@ import {
   createNativeKeyBinding,
   deleteNativeKeyBinding,
   fetchCredentialDescriptors,
+  fetchNativeKeyBindingCatalog,
   fetchNativeKeyBindings,
+  fetchTopLevelAPIKeys,
   updateNativeKeyBinding,
 } from "./mappings";
 
@@ -35,6 +37,31 @@ beforeEach(() => {
 });
 
 describe("native key binding API", () => {
+  it("lists normalized top-level keys through CPA Management", async () => {
+    mocks.get.mockResolvedValueOnce({
+      data: { "api-keys": [" sk-alpha ", "sk-beta", "", null, 3, "sk-alpha"] },
+    });
+
+    await expect(fetchTopLevelAPIKeys()).resolves.toEqual(["sk-alpha", "sk-beta"]);
+    expect(mocks.get).toHaveBeenCalledWith("/v0/management/api-keys");
+
+    mocks.get.mockResolvedValueOnce({ data: { "api-keys": null } });
+    await expect(fetchTopLevelAPIKeys()).resolves.toEqual([]);
+  });
+
+  it("matches top-level keys in a protected JSON body without putting them in the URL", async () => {
+    const catalog = {
+      entries: [{ key_index: 0, key_preview: "sk-al...lpha", binding }],
+      orphan_bindings: [],
+    };
+    mocks.post.mockResolvedValueOnce({ data: catalog });
+    const apiKeys = ["sk-alpha-secret"];
+
+    await expect(fetchNativeKeyBindingCatalog(apiKeys)).resolves.toEqual(catalog);
+    expect(mocks.post).toHaveBeenCalledWith("/plugin/native-key-bindings/catalog", { api_keys: apiKeys });
+    expect(String(mocks.post.mock.calls[0][0])).not.toContain("sk-alpha-secret");
+  });
+
   it("lists native key bindings and tolerates an omitted list", async () => {
     mocks.get.mockResolvedValueOnce({ data: { bindings: [binding] } });
     await expect(fetchNativeKeyBindings()).resolves.toEqual([binding]);

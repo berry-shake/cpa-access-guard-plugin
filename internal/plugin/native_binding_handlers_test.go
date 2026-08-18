@@ -158,6 +158,99 @@ func TestNativeKeyBindingManagementCRUDDoesNotExposeSecretOrScope(t *testing.T) 
 	}
 }
 
+func TestNativeKeyBindingCatalogMatchesScopesAndRedactsSecrets(t *testing.T) {
+	app, statePath := configureNativeBindingManagementApp(t)
+	const (
+		basePath      = "/v0/management/plugins/cpa-access-guard/native-key-bindings"
+		catalogPath   = basePath + "/catalog"
+		matchedSecret = "sk-native-catalog-matched-0123456789"
+		orphanSecret  = "sk-native-catalog-orphan-9876543210"
+		unboundSecret = "sk-native-catalog-unbound-1122334455"
+		shortSecret   = "short"
+	)
+
+	for _, input := range []map[string]any{
+		{"id": "matched", "name": "Matched", "key": matchedSecret, "group": "team"},
+		{"id": "orphan", "name": "Orphan", "key": orphanSecret, "group": "free"},
+	} {
+		created := nativeBindingManagementCall(t, app, http.MethodPost, basePath, nil, input)
+		if created.StatusCode != http.StatusCreated {
+			t.Fatalf("create status=%d body=%s", created.StatusCode, created.Body)
+		}
+	}
+
+	stateBefore, errReadBefore := os.ReadFile(statePath)
+	if errReadBefore != nil {
+		t.Fatal(errReadBefore)
+	}
+	catalog := nativeBindingManagementCall(t, app, http.MethodPost, catalogPath, nil, map[string]any{
+		"api_keys": []string{
+			" ",
+			"  " + matchedSecret + "  ",
+			matchedSecret,
+			unboundSecret,
+			"\t",
+			shortSecret,
+			unboundSecret,
+		},
+	})
+	if catalog.StatusCode != http.StatusOK {
+		t.Fatalf("catalog status=%d body=%s", catalog.StatusCode, catalog.Body)
+	}
+	assertNativeBindingResponseIsRedacted(t, catalog.Body, matchedSecret, orphanSecret, unboundSecret, shortSecret)
+	if bytes.Contains(catalog.Body, []byte(`"binding":null`)) {
+		t.Fatalf("unmatched catalog entry must omit binding: %s", catalog.Body)
+	}
+
+	var payload struct {
+		Entries        []nativeKeyBindingCatalogEntry `json:"entries"`
+		OrphanBindings []publicNativeKeyBinding       `json:"orphan_bindings"`
+	}
+	if errUnmarshal := json.Unmarshal(catalog.Body, &payload); errUnmarshal != nil {
+		t.Fatal(errUnmarshal)
+	}
+	if len(payload.Entries) != 3 {
+		t.Fatalf("entries=%+v, want three non-blank unique keys", payload.Entries)
+	}
+	if payload.Entries[0].KeyIndex != 1 || payload.Entries[0].KeyPreview != policy.NativeKeyPreview(matchedSecret) ||
+		payload.Entries[0].Binding == nil || payload.Entries[0].Binding.ID != "matched" {
+		t.Fatalf("matched entry=%+v", payload.Entries[0])
+	}
+	if payload.Entries[1].KeyIndex != 3 || payload.Entries[1].KeyPreview != policy.NativeKeyPreview(unboundSecret) || payload.Entries[1].Binding != nil {
+		t.Fatalf("unbound entry=%+v", payload.Entries[1])
+	}
+	if payload.Entries[2].KeyIndex != 5 || payload.Entries[2].KeyPreview != "<redacted>" || payload.Entries[2].Binding != nil {
+		t.Fatalf("short-key entry=%+v", payload.Entries[2])
+	}
+	if len(payload.OrphanBindings) != 1 || payload.OrphanBindings[0].ID != "orphan" {
+		t.Fatalf("orphan bindings=%+v", payload.OrphanBindings)
+	}
+
+	stateAfter, errReadAfter := os.ReadFile(statePath)
+	if errReadAfter != nil {
+		t.Fatal(errReadAfter)
+	}
+	if !bytes.Equal(stateBefore, stateAfter) {
+		t.Fatal("catalog request modified persistent state")
+	}
+
+	emptyCatalog := nativeBindingManagementCall(t, app, http.MethodPost, catalogPath, nil, map[string]any{"api_keys": []string{}})
+	if emptyCatalog.StatusCode != http.StatusOK {
+		t.Fatalf("empty catalog status=%d body=%s", emptyCatalog.StatusCode, emptyCatalog.Body)
+	}
+	if errUnmarshal := json.Unmarshal(emptyCatalog.Body, &payload); errUnmarshal != nil {
+		t.Fatal(errUnmarshal)
+	}
+	if len(payload.Entries) != 0 || len(payload.OrphanBindings) != 2 {
+		t.Fatalf("empty catalog payload=%+v", payload)
+	}
+
+	invalid := app.catalogNativeKeyBindings([]byte(`{"api_keys":[`))
+	if invalid.StatusCode != http.StatusBadRequest || !bytes.Contains(invalid.Body, []byte(`"code":"invalid_json"`)) {
+		t.Fatalf("invalid catalog status=%d body=%s", invalid.StatusCode, invalid.Body)
+	}
+}
+
 func TestNativeKeyBindingManagementValidationAndRegistration(t *testing.T) {
 	app, _ := configureNativeBindingManagementApp(t)
 	const path = "/v0/management/plugins/cpa-access-guard/native-key-bindings"
@@ -219,6 +312,17 @@ func TestNativeKeyBindingManagementValidationAndRegistration(t *testing.T) {
 			t.Fatalf("management registration missing %s %s", method, path)
 		}
 	}
+
+	catalogRegistered := false
+	for _, route := range app.managementRegistration().Routes {
+		if route.Path == "/plugins/cpa-access-guard/native-key-bindings/catalog" && route.Method == http.MethodPost {
+			catalogRegistered = true
+			break
+		}
+	}
+	if !catalogRegistered {
+		t.Fatal("management registration missing POST native-key-bindings/catalog")
+	}
 }
 
 func TestNativeKeyBindingPersistenceErrorIsInternalAndRedacted(t *testing.T) {
@@ -240,6 +344,9 @@ func assertNativeBindingResponseIsRedacted(t *testing.T, body []byte, secrets ..
 	for _, secret := range secrets {
 		if secret != "" && strings.Contains(text, secret) {
 			t.Fatalf("response exposed plaintext API key: %s", text)
+		}
+		if callerScope := policy.NativeCallerScope(secret); callerScope != "" && strings.Contains(text, callerScope) {
+			t.Fatalf("response exposed caller_scope value: %s", text)
 		}
 	}
 	if strings.Contains(text, `"caller_scope"`) {

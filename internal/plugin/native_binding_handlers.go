@@ -35,6 +35,22 @@ type publicNativeKeyBinding struct {
 	UpdatedAt  string `json:"updated_at,omitempty"`
 }
 
+// nativeKeyBindingCatalogRequest carries the current CPA top-level API keys.
+// The keys are used only for this in-memory join and are never returned or
+// persisted by the plugin.
+type nativeKeyBindingCatalogRequest struct {
+	APIKeys []string `json:"api_keys"`
+}
+
+// nativeKeyBindingCatalogEntry preserves the source array index so callers
+// can associate the redacted response with their in-memory key list without
+// exposing the plaintext key or its caller_scope.
+type nativeKeyBindingCatalogEntry struct {
+	KeyIndex   int                     `json:"key_index"`
+	KeyPreview string                  `json:"key_preview"`
+	Binding    *publicNativeKeyBinding `json:"binding,omitempty"`
+}
+
 func (a *App) listNativeKeyBindings() ManagementResponse {
 	bindings := a.store.NativeKeyBindingsSnapshot()
 	public := make([]publicNativeKeyBinding, 0, len(bindings))
@@ -42,6 +58,58 @@ func (a *App) listNativeKeyBindings() ManagementResponse {
 		public = append(public, publicNativeKeyBindingFromPolicy(binding))
 	}
 	return jsonResponse(http.StatusOK, map[string]any{"bindings": public})
+}
+
+func (a *App) catalogNativeKeyBindings(body []byte) ManagementResponse {
+	var req nativeKeyBindingCatalogRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		return jsonError(http.StatusBadRequest, "invalid_json", err.Error())
+	}
+
+	bindings := a.store.NativeKeyBindingsSnapshot()
+	bindingsByScope := make(map[string]policy.NativeKeyBinding, len(bindings))
+	for _, binding := range bindings {
+		bindingsByScope[binding.CallerScope] = binding
+	}
+
+	entries := make([]nativeKeyBindingCatalogEntry, 0, len(req.APIKeys))
+	seenScopes := make(map[string]struct{}, len(req.APIKeys))
+	matchedScopes := make(map[string]struct{}, len(bindings))
+	for index, rawKey := range req.APIKeys {
+		key := strings.TrimSpace(rawKey)
+		if key == "" {
+			continue
+		}
+		callerScope := policy.NativeCallerScope(key)
+		if _, seen := seenScopes[callerScope]; seen {
+			continue
+		}
+		seenScopes[callerScope] = struct{}{}
+
+		entry := nativeKeyBindingCatalogEntry{
+			KeyIndex:   index,
+			KeyPreview: policy.NativeKeyPreview(key),
+		}
+		if binding, ok := bindingsByScope[callerScope]; ok {
+			publicBinding := publicNativeKeyBindingFromPolicy(binding)
+			entry.Binding = &publicBinding
+			matchedScopes[callerScope] = struct{}{}
+		}
+		entries = append(entries, entry)
+	}
+
+	orphanBindings := make([]publicNativeKeyBinding, 0)
+	for _, binding := range bindings {
+		if _, matched := matchedScopes[binding.CallerScope]; matched {
+			continue
+		}
+		orphanBindings = append(orphanBindings, publicNativeKeyBindingFromPolicy(binding))
+	}
+
+	return jsonResponse(http.StatusOK, map[string]any{
+		"entries":         entries,
+		"orphan_bindings": orphanBindings,
+	})
 }
 
 func (a *App) createNativeKeyBinding(body []byte) ManagementResponse {

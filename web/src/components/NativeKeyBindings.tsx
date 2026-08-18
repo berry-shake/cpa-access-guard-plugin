@@ -5,10 +5,11 @@ import {
   createNativeKeyBinding,
   deleteNativeKeyBinding,
   fetchClassifyRules,
-  fetchNativeKeyBindings,
+  fetchNativeKeyBindingCatalog,
+  fetchTopLevelAPIKeys,
   updateNativeKeyBinding,
 } from "../api/mappings";
-import type { ClassifyRule, NativeKeyBinding } from "../types";
+import type { ClassifyRule, NativeKeyBinding, NativeKeyBindingCatalog } from "../types";
 
 const BUILTIN_GROUPS = ["free", "team", "plus", "supported"] as const;
 
@@ -43,11 +44,69 @@ function messageFromError(error: unknown): string {
   return String(error);
 }
 
-type EditorState = { mode: "create" } | { mode: "edit"; binding: NativeKeyBinding };
+interface NativeKeyRow {
+  rowKey: string;
+  present: boolean;
+  keyPreview: string;
+  // Plaintext exists only for a current host entry and stays in React memory.
+  // Never render it or use it in a DOM attribute, URL, log, or storage key.
+  apiKey?: string;
+  topLevelIndex?: number;
+  binding?: NativeKeyBinding;
+}
+
+export function buildNativeKeyRows(apiKeys: string[], catalog: NativeKeyBindingCatalog): NativeKeyRow[] {
+  const rows: NativeKeyRow[] = [];
+  const entries = [...catalog.entries].sort((a, b) => a.key_index - b.key_index);
+  for (const entry of entries) {
+    const apiKey = apiKeys[entry.key_index];
+    if (typeof apiKey !== "string" || !apiKey) continue;
+    rows.push({
+      rowKey: `host:${entry.key_index}`,
+      present: true,
+      keyPreview: entry.key_preview || "<redacted>",
+      apiKey,
+      topLevelIndex: entry.key_index,
+      binding: entry.binding ?? undefined,
+    });
+  }
+  for (const binding of catalog.orphan_bindings) {
+    rows.push({
+      rowKey: `orphan:${binding.id}`,
+      present: false,
+      keyPreview: binding.key_preview || "<redacted>",
+      binding,
+    });
+  }
+  return rows;
+}
+
+interface SelectedTopLevelKey {
+  apiKey: string;
+  keyPreview: string;
+}
+
+type EditorState =
+  | {
+      mode: "create";
+      selectedKey?: SelectedTopLevelKey;
+      initialID?: string;
+      initialName?: string;
+    }
+  | { mode: "edit"; binding: NativeKeyBinding };
+
+function suggestedBindingID(index: number, rows: NativeKeyRow[]): string {
+  const ids = new Set(rows.flatMap((row) => row.binding ? [row.binding.id.toLowerCase()] : []));
+  const base = `native-key-${index + 1}`;
+  if (!ids.has(base)) return base;
+  let suffix = 2;
+  while (ids.has(`${base}-${suffix}`)) suffix++;
+  return `${base}-${suffix}`;
+}
 
 export default function NativeKeyBindingsTab() {
   const t = useT();
-  const [bindings, setBindings] = useState<NativeKeyBinding[]>([]);
+  const [rows, setRows] = useState<NativeKeyRow[]>([]);
   const [rules, setRules] = useState<ClassifyRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -58,11 +117,12 @@ export default function NativeKeyBindingsTab() {
     setLoading(true);
     setError("");
     try {
-      const [nextBindings, nextRules] = await Promise.all([
-        fetchNativeKeyBindings(),
+      const [apiKeys, nextRules] = await Promise.all([
+        fetchTopLevelAPIKeys(),
         fetchClassifyRules().catch(() => [] as ClassifyRule[]),
       ]);
-      setBindings(nextBindings);
+      const catalog = await fetchNativeKeyBindingCatalog(apiKeys);
+      setRows(buildNativeKeyRows(apiKeys, catalog));
       setRules(nextRules);
     } catch (e: unknown) {
       setError(messageFromError(e));
@@ -74,6 +134,8 @@ export default function NativeKeyBindingsTab() {
   useEffect(() => { void load(); }, [load]);
 
   const groupOptions = useMemo(() => buildNativeBindingGroupOptions(rules), [rules]);
+  const topLevelCount = rows.filter((row) => row.present).length;
+  const boundCount = rows.filter((row) => row.present && row.binding).length;
 
   const toggleBinding = async (binding: NativeKeyBinding) => {
     // Disabling removes this scheduling restriction but does not revoke CPA's
@@ -106,6 +168,17 @@ export default function NativeKeyBindingsTab() {
     }
   };
 
+  const bindTopLevelKey = (row: NativeKeyRow) => {
+    if (!row.present || !row.apiKey || row.topLevelIndex === undefined || row.binding) return;
+    const ordinal = row.topLevelIndex + 1;
+    setEditor({
+      mode: "create",
+      selectedKey: { apiKey: row.apiKey, keyPreview: row.keyPreview },
+      initialID: suggestedBindingID(row.topLevelIndex, rows),
+      initialName: t("mapping.native.defaultName", { index: ordinal }),
+    });
+  };
+
   return (
     <>
       <div className="native-binding-notice" role="note">
@@ -113,6 +186,7 @@ export default function NativeKeyBindingsTab() {
         <div>
           <strong>{t("mapping.native.noticeTitle")}</strong>
           <p>{t("mapping.native.noticeBody")}</p>
+          <p>{t("mapping.native.catalogNotice")}</p>
           <p>{t("mapping.native.rotateNotice")}</p>
           <p className="native-binding-unbind-warning">
             <span aria-hidden="true">⚠ </span>{t("mapping.native.unbindNotice")}
@@ -123,7 +197,13 @@ export default function NativeKeyBindingsTab() {
         </div>
       </div>
 
-      <div className="map-toolbar">
+      <div className="map-toolbar native-binding-toolbar">
+        <span className="muted native-binding-summary">
+          {t("mapping.native.summary", { total: topLevelCount, bound: boundCount })}
+        </span>
+        <button className="btn" type="button" disabled={loading} onClick={() => { void load(); }}>
+          {t("mapping.native.refresh")}
+        </button>
         <button className="btn primary" type="button" onClick={() => setEditor({ mode: "create" })}>
           + {t("mapping.native.newBinding")}
         </button>
@@ -132,63 +212,106 @@ export default function NativeKeyBindingsTab() {
       {error && <div className="error" role="alert">{error}</div>}
       {loading ? (
         <div className="muted native-binding-empty">{t("keys.loading")}</div>
-      ) : bindings.length === 0 ? (
+      ) : rows.length === 0 && error ? (
+        <div className="muted native-binding-empty">{t("mapping.native.loadFailed")}</div>
+      ) : rows.length === 0 ? (
         <div className="native-binding-empty">
           <strong>{t("mapping.native.emptyTitle")}</strong>
           <span className="muted">{t("mapping.native.emptyBody")}</span>
         </div>
       ) : (
         <div className="native-binding-grid">
-          {bindings.map((binding) => {
-            const pending = pendingID === binding.id;
+          {rows.map((row) => {
+            const binding = row.binding;
+            const pending = !!binding && pendingID === binding.id;
+            const status = !row.present
+              ? "orphan"
+              : !binding
+                ? "unbound"
+                : binding.enabled
+                  ? "enabled"
+                  : "disabled";
+            const ordinal = (row.topLevelIndex ?? 0) + 1;
             return (
-              <article className={"native-binding-card" + (binding.enabled ? "" : " disabled")} key={binding.id}>
+              <article
+                className={`native-binding-card ${status}`}
+                key={row.rowKey}
+                data-testid={`native-key-row-${status}`}
+              >
                 <div className="native-binding-card-head">
                   <div className="native-binding-identity">
-                    <strong>{binding.name || binding.id}</strong>
-                    <span className="mono">{binding.id}</span>
+                    <strong>
+                      {binding?.name || binding?.id || t("mapping.native.topLevelKeyName", { index: ordinal })}
+                    </strong>
+                    <span className="mono">
+                      {binding?.id || t("mapping.native.topLevelPosition", { index: ordinal })}
+                    </span>
                   </div>
-                  <span className={"native-binding-status " + (binding.enabled ? "enabled" : "disabled")}>
-                    {t(binding.enabled ? "mapping.native.enabled" : "mapping.native.disabled")}
+                  <span className={`native-binding-status ${status}`}>
+                    {t(`mapping.native.${status}`)}
                   </span>
                 </div>
                 <dl className="native-binding-meta">
                   <div>
                     <dt>{t("mapping.native.keyPreview")}</dt>
-                    <dd className="mono">{binding.key_preview || "<redacted>"}</dd>
+                    <dd className="mono">{row.keyPreview}</dd>
                   </div>
                   <div>
                     <dt>{t("mapping.native.group")}</dt>
-                    <dd><span className="native-binding-group mono">{binding.group}</span></dd>
+                    <dd>
+                      <span className={`native-binding-group mono${binding ? "" : " unrestricted"}`}>
+                        {binding?.group || t("mapping.native.defaultScheduling")}
+                      </span>
+                    </dd>
                   </div>
                 </dl>
+                {!row.present && (
+                  <p className="native-binding-orphan-note">{t("mapping.native.orphanHint")}</p>
+                )}
                 <div className="native-binding-actions">
-                  <label className="switch" title={t("mapping.native.toggleLabel", { id: binding.id })}>
-                    <input
-                      type="checkbox"
-                      checked={binding.enabled}
-                      disabled={pending}
-                      onChange={() => { void toggleBinding(binding); }}
-                      aria-label={t("mapping.native.toggleLabel", { id: binding.id })}
-                    />
-                    <span className="track"><span className="thumb" /></span>
-                  </label>
-                  <button
-                    className="btn sm"
-                    type="button"
-                    disabled={pending}
-                    onClick={() => setEditor({ mode: "edit", binding })}
-                  >
-                    {t("mapping.native.editRotate")}
-                  </button>
-                  <button
-                    className="btn sm danger-outline"
-                    type="button"
-                    disabled={pending}
-                    onClick={() => { void removeBinding(binding); }}
-                  >
-                    {t("mapping.delete")}
-                  </button>
+                  {binding ? (
+                    <>
+                      <label className="switch" title={t("mapping.native.toggleLabel", { id: binding.id })}>
+                        <input
+                          type="checkbox"
+                          checked={binding.enabled}
+                          disabled={pending}
+                          onChange={() => { void toggleBinding(binding); }}
+                          aria-label={t("mapping.native.toggleLabel", { id: binding.id })}
+                        />
+                        <span className="track"><span className="thumb" /></span>
+                      </label>
+                      <button
+                        className="btn sm"
+                        type="button"
+                        disabled={pending}
+                        onClick={() => setEditor({ mode: "edit", binding })}
+                      >
+                        {t("mapping.native.editRotate")}
+                      </button>
+                      <button
+                        className="btn sm danger-outline"
+                        type="button"
+                        disabled={pending}
+                        onClick={() => { void removeBinding(binding); }}
+                      >
+                        {t("mapping.delete")}
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="muted native-binding-free-hint">
+                        {t("mapping.native.unboundHint")}
+                      </span>
+                      <button
+                        className="btn sm primary"
+                        type="button"
+                        onClick={() => bindTopLevelKey(row)}
+                      >
+                        {t("mapping.native.bindThisKey")}
+                      </button>
+                    </>
+                  )}
                 </div>
               </article>
             );
@@ -198,8 +321,11 @@ export default function NativeKeyBindingsTab() {
 
       {editor && (
         <NativeKeyBindingEditor
-          key={editor.mode === "create" ? "__new" : editor.binding.id}
+          key={editor.mode === "edit" ? editor.binding.id : editor.initialID || "__new"}
           binding={editor.mode === "edit" ? editor.binding : undefined}
+          selectedKey={editor.mode === "create" ? editor.selectedKey : undefined}
+          initialID={editor.mode === "create" ? editor.initialID : undefined}
+          initialName={editor.mode === "create" ? editor.initialName : undefined}
           groupOptions={groupOptions}
           onCancel={() => setEditor(null)}
           onSaved={async () => {
@@ -214,23 +340,35 @@ export default function NativeKeyBindingsTab() {
 
 interface EditorProps {
   binding?: NativeKeyBinding;
+  selectedKey?: SelectedTopLevelKey;
+  initialID?: string;
+  initialName?: string;
   groupOptions: string[];
   onCancel: () => void;
   onSaved: () => Promise<void>;
 }
 
-function NativeKeyBindingEditor({ binding, groupOptions, onCancel, onSaved }: EditorProps) {
+function NativeKeyBindingEditor({
+  binding,
+  selectedKey,
+  initialID,
+  initialName,
+  groupOptions,
+  onCancel,
+  onSaved,
+}: EditorProps) {
   const t = useT();
   const editing = !!binding;
-  const [id, setID] = useState(binding?.id ?? "");
-  const [name, setName] = useState(binding?.name ?? "");
+  const [id, setID] = useState(binding?.id ?? initialID ?? "");
+  const [name, setName] = useState(binding?.name ?? initialName ?? "");
   const [enabled, setEnabled] = useState(binding?.enabled ?? true);
   const [plainKey, setPlainKey] = useState("");
   const [group, setGroup] = useState(binding?.group ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  const canSave = id.trim() !== "" && group.trim() !== "" && (editing || plainKey.trim() !== "");
+  const createKey = selectedKey?.apiKey ?? plainKey;
+  const canSave = id.trim() !== "" && group.trim() !== "" && (editing || createKey.trim() !== "");
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -256,11 +394,13 @@ function NativeKeyBindingEditor({ binding, groupOptions, onCancel, onSaved }: Ed
           id: id.trim(),
           name: name.trim() || undefined,
           enabled,
-          key: plainKey.trim(),
+          key: createKey.trim(),
           group: group.trim(),
         });
       }
-      // Drop the only UI-held plaintext copy before closing the editor.
+      // Drop the only editable UI-held plaintext copy before closing. A key
+      // selected from the host catalog lives only in the parent modal state,
+      // which is destroyed synchronously by onSaved.
       setPlainKey("");
       await onSaved();
     } catch (e: unknown) {
@@ -287,7 +427,7 @@ function NativeKeyBindingEditor({ binding, groupOptions, onCancel, onSaved }: Ed
               value={id}
               onChange={(e) => setID(e.target.value)}
               disabled={editing || saving}
-              autoFocus={!editing}
+              autoFocus={!editing && !initialID}
               autoComplete="off"
               placeholder="client-a"
               required
@@ -305,26 +445,34 @@ function NativeKeyBindingEditor({ binding, groupOptions, onCancel, onSaved }: Ed
               placeholder={id || "Client A"}
             />
           </div>
-          <div className="map-form-row">
-            <label htmlFor="native-binding-key">
-              {t(editing ? "mapping.native.rotateKey" : "mapping.native.plainKey")}
-            </label>
-            <input
-              id="native-binding-key"
-              className="mono"
-              type="password"
-              value={plainKey}
-              onChange={(e) => setPlainKey(e.target.value)}
-              disabled={saving}
-              autoComplete="new-password"
-              spellCheck={false}
-              placeholder={editing ? t("mapping.native.keepKeyPlaceholder") : "sk-..."}
-              required={!editing}
-            />
-            <p className="native-binding-field-hint">
-              {t(editing ? "mapping.native.rotateKeyHint" : "mapping.native.plainKeyHint")}
-            </p>
-          </div>
+          {selectedKey && !editing ? (
+            <div className="map-form-row">
+              <label>{t("mapping.native.selectedKey")}</label>
+              <div className="native-binding-selected-key mono">{selectedKey.keyPreview}</div>
+              <p className="native-binding-field-hint">{t("mapping.native.selectedKeyHint")}</p>
+            </div>
+          ) : (
+            <div className="map-form-row">
+              <label htmlFor="native-binding-key">
+                {t(editing ? "mapping.native.rotateKey" : "mapping.native.plainKey")}
+              </label>
+              <input
+                id="native-binding-key"
+                className="mono"
+                type="password"
+                value={plainKey}
+                onChange={(e) => setPlainKey(e.target.value)}
+                disabled={saving}
+                autoComplete="new-password"
+                spellCheck={false}
+                placeholder={editing ? t("mapping.native.keepKeyPlaceholder") : "sk-..."}
+                required={!editing}
+              />
+              <p className="native-binding-field-hint">
+                {t(editing ? "mapping.native.rotateKeyHint" : "mapping.native.plainKeyHint")}
+              </p>
+            </div>
+          )}
           <div className="map-form-row">
             <label htmlFor="native-binding-group">{t("mapping.native.group")}</label>
             <input
