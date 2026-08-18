@@ -1,0 +1,248 @@
+package plugin
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"cpa-key-policy/internal/policy"
+)
+
+func configureNativeBindingManagementApp(t *testing.T) (*App, string) {
+	t.Helper()
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	app := NewApp()
+	config := []byte("enabled: true\nstate_file: \"" + filepath.ToSlash(statePath) + "\"\nkeys: []\n")
+	req, _ := json.Marshal(LifecycleRequest{ConfigYAML: config})
+	if _, err := app.HandleMethod(MethodPluginReconfigure, req); err != nil {
+		t.Fatalf("configure: %v", err)
+	}
+	t.Cleanup(app.Shutdown)
+	return app, statePath
+}
+
+func nativeBindingManagementCall(t *testing.T, app *App, method, path string, query url.Values, body any) ManagementResponse {
+	t.Helper()
+	var rawBody []byte
+	if body != nil {
+		var err error
+		rawBody, err = json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	rawReq, _ := json.Marshal(ManagementRequest{Method: method, Path: path, Query: query, Body: rawBody})
+	raw, err := app.HandleMethod(MethodManagementHandle, rawReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return managementResponseFromEnvelope(t, raw)
+}
+
+func TestNativeKeyBindingManagementCRUDDoesNotExposeSecretOrScope(t *testing.T) {
+	app, statePath := configureNativeBindingManagementApp(t)
+	const (
+		basePath  = "/v0/management/plugins/cpa-key-policy/native-key-bindings"
+		secret    = "sk-native-management-secret-0123456789"
+		newSecret = "sk-native-management-rotated-9876543210"
+	)
+
+	created := nativeBindingManagementCall(t, app, http.MethodPost, basePath, nil, map[string]any{
+		"id": " Client-A ", "name": "Client A", "key": secret, "group": " CLASSIFY: TENANT-A ",
+	})
+	if created.StatusCode != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", created.StatusCode, created.Body)
+	}
+	assertNativeBindingResponseIsRedacted(t, created.Body, secret)
+	var createPayload struct {
+		Binding publicNativeKeyBinding `json:"binding"`
+	}
+	if err := json.Unmarshal(created.Body, &createPayload); err != nil {
+		t.Fatal(err)
+	}
+	if got := createPayload.Binding; got.ID != "client-a" || got.Name != "Client A" || !got.Enabled || got.Group != "classify:tenant-a" || got.KeyPreview == "" {
+		t.Fatalf("created binding=%+v", got)
+	}
+	originalPreview := createPayload.Binding.KeyPreview
+
+	listed := nativeBindingManagementCall(t, app, http.MethodGet, basePath, nil, nil)
+	if listed.StatusCode != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", listed.StatusCode, listed.Body)
+	}
+	assertNativeBindingResponseIsRedacted(t, listed.Body, secret)
+	var listPayload struct {
+		Bindings []publicNativeKeyBinding `json:"bindings"`
+	}
+	if err := json.Unmarshal(listed.Body, &listPayload); err != nil {
+		t.Fatal(err)
+	}
+	if len(listPayload.Bindings) != 1 || listPayload.Bindings[0].ID != "client-a" {
+		t.Fatalf("listed bindings=%+v", listPayload.Bindings)
+	}
+
+	// A partial PATCH preserves the derived identity and key preview while
+	// changing only policy/display fields.
+	patched := nativeBindingManagementCall(t, app, http.MethodPatch, basePath, nil, map[string]any{
+		"id": "CLIENT-A", "name": "Renamed", "enabled": false, "group": "team",
+	})
+	if patched.StatusCode != http.StatusOK {
+		t.Fatalf("patch status=%d body=%s", patched.StatusCode, patched.Body)
+	}
+	var patchPayload struct {
+		Binding publicNativeKeyBinding `json:"binding"`
+	}
+	if err := json.Unmarshal(patched.Body, &patchPayload); err != nil {
+		t.Fatal(err)
+	}
+	if patchPayload.Binding.Enabled || patchPayload.Binding.Name != "Renamed" || patchPayload.Binding.Group != "team" || patchPayload.Binding.KeyPreview != originalPreview {
+		t.Fatalf("patched binding=%+v", patchPayload.Binding)
+	}
+
+	rotated := nativeBindingManagementCall(t, app, http.MethodPatch, basePath, nil, map[string]any{
+		"id": "client-a", "key": newSecret, "enabled": true,
+	})
+	if rotated.StatusCode != http.StatusOK {
+		t.Fatalf("rotate status=%d body=%s", rotated.StatusCode, rotated.Body)
+	}
+	assertNativeBindingResponseIsRedacted(t, rotated.Body, newSecret)
+	var rotatePayload struct {
+		Binding publicNativeKeyBinding `json:"binding"`
+	}
+	if err := json.Unmarshal(rotated.Body, &rotatePayload); err != nil {
+		t.Fatal(err)
+	}
+	if !rotatePayload.Binding.Enabled || rotatePayload.Binding.KeyPreview == originalPreview {
+		t.Fatalf("rotated binding=%+v", rotatePayload.Binding)
+	}
+
+	stateRaw, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(stateRaw, []byte(secret)) || bytes.Contains(stateRaw, []byte(newSecret)) {
+		t.Fatalf("state contains a plaintext API key: %s", stateRaw)
+	}
+	state, err := policy.LoadState(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.NativeKeyBindings) != 1 || state.NativeKeyBindings[0].CallerScope != policy.NativeCallerScope(newSecret) {
+		t.Fatalf("persisted binding=%+v", state.NativeKeyBindings)
+	}
+
+	status := nativeBindingManagementCall(t, app, http.MethodGet, "/v0/management/plugins/cpa-key-policy/status", nil, nil)
+	var statusPayload map[string]any
+	if err := json.Unmarshal(status.Body, &statusPayload); err != nil {
+		t.Fatal(err)
+	}
+	if statusPayload["native_key_binding_count"] != float64(1) || statusPayload["native_key_binding_enabled_count"] != float64(1) {
+		t.Fatalf("status payload=%+v", statusPayload)
+	}
+	if _, exists := statusPayload["caller_scope"]; exists {
+		t.Fatalf("status exposed caller_scope: %+v", statusPayload)
+	}
+
+	deleted := nativeBindingManagementCall(t, app, http.MethodDelete, basePath, url.Values{"id": {"CLIENT-A"}}, nil)
+	if deleted.StatusCode != http.StatusOK {
+		t.Fatalf("delete status=%d body=%s", deleted.StatusCode, deleted.Body)
+	}
+	empty := nativeBindingManagementCall(t, app, http.MethodGet, basePath, nil, nil)
+	if string(empty.Body) != `{"bindings":[]}` {
+		t.Fatalf("empty list body=%s", empty.Body)
+	}
+}
+
+func TestNativeKeyBindingManagementValidationAndRegistration(t *testing.T) {
+	app, _ := configureNativeBindingManagementApp(t)
+	const path = "/v0/management/plugins/cpa-key-policy/native-key-bindings"
+
+	for _, tc := range []struct {
+		name string
+		body map[string]any
+	}{
+		{name: "missing id", body: map[string]any{"key": "sk-long-enough-secret", "group": "team"}},
+		{name: "missing key", body: map[string]any{"id": "a", "group": "team"}},
+		{name: "missing group", body: map[string]any{"id": "a", "key": "sk-long-enough-secret"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := nativeBindingManagementCall(t, app, http.MethodPost, path, nil, tc.body)
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s", resp.StatusCode, resp.Body)
+			}
+		})
+	}
+
+	secret := "sk-duplicate-native-secret-0123456789"
+	first := nativeBindingManagementCall(t, app, http.MethodPost, path, nil, map[string]any{
+		"id": "a", "key": secret, "group": "team",
+	})
+	if first.StatusCode != http.StatusCreated {
+		t.Fatalf("first create status=%d body=%s", first.StatusCode, first.Body)
+	}
+	duplicateID := nativeBindingManagementCall(t, app, http.MethodPost, path, nil, map[string]any{
+		"id": "A", "key": "sk-different-native-secret-9876543210", "group": "free",
+	})
+	if duplicateID.StatusCode != http.StatusConflict {
+		t.Fatalf("duplicate id status=%d body=%s", duplicateID.StatusCode, duplicateID.Body)
+	}
+	duplicateScope := nativeBindingManagementCall(t, app, http.MethodPost, path, nil, map[string]any{
+		"id": "b", "key": secret, "group": "free",
+	})
+	if duplicateScope.StatusCode != http.StatusBadRequest {
+		t.Fatalf("duplicate scope status=%d body=%s", duplicateScope.StatusCode, duplicateScope.Body)
+	}
+	assertNativeBindingResponseIsRedacted(t, duplicateScope.Body, secret)
+
+	unknownPatch := nativeBindingManagementCall(t, app, http.MethodPatch, path, nil, map[string]any{"id": "missing", "enabled": false})
+	if unknownPatch.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown patch status=%d body=%s", unknownPatch.StatusCode, unknownPatch.Body)
+	}
+	unknownDelete := nativeBindingManagementCall(t, app, http.MethodDelete, path, url.Values{"id": {"missing"}}, nil)
+	if unknownDelete.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown delete status=%d body=%s", unknownDelete.StatusCode, unknownDelete.Body)
+	}
+
+	methods := map[string]bool{}
+	for _, route := range app.managementRegistration().Routes {
+		if route.Path == "/plugins/cpa-key-policy/native-key-bindings" {
+			methods[route.Method] = true
+		}
+	}
+	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodDelete} {
+		if !methods[method] {
+			t.Fatalf("management registration missing %s %s", method, path)
+		}
+	}
+}
+
+func TestNativeKeyBindingPersistenceErrorIsInternalAndRedacted(t *testing.T) {
+	resp := nativeKeyBindingStoreError(fmt.Errorf("%w: /sensitive/state/path: disk full", policy.ErrNativeKeyBindingPersistence))
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, resp.Body)
+	}
+	if bytes.Contains(resp.Body, []byte("/sensitive/state/path")) || bytes.Contains(resp.Body, []byte("disk full")) {
+		t.Fatalf("persistence response exposed I/O details: %s", resp.Body)
+	}
+	if !bytes.Contains(resp.Body, []byte(`"code":"persistence_failed"`)) {
+		t.Fatalf("persistence response body=%s", resp.Body)
+	}
+}
+
+func assertNativeBindingResponseIsRedacted(t *testing.T, body []byte, secrets ...string) {
+	t.Helper()
+	text := string(body)
+	for _, secret := range secrets {
+		if secret != "" && strings.Contains(text, secret) {
+			t.Fatalf("response exposed plaintext API key: %s", text)
+		}
+	}
+	if strings.Contains(text, `"caller_scope"`) {
+		t.Fatalf("response exposed caller_scope: %s", text)
+	}
+}

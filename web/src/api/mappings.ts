@@ -1,5 +1,13 @@
 import { apiClient, pluginPath } from "./client";
-import type { AliasMapping, ClassifyRule, CredentialDescriptor, ClassifyPreviewResponse } from "../types";
+import type {
+  AliasMapping,
+  ClassifyRule,
+  CredentialDescriptor,
+  ClassifyPreviewResponse,
+  NativeKeyBinding,
+  NativeKeyBindingCreateRequest,
+  NativeKeyBindingUpdateRequest,
+} from "../types";
 import { readPlanType } from "./models";
 
 // --- Alias mapping CRUD ---
@@ -53,17 +61,70 @@ export async function classifyPreview(
 ): Promise<ClassifyPreviewResponse> {
   const c = apiClient();
   const body: Record<string, unknown> = { descriptors };
-  if (rules && rules.length > 0) body.rules = rules;
+  if (rules !== undefined) body.rules = rules;
   const { data } = await c.post<ClassifyPreviewResponse>(pluginPath("/classify-preview"), body);
+  // Older/incompatible backends may return only group aggregates. Treat that
+  // as unavailable: a missing per-rule result must never become a UI claim of
+  // "0 matches" for every rule.
+  const raw = data as unknown as Record<string, unknown> | null;
+  const ruleMatches = raw?.["rule_matches"];
+  if (!ruleMatches || typeof ruleMatches !== "object" || Array.isArray(ruleMatches)) {
+    throw new Error("classify-preview response is missing rule_matches");
+  }
   return data;
 }
 
+// Fields that this UI can reconstruct closely enough from CPA's /auth-files
+// management response to preview. Runtime classification can use other safe
+// Scheduler Auth.Attributes too, but that endpoint does not expose provenance:
+// note/priority/websockets may be management Metadata fallbacks even when the
+// Scheduler candidate has no same-named Attribute. Do not show an exact count
+// for those fields; a false positive is worse than an explicit "unavailable".
+const CLASSIFY_PREVIEW_FIELDS = new Set([
+  "filename",
+  "id",
+  "provider",
+  "plan_type",
+  "tier",
+  "path",
+  "weight",
+]);
+
+export function canPreviewClassifyField(field: string): boolean {
+  return CLASSIFY_PREVIEW_FIELDS.has(field.trim().toLowerCase());
+}
+
+function copyDescriptorStringAttribute(
+  source: Record<string, unknown>,
+  target: Record<string, string>,
+  key: string,
+): void {
+  const value = source[key];
+  if (typeof value === "string" && value.trim()) {
+    target[key] = value.trim();
+  }
+}
+
+function copyDescriptorScalarAttribute(
+  source: Record<string, unknown>,
+  target: Record<string, string>,
+  key: string,
+): void {
+  const value = source[key];
+  if (typeof value === "string" && value.trim()) {
+    target[key] = value.trim();
+  } else if (typeof value === "number" && Number.isFinite(value)) {
+    target[key] = String(value);
+  } else if (typeof value === "boolean") {
+    target[key] = String(value);
+  }
+}
+
 // fetchCredentialDescriptors pulls the auth-file list from CPA and builds
-// CredentialDescriptor[] for the classify-preview endpoint. Each descriptor
-// carries id (filename), provider, and attributes (plan_type, tier) so both
-// built-in and custom regex rules can match against real credential metadata.
-// Reuses readPlanType (shared with the model catalog) so plan_type/tier
-// extraction stays consistent with the Scheduler's built-in detection.
+// CredentialDescriptor[] for the classify-preview endpoint. It deliberately
+// copies only fields whose management representation corresponds to the
+// Scheduler Attribute used at runtime. Arbitrary auth JSON/Metadata fields are
+// not Scheduler Attributes and are therefore not guessed here.
 export async function fetchCredentialDescriptors(): Promise<CredentialDescriptor[]> {
   const c = apiClient();
   const { data } = await c.get<unknown>("/v0/management/auth-files");
@@ -77,11 +138,52 @@ export async function fetchCredentialDescriptors(): Promise<CredentialDescriptor
     if (!id) continue;
     const provider = ((o["provider"] as string) ?? (o["type"] as string) ?? "").trim().toLowerCase();
     const attrs: Record<string, string> = {};
-    const planType = readPlanType(o);
+    // Codex exposes plan_type through its id_token claims. Antigravity uses a
+    // separate top-level tier value; never relabel one provider's identity as
+    // the other provider's Scheduler Attribute.
+    const planType = provider === "codex" ? readPlanType(o) : "";
     if (planType) attrs["plan_type"] = planType;
     const tier = (o["tier"] as string) ?? "";
-    if (typeof tier === "string" && tier.trim()) attrs["tier"] = tier.trim().toLowerCase();
+    if (provider === "antigravity" && typeof tier === "string" && tier.trim()) {
+      attrs["tier"] = tier.trim().toLowerCase();
+    }
+    // `path` is emitted from Auth.Attributes by CPA. `weight` is normalized
+    // into Auth.Attributes by CPA's file synthesizer (including plugin-parsed
+    // files). Do not copy note/priority/websockets here: the management route
+    // may synthesize those values from Metadata even when scheduler.pick will
+    // not receive a corresponding Attribute.
+    copyDescriptorStringAttribute(o, attrs, "path");
+    copyDescriptorScalarAttribute(o, attrs, "weight");
     out.push({ id, provider, attributes: attrs });
   }
   return out;
+}
+
+// --- CPA top-level API-key binding CRUD ---
+
+export async function fetchNativeKeyBindings(): Promise<NativeKeyBinding[]> {
+  const c = apiClient();
+  const { data } = await c.get<{ bindings: NativeKeyBinding[] }>(pluginPath("/native-key-bindings"));
+  return data.bindings ?? [];
+}
+
+export async function createNativeKeyBinding(
+  input: NativeKeyBindingCreateRequest,
+): Promise<NativeKeyBinding> {
+  const c = apiClient();
+  const { data } = await c.post<{ binding: NativeKeyBinding }>(pluginPath("/native-key-bindings"), input);
+  return data.binding;
+}
+
+export async function updateNativeKeyBinding(
+  input: NativeKeyBindingUpdateRequest,
+): Promise<NativeKeyBinding> {
+  const c = apiClient();
+  const { data } = await c.patch<{ binding: NativeKeyBinding }>(pluginPath("/native-key-bindings"), input);
+  return data.binding;
+}
+
+export async function deleteNativeKeyBinding(id: string): Promise<void> {
+  const c = apiClient();
+  await c.delete(pluginPath("/native-key-bindings"), { data: { id } });
 }

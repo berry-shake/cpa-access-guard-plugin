@@ -154,13 +154,13 @@ function fromOpenAICompat(payload: unknown): RawEntry[] {
   });
 }
 
-// One auth-file row from /v0/management/auth-files. We only need the file name
-// (to join against per-file models) and the tier identity claim (codex
-// id_token plan_type, antigravity tier). The ListAuthFiles response exposes
-// plan_type under id_token.claims.plan_type; the flat "account_type" sibling is
-// a fallback. Everything else is ignored.
+// One auth-file row from /v0/management/auth-files. `id` is the runtime auth ID
+// used by SchedulerAuthCandidate.ID and therefore by filename/id classify
+// rules. It may differ from the display/file name. The management endpoint for
+// per-auth models accepts either form, but querying by the stable ID avoids an
+// ambiguous FileName when one source expands into multiple runtime auths.
 interface AuthFileMeta {
-  name: string;
+  id: string;
   // provider as reported by the auth-files LIST endpoint (e.g. "codex",
   // "antigravity", "claude"). The per-file /auth-files/models endpoint does NOT
   // echo a provider/channel — its models objects carry a per-model "type"
@@ -168,7 +168,10 @@ interface AuthFileMeta {
   // carry the list-endpoint provider here so each file's models land under the
   // right provider group; otherwise the file name leaks in as the "provider".
   provider: string;
-  planType: string;
+  // Only values that correspond to Scheduler-safe Attributes are forwarded to
+  // /catalog. In particular, Antigravity tier remains `tier`; it must never be
+  // relabelled as Codex `plan_type`.
+  attributes?: Record<string, string>;
 }
 
 function fromAuthFiles(payload: unknown): AuthFileMeta[] {
@@ -178,13 +181,74 @@ function fromAuthFiles(payload: unknown): AuthFileMeta[] {
   const out: AuthFileMeta[] = [];
   for (const item of list) {
     const o = (item ?? {}) as Record<string, unknown>;
-    const name = ((o["name"] as string) ?? (o["id"] as string) ?? "").trim();
-    if (!name) continue;
+    const rawID = typeof o["id"] === "string" ? o["id"].trim() : "";
+    const rawName = typeof o["name"] === "string" ? o["name"].trim() : "";
+    const id = rawID || rawName;
+    if (!id) continue;
     const provider = ((o["provider"] as string) ?? (o["type"] as string) ?? "").trim().toLowerCase();
-    const planType = readPlanType(o);
-    out.push({ name, provider, planType });
+    const attributes = authFileCatalogAttributes(o, provider);
+    out.push({
+      id,
+      provider,
+      attributes: Object.keys(attributes).length ? attributes : undefined,
+    });
   }
   return out;
+}
+
+function copyCatalogStringAttribute(
+  source: Record<string, unknown>,
+  target: Record<string, string>,
+  key: string,
+): void {
+  const value = source[key];
+  if (typeof value === "string" && value.trim()) {
+    target[key] = value.trim();
+  }
+}
+
+function copyCatalogNumericAttribute(
+  source: Record<string, unknown>,
+  target: Record<string, string>,
+  key: string,
+): void {
+  const value = source[key];
+  if (typeof value === "string" && value.trim()) {
+    target[key] = value.trim();
+  } else if (typeof value === "number" && Number.isFinite(value)) {
+    target[key] = String(value);
+  }
+}
+
+// Build only the Scheduler-attribute subset whose management representation has
+// trustworthy provenance. `path` is emitted directly from Auth.Attributes and
+// CPA normalizes file metadata `weight` into Auth.Attributes on both native and
+// plugin-parsed file paths. Do not copy note/priority/websockets: ListAuthFiles
+// can synthesize those fields from Metadata even when scheduler.pick receives
+// no corresponding Attribute, which would create a false-positive picker
+// group. Arbitrary credential metadata (email, access_token, etc.) is likewise
+// deliberately excluded.
+function authFileCatalogAttributes(
+  entry: Record<string, unknown>,
+  provider: string,
+): Record<string, string> {
+  const attributes: Record<string, string> = {};
+
+  if (provider === "codex") {
+    const planType = readCodexPlanType(entry);
+    if (planType) attributes.plan_type = planType;
+  }
+
+  if (provider === "antigravity") {
+    const tier = entry["tier"];
+    if (typeof tier === "string" && tier.trim()) {
+      attributes.tier = tier.trim().toLowerCase();
+    }
+  }
+
+  copyCatalogStringAttribute(entry, attributes, "path");
+  copyCatalogNumericAttribute(entry, attributes, "weight");
+  return attributes;
 }
 
 // Extract the tier/plan identity from an auth-files list entry. codex's
@@ -197,7 +261,7 @@ function fromAuthFiles(payload: unknown): AuthFileMeta[] {
 // side reads Attributes["tier"] for antigravity, which is a separate path).
 // Returns "" when no recognizable claim is present (→ "supported" bucket).
 // Exported for unit testing against real ListAuthFiles payloads.
-export function readPlanType(entry: Record<string, unknown>): string {
+function readCodexPlanType(entry: Record<string, unknown>): string {
   const idToken = entry["id_token"];
   if (idToken && typeof idToken === "object") {
     const tok = idToken as Record<string, unknown>;
@@ -215,12 +279,11 @@ export function readPlanType(entry: Record<string, unknown>): string {
       }
     }
   }
-  // antigravity tier identity, when present, sits at the top level.
-  const tier = entry["tier"];
-  if (typeof tier === "string" && tier.trim() !== "") {
-    return tier.trim().toLowerCase();
-  }
   return "";
+}
+
+export function readPlanType(entry: Record<string, unknown>): string {
+  return readCodexPlanType(entry);
 }
 
 // Build a RawEntry from a per-file /auth-files/models response. The provider
@@ -320,10 +383,13 @@ export async function fetchCatalog(
   const selected = new Set<string>();
   for (const p of selectedProviders ?? []) selected.add(p.toLowerCase());
 
-  const safe = async <T>(p: Promise<{ data: T }>, apply: (d: T) => void) => {
+  const safe = async <T>(
+    p: Promise<{ data: T }>,
+    apply: (d: T) => void | Promise<void>,
+  ) => {
     try {
       const { data } = await p;
-      apply(data);
+      await apply(data);
     } catch {
       /* skip unavailable source */
     }
@@ -369,7 +435,7 @@ export async function fetchCatalog(
     const perFile = await Promise.all(
       metas.map((m) =>
         c
-          .get("/v0/management/auth-files/models", { params: { name: m.name } })
+          .get("/v0/management/auth-files/models", { params: { name: m.id } })
           .then((r) => ({ meta: m, data: r.data }))
           .catch(() => null),
       ),
@@ -387,12 +453,10 @@ export async function fetchCatalog(
       const fileEntries = fromAuthFileModels(res.meta.provider, res.data);
       const models = toStrings(fileEntries[0]?.models);
       if (!res.meta.provider || models.length === 0) continue;
-      const attributes: Record<string, string> = {};
-      if (res.meta.planType) attributes.plan_type = res.meta.planType;
       credentials.push({
-        id: res.meta.name,
+        id: res.meta.id,
         provider: res.meta.provider,
-        attributes: Object.keys(attributes).length ? attributes : undefined,
+        attributes: res.meta.attributes,
         models,
       });
     }
@@ -421,7 +485,7 @@ export async function fetchCatalog(
         const provider = cred.provider.toLowerCase();
         const e: RawEntry = { provider, models: cred.models };
         if (TIERED_PROVIDERS.has(provider)) {
-          e.group = cred.attributes?.plan_type || SUPPORTED_GROUP;
+          e.group = cred.attributes?.plan_type || cred.attributes?.tier || SUPPORTED_GROUP;
           authFileTieredProviders.add(provider);
         }
         entries.push(e);
@@ -432,7 +496,9 @@ export async function fetchCatalog(
   for (const ch of STATIC_CHANNELS) {
     await safe(
       c.get("/v0/management/model-definitions/" + ch),
-      (d) => entries.push(...fromModelDefinitions(ch, d)),
+      (d) => {
+        entries.push(...fromModelDefinitions(ch, d));
+      },
     );
   }
 

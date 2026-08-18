@@ -131,10 +131,12 @@ type classifyPreviewRequest struct {
 	// Descriptors are the credential descriptors to classify. Each has a
 	// filename (ID), provider, and optional attributes (plan_type, tier, etc.).
 	Descriptors []credentialDescriptor `json:"descriptors"`
-	// Rules are optional rules to evaluate. If empty, the store's current
-	// classify rules are used. This lets the UI preview rule changes before
-	// saving.
-	Rules []policy.ClassifyRule `json:"rules,omitempty"`
+	// Rules optionally supplies an explicit rule set. A pointer distinguishes an
+	// omitted field (use the store's current rules) from `rules: []` (preview no
+	// custom rules). Explicit rules are compiled strictly with Go's RE2 engine;
+	// invalid patterns return a validation error instead of a misleading empty
+	// preview.
+	Rules *[]policy.ClassifyRule `json:"rules,omitempty"`
 }
 
 type credentialDescriptor struct {
@@ -149,6 +151,10 @@ type classifyPreviewResponse struct {
 	Groups map[string][]string `json:"groups"`
 	// GroupCounts maps group name → count of matching credentials.
 	GroupCounts map[string]int `json:"group_counts"`
+	// RuleMatches reports each rule's own matches. Groups is the de-duplicated
+	// union and cannot be used for a per-rule count when several rules target the
+	// same group.
+	RuleMatches map[string][]string `json:"rule_matches"`
 }
 
 func (a *App) classifyPreview(raw []byte) ManagementResponse {
@@ -157,9 +163,13 @@ func (a *App) classifyPreview(raw []byte) ManagementResponse {
 		return jsonError(http.StatusBadRequest, "bad_request", err.Error())
 	}
 
-	// Use provided rules or fall back to the store's current rules.
-	rules := req.Rules
-	if len(rules) == 0 {
+	// Use an explicitly supplied rule set (including an empty one), or fall back
+	// to the store's current, already-validated rules.
+	rules := []policy.ClassifyRule(nil)
+	explicitRules := req.Rules != nil
+	if explicitRules {
+		rules = append(rules, (*req.Rules)...)
+	} else {
 		rules = a.store.ClassifyRulesSnapshot()
 	}
 
@@ -168,44 +178,101 @@ func (a *App) classifyPreview(raw []byte) ManagementResponse {
 		rule    policy.ClassifyRule
 		pattern *regexp.Regexp
 	}
-	var compiled []compiledRule
+	compiled := make([]compiledRule, 0, len(rules))
+	ruleMatches := make(map[string][]string, len(rules))
+	ruleSeen := make(map[string]struct{}, len(rules))
 	for _, r := range rules {
-		if !r.Enabled {
-			continue
+		r.Name = strings.TrimSpace(r.Name)
+		r.Field = strings.ToLower(strings.TrimSpace(r.Field))
+		r.Pattern = strings.TrimSpace(r.Pattern)
+		r.Group = strings.ToLower(strings.TrimSpace(r.Group))
+		if explicitRules {
+			if r.Name == "" {
+				return jsonError(http.StatusBadRequest, "validation_error", "classify rule name is required")
+			}
+			if r.Field == "" {
+				return jsonError(http.StatusBadRequest, "validation_error", "classify rule field is required")
+			}
+			if r.Pattern == "" {
+				return jsonError(http.StatusBadRequest, "validation_error", "classify rule pattern is required")
+			}
+			if r.Group == "" {
+				return jsonError(http.StatusBadRequest, "validation_error", "classify rule group is required")
+			}
 		}
+		nameKey := strings.ToLower(r.Name)
+		if _, exists := ruleSeen[nameKey]; exists {
+			return jsonError(http.StatusBadRequest, "validation_error", "duplicate classify rule name: "+r.Name)
+		}
+		ruleSeen[nameKey] = struct{}{}
+		ruleMatches[r.Name] = []string{}
 		re, err := regexp.Compile(r.Pattern)
 		if err != nil {
-			continue // skip invalid rules in preview
+			return jsonError(http.StatusBadRequest, "validation_error", "classify rule "+r.Name+" has invalid Go/RE2 regex: "+err.Error())
+		}
+		if !r.Enabled {
+			continue
 		}
 		compiled = append(compiled, compiledRule{rule: r, pattern: re})
 	}
 
 	groups := make(map[string][]string)
-	groupCounts := make(map[string]int)
+	groupSeen := make(map[string]map[string]struct{})
+	ruleMatchSeen := make(map[string]map[string]struct{}, len(rules))
+	for name := range ruleMatches {
+		ruleMatchSeen[name] = make(map[string]struct{})
+	}
+	appendGroup := func(group, id string) {
+		seen := groupSeen[group]
+		if seen == nil {
+			seen = make(map[string]struct{})
+			groupSeen[group] = seen
+		}
+		if _, exists := seen[id]; exists {
+			return
+		}
+		seen[id] = struct{}{}
+		groups[group] = append(groups[group], id)
+	}
+	appendRuleMatch := func(name, id string) {
+		seen := ruleMatchSeen[name]
+		if _, exists := seen[id]; exists {
+			return
+		}
+		seen[id] = struct{}{}
+		ruleMatches[name] = append(ruleMatches[name], id)
+	}
 
 	for _, desc := range req.Descriptors {
+		desc.ID = strings.TrimSpace(desc.ID)
+		desc.Provider = strings.ToLower(strings.TrimSpace(desc.Provider))
+		if desc.ID == "" {
+			continue
+		}
 		matched := false
 		// 1. Evaluate custom rules (multi-group: collect all matches).
 		for _, cr := range compiled {
 			val := descriptorFieldValue(desc, cr.rule.Field)
 			if val != "" && cr.pattern.MatchString(val) {
-				g := strings.ToLower(cr.rule.Group)
-				groups[g] = append(groups[g], desc.ID)
-				groupCounts[g]++
+				appendGroup(cr.rule.Group, desc.ID)
+				appendRuleMatch(cr.rule.Name, desc.ID)
 				matched = true
 			}
 		}
 		// 2. If no custom rule matched, fall back to built-in plan_type/tier.
 		if !matched {
-			g := descriptorBuiltInGroup(desc)
-			groups[g] = append(groups[g], desc.ID)
-			groupCounts[g]++
+			appendGroup(descriptorBuiltInGroup(desc), desc.ID)
 		}
+	}
+	groupCounts := make(map[string]int, len(groups))
+	for group, ids := range groups {
+		groupCounts[group] = len(ids)
 	}
 
 	return jsonResponse(http.StatusOK, classifyPreviewResponse{
 		Groups:      groups,
 		GroupCounts: groupCounts,
+		RuleMatches: ruleMatches,
 	})
 }
 
@@ -225,21 +292,27 @@ func descriptorFieldValue(desc credentialDescriptor, field string) string {
 	return ""
 }
 
-// descriptorBuiltInGroup returns the built-in plan_type/tier group, or
-// "supported" if no recognizable claim is present.
+// descriptorBuiltInGroup mirrors policy.GroupsForCredential: explicit
+// plan_type/tier values are honored for any provider, but the synthetic
+// "supported" bucket exists only for built-in tier providers. Other providers
+// remain flat (empty group) when no custom rule matches.
 func descriptorBuiltInGroup(desc credentialDescriptor) string {
-	if desc.Attributes == nil {
-		return "supported"
+	provider := strings.ToLower(strings.TrimSpace(desc.Provider))
+	plan, tier := "", ""
+	if desc.Attributes != nil {
+		plan = strings.ToLower(strings.TrimSpace(desc.Attributes["plan_type"]))
+		tier = strings.ToLower(strings.TrimSpace(desc.Attributes["tier"]))
 	}
-	plan := strings.ToLower(strings.TrimSpace(desc.Attributes["plan_type"]))
-	tier := strings.ToLower(strings.TrimSpace(desc.Attributes["tier"]))
 	if plan != "" {
 		return plan
 	}
 	if tier != "" {
 		return tier
 	}
-	return "supported"
+	if policy.BuiltinTierProviders[provider] {
+		return "supported"
+	}
+	return ""
 }
 
 // --- Catalog builder (POST /catalog) ---

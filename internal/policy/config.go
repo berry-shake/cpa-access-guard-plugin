@@ -18,6 +18,11 @@ type Config struct {
 	Enabled   bool        `yaml:"enabled" json:"enabled"`
 	StateFile string      `yaml:"state_file" json:"state_file"`
 	Keys      []KeyConfig `yaml:"keys" json:"keys"`
+	// NativeKeyBindings constrain CPA's built-in downstream API keys to an
+	// auth-file group. Unlike Keys, these entries do not authenticate the
+	// caller and never persist the plaintext API key: CallerScope is the
+	// irreversible identity produced by NativeCallerScope.
+	NativeKeyBindings []NativeKeyBinding `yaml:"native_key_bindings,omitempty" json:"native_key_bindings,omitempty"`
 	// Aliases is the global alias mapping table. Each entry maps a downstream
 	// alias name to one or more (provider, model, group) targets with a shared
 	// pricing config. Keys reference aliases by name via KeyAliasRef.
@@ -126,8 +131,9 @@ type AliasTarget struct {
 // ClassifyRule is a user-defined credential classification rule. It matches
 // a field on the auth candidate (filename, provider, plan_type, tier, or any
 // custom attribute) against a regex pattern, and assigns matching candidates
-// to a named group. Rules run in order; the first match wins (a credential can
-// belong to multiple groups when multiple rules match — multi-group semantics).
+// to a named group. Every matching rule contributes its group, so one
+// credential can belong to multiple custom groups. Multiple rules targeting
+// the same group form a union rather than an intersection.
 // Custom rules run BEFORE the built-in plan_type/tier detection, so they can
 // override the default classification.
 type ClassifyRule struct {
@@ -273,6 +279,10 @@ type State struct {
 	Keys      []KeyConfig            `json:"keys"`
 	Usage     map[string]*UsageState `json:"usage,omitempty"`
 	UpdatedAt time.Time              `json:"updated_at"`
+	// Do not add omitempty here. A missing field identifies a legacy state file
+	// and lets Configure bootstrap bindings from config.yaml once, while an
+	// explicit [] records that all bindings were deliberately deleted.
+	NativeKeyBindings []NativeKeyBinding `json:"native_key_bindings"`
 	// Aliases is the global alias mapping table, persisted so that key alias
 	// references survive restarts even when config.yaml is not re-read. On
 	// Configure, the config.yaml Aliases take precedence; state Aliases are a
@@ -428,6 +438,9 @@ func normalizeConfig(cfg *Config) error {
 	// This runs on every normalizeConfig call (DecodeConfig, Configure, state
 	// load) so old configs and old state files are always migrated.
 	migrateModelsToAliases(cfg)
+	if err := normalizeNativeKeyBindings(cfg.NativeKeyBindings); err != nil {
+		return err
+	}
 	seen := map[string]struct{}{}
 	for i := range cfg.Keys {
 		key := &cfg.Keys[i]
@@ -659,9 +672,12 @@ func LoadState(path string) (*State, error) {
 }
 
 // SaveState atomically writes the key list plus usage ledger to the state file.
-func SaveState(path string, keys []KeyConfig, usage map[string]*UsageState, aliases []AliasMapping, rules []ClassifyRule) error {
+func SaveState(path string, keys []KeyConfig, usage map[string]*UsageState, aliases []AliasMapping, rules []ClassifyRule, nativeBindings ...[]NativeKeyBinding) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
+	}
+	if len(nativeBindings) > 1 {
+		return errors.New("SaveState accepts at most one native key binding list")
 	}
 	// Models is a DERIVED field (resolved from Aliases × global table via
 	// resolveAliasRefsToModels); the canonical source is Aliases. Persisting
@@ -675,7 +691,14 @@ func SaveState(path string, keys []KeyConfig, usage map[string]*UsageState, alia
 		cleanKeys[i] = keys[i]
 		cleanKeys[i].Models = nil
 	}
-	state := State{Version: 1, Keys: cleanKeys, Usage: usage, UpdatedAt: time.Now().UTC(), Aliases: aliases, ClassifyRules: rules}
+	// Always persist an explicit array, including when empty. This preserves the
+	// distinction between an old state file with no native_key_bindings field
+	// and a new state in which the user deliberately deleted every binding.
+	cleanBindings := make([]NativeKeyBinding, 0)
+	if len(nativeBindings) == 1 {
+		cleanBindings = append(cleanBindings, nativeBindings[0]...)
+	}
+	state := State{Version: 1, Keys: cleanKeys, Usage: usage, UpdatedAt: time.Now().UTC(), NativeKeyBindings: cleanBindings, Aliases: aliases, ClassifyRules: rules}
 	raw, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
@@ -699,10 +722,14 @@ func SaveUsageOnly(path string, usage map[string]*UsageState) error {
 	var keys []KeyConfig
 	var aliases []AliasMapping
 	var rules []ClassifyRule
+	// A brand-new state gets an explicit [], while a legacy state that exists
+	// but omits the field keeps nil so Configure can detect and migrate it.
+	nativeBindings := make([]NativeKeyBinding, 0)
 	if cur, err := LoadState(path); err == nil {
 		keys = cur.Keys
 		aliases = cur.Aliases
 		rules = cur.ClassifyRules
+		nativeBindings = cur.NativeKeyBindings
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -712,7 +739,7 @@ func SaveUsageOnly(path string, usage map[string]*UsageState) error {
 	for i := range keys {
 		keys[i].Models = nil
 	}
-	state := State{Version: 1, Keys: keys, Usage: usage, UpdatedAt: time.Now().UTC(), Aliases: aliases, ClassifyRules: rules}
+	state := State{Version: 1, Keys: keys, Usage: usage, UpdatedAt: time.Now().UTC(), NativeKeyBindings: nativeBindings, Aliases: aliases, ClassifyRules: rules}
 	raw, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err

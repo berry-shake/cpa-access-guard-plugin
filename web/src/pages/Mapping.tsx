@@ -2,16 +2,20 @@ import { useEffect, useState, useCallback } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { useT } from "../i18n";
 import type { AliasMapping, AliasTarget, ClassifyRule, ClassifyPreviewResponse, CredentialDescriptor } from "../types";
-import { fetchAliases, upsertAlias, deleteAlias, fetchClassifyRules, upsertClassifyRule, deleteClassifyRule, reorderClassifyRules, classifyPreview, fetchCredentialDescriptors } from "../api/mappings";
+import { fetchAliases, upsertAlias, deleteAlias, fetchClassifyRules, upsertClassifyRule, deleteClassifyRule, reorderClassifyRules, classifyPreview, fetchCredentialDescriptors, canPreviewClassifyField } from "../api/mappings";
+import NativeKeyBindingsTab from "../components/NativeKeyBindings";
+
+type MappingTab = "alias" | "classify" | "native";
 
 export default function Mapping() {
   const t = useT();
   const loc = useLocation();
-  const [tab, setTab] = useState<"alias" | "classify">("alias");
+  const [tab, setTab] = useState<MappingTab>("alias");
 
   // Pick up returned state (new targets from ModelPick, etc.)
   useEffect(() => {
-    if (loc.state?.mappingTab) setTab(loc.state.mappingTab);
+    const requested = loc.state?.mappingTab;
+    if (requested === "alias" || requested === "classify" || requested === "native") setTab(requested);
   }, [loc.state]);
 
   return (
@@ -26,8 +30,13 @@ export default function Mapping() {
         <button className={"map-tab" + (tab === "classify" ? " active" : "")} onClick={() => setTab("classify")}>
           {t("mapping.classifyTab")}
         </button>
+        <button className={"map-tab" + (tab === "native" ? " active" : "")} onClick={() => setTab("native")}>
+          {t("mapping.nativeTab")}
+        </button>
       </div>
-      {tab === "alias" ? <AliasListTab /> : <ClassifyTab />}
+      {tab === "alias" && <AliasListTab />}
+      {tab === "classify" && <ClassifyTab />}
+      {tab === "native" && <NativeKeyBindingsTab />}
     </div>
   );
 }
@@ -147,19 +156,36 @@ function ClassifyTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [previewData, setPreviewData] = useState<ClassifyPreviewResponse | null>(null);
+  const [previewError, setPreviewError] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError("");
+    setPreviewError("");
+    setPreviewData(null);
     try {
-      const [list, descriptors] = await Promise.all([
-        fetchClassifyRules(),
-        fetchCredentialDescriptors().catch(() => [] as CredentialDescriptor[]),
-      ]);
+      const list = await fetchClassifyRules();
       setRules(list);
-      // Evaluate the current rules against real credential descriptors so
-      // each rule card shows the true match count + file list.
-      const preview = await classifyPreview(descriptors).catch(() => null as ClassifyPreviewResponse | null);
-      setPreviewData(preview);
+
+      let descriptors: CredentialDescriptor[];
+      try {
+        descriptors = await fetchCredentialDescriptors();
+      } catch (e: unknown) {
+        // A failed auth-files request is not the same as a successful empty
+        // list. Keep previewData null so the cards say "unavailable" instead
+        // of presenting a dangerous false zero-match result.
+        setPreviewError(String(e));
+        return;
+      }
+
+      // Evaluate the current rules against the safe subset reconstructed from
+      // CPA's management descriptors. This is a regex preview, not proof that
+      // an auth is currently schedulable.
+      try {
+        setPreviewData(await classifyPreview(descriptors));
+      } catch (e: unknown) {
+        setPreviewError(String(e));
+      }
     } catch (e: unknown) {
       setError(String(e));
     } finally {
@@ -202,7 +228,13 @@ function ClassifyTab() {
           + {t("mapping.newRule")}
         </button>
       </div>
+      <div className="rule-preview-notice">{t("mapping.rule.previewNotice")}</div>
       {error && <div className="error">{error}</div>}
+      {previewError && (
+        <div className="error">
+          {t("mapping.rule.previewLoadFailed", { error: previewError })}
+        </div>
+      )}
       {loading ? (
         <div className="muted" style={{ padding: 20 }}>Loading...</div>
       ) : (
@@ -264,17 +296,23 @@ function RuleCard({
   const [matchedFiles, setMatchedFiles] = useState<string[]>([]);
   const [page, setPage] = useState(0);
   const pageSize = 50;
+  const previewable = canPreviewClassifyField(rule.field);
+  const rulePreviewAvailable = previewable
+    && previewData !== null
+    && Array.isArray(previewData.rule_matches?.[rule.name]);
 
-  // Compute the match count + matched file list up front from previewData
-  // (fetched by ClassifyTab once the rules + descriptors load). The badge
-  // shows the count even when collapsed, so this must not be gated on
-  // `expanded`. Re-run whenever the preview or this rule's target group
-  // changes; the matchedFiles list drives the expanded detail pagination.
+  // Use the rule-specific result. A group is a union, so reading the group
+  // aggregate would give every same-group rule the same misleading count.
   useEffect(() => {
-    const files = previewData?.groups[rule.group.toLowerCase()] ?? [];
+    const files = previewData?.rule_matches?.[rule.name];
+    if (!rulePreviewAvailable || !Array.isArray(files)) {
+      setMatchCount(null);
+      setMatchedFiles([]);
+      return;
+    }
     setMatchCount(files.length);
     setMatchedFiles(files);
-  }, [previewData, rule.group]);
+  }, [previewData, rule.name, rulePreviewAvailable]);
 
   const pageCount = Math.ceil(matchedFiles.length / pageSize);
   const pageFiles = matchedFiles.slice(page * pageSize, (page + 1) * pageSize);
@@ -292,7 +330,9 @@ function RuleCard({
         </div>
         <div className="rule-card-right">
           <span className={"rule-match-badge" + (matchCount === 0 ? " zero" : "")}>
-            {matchCount !== null
+            {!rulePreviewAvailable
+              ? t("mapping.rule.matchUnavailable")
+              : matchCount !== null
               ? (matchCount > 0 ? t("mapping.rule.matchCount", { n: matchCount }) : t("mapping.rule.matchCountZero"))
               : "..."}
           </span>
@@ -308,7 +348,13 @@ function RuleCard({
         <div className="rule-detail">
           <div className="rule-detail-files">
             {pageFiles.length === 0 ? (
-              <div className="muted" style={{ padding: 8 }}>{t("mapping.rule.noFiles")}</div>
+              <div className="muted" style={{ padding: 8 }}>
+                {!previewable
+                  ? t("mapping.rule.previewUnavailableDetail")
+                  : !rulePreviewAvailable
+                  ? t("mapping.rule.previewLoadFailedDetail")
+                  : t("mapping.rule.noFiles")}
+              </div>
             ) : (
               pageFiles.map((f, i) => (
                 <div key={i} className="rule-detail-file">
@@ -602,8 +648,6 @@ export function RuleEditForm() {
     enabled: true,
   });
   const [customField, setCustomField] = useState("");
-  const [regexError, setRegexError] = useState("");
-  const [regexValid, setRegexValid] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -624,34 +668,18 @@ export function RuleEditForm() {
     }).catch((e: unknown) => setError(String(e)));
   }, [ruleName, isNew]);
 
-  // Live regex validation.
-  useEffect(() => {
-    if (!rule.pattern) {
-      setRegexError("");
-      setRegexValid(false);
-      return;
-    }
-    try {
-      new RegExp(rule.pattern);
-      setRegexError("");
-      setRegexValid(true);
-    } catch (e: unknown) {
-      setRegexError(String(e).replace(/^Error: /, ""));
-      setRegexValid(false);
-    }
-  }, [rule.pattern]);
-
-  const effectiveField = rule.field === "custom" ? customField : rule.field;
+  const effectiveField = (rule.field === "custom" ? customField : rule.field).trim().toLowerCase();
 
   const handleSave = async () => {
-    if (!regexValid) {
-      setError(t("mapping.rule.regexInvalid", { err: regexError }));
-      return;
-    }
     setSaving(true);
     setError("");
     try {
-      await upsertClassifyRule({ ...rule, field: effectiveField });
+      const draft = { ...rule, field: effectiveField };
+      // Validate with the same Go/RE2 engine used at runtime. JavaScript's
+      // RegExp grammar differs (for example (?i) and lookarounds), so browser-
+      // only validation would reject valid rules and approve invalid ones.
+      await classifyPreview([], [draft]);
+      await upsertClassifyRule(draft);
       nav("/mapping", { state: { mappingTab: "classify" } });
     } catch (e: unknown) {
       setError(String(e));
@@ -698,8 +726,9 @@ export function RuleEditForm() {
               className="mono"
               value={customField}
               onChange={(e) => setCustomField(e.target.value)}
-              placeholder="custom_attribute_name"
+              placeholder="auth_kind"
             />
+            <p className="native-binding-field-hint">{t("mapping.rule.customFieldHint")}</p>
           </div>
         )}
         <div className="map-form-row">
@@ -710,8 +739,7 @@ export function RuleEditForm() {
             onChange={(e) => setRule({ ...rule, pattern: e.target.value })}
             placeholder="^team$"
           />
-          {regexValid && <div className="regex-valid">✓ {t("mapping.rule.regexValid")}</div>}
-          {regexError && <div className="regex-invalid">{t("mapping.rule.regexInvalid", { err: regexError })}</div>}
+          <p className="native-binding-field-hint">{t("mapping.rule.regexHint")}</p>
         </div>
         <div className="map-form-row">
           <label>{t("mapping.rule.group")}</label>
@@ -735,7 +763,7 @@ export function RuleEditForm() {
         </div>
         {error && <div className="error">{error}</div>}
         <div className="map-form-foot">
-          <button className="btn primary" onClick={handleSave} disabled={saving || !regexValid}>
+          <button className="btn primary" onClick={handleSave} disabled={saving}>
             {saving ? "..." : t("mapping.save")}
           </button>
           <button className="btn" onClick={() => nav("/mapping", { state: { mappingTab: "classify" } })}>

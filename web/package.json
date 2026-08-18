@@ -1,7 +1,7 @@
 {
   "name": "cpa-key-policy-web",
   "private": true,
-  "version": "0.4.4",
+  "version": "0.5.0",
   "type": "module",
   "description": "Management UI for the cpa-key-policy CLIProxyAPI plugin.",
   "scripts": {
@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -b --noEmit"
+    "typecheck": "tsc -b"
   },
   "dependencies": {
     "react": "^18.3.1",

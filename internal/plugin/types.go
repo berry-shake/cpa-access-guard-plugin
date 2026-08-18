@@ -41,9 +41,21 @@ const (
 )
 
 const (
+	// SchedulerGroupMetadataKey is populated by this plugin's frontend auth
+	// provider for plugin-managed downstream keys. A matching native-key binding
+	// takes precedence because the Scheduler ABI does not carry enough provider
+	// provenance to trust an arbitrary group over an authenticated caller scope.
+	SchedulerGroupMetadataKey = "group"
+	// SchedulerCallerScopeMetadataKey is populated by CPA after its native
+	// config-api-key provider authenticates a downstream key. The value is a
+	// stable, one-way scope identifier rather than the plaintext API key.
+	SchedulerCallerScopeMetadataKey = "caller_scope"
+)
+
+const (
 	PluginID   = "cpa-key-policy"
 	PluginName = "cpa-key-policy"
-	Version    = "0.4.4"
+	Version    = "0.5.0"
 )
 
 type Envelope struct {
@@ -134,8 +146,9 @@ type ModelRouteResponse struct {
 
 // SchedulerPickRequest is the payload of the host->plugin scheduler.pick call.
 // It mirrors pluginapi.SchedulerPickRequest. The plugin only needs Provider,
-// Model, Options.Metadata (carrying the group we stamped at authenticate time)
-// and Candidates[].Attributes (codex plan_type etc.).
+// Model, Options.Metadata (carrying either the group stamped by our frontend
+// auth provider or CPA's native caller_scope) and Candidates[].Attributes
+// (codex plan_type etc.).
 type SchedulerPickRequest struct {
 	Provider   string                   `json:"Provider,omitempty"`
 	Providers  []string                 `json:"Providers,omitempty"`

@@ -43,6 +43,43 @@ describe("translate", () => {
     expect(translate("login.memoryNote")).toContain("記憶體");
   });
 
+  it.each(["zh-CN", "zh-TW", "en", "ru"] as const)(
+    "keeps the unsupported scheduler-path warning explicit in %s",
+    (locale) => {
+      _resetLocale(locale);
+      const warning = translate("mapping.native.pathNotice");
+      expect(warning).toContain("AuthManager/Scheduler");
+      expect(warning).toContain("Home");
+      expect(warning).toContain("Alpha Search");
+      expect(warning).toContain("Codex Live/Realtime");
+      expect(warning).toContain("plugin-executor");
+      expect(warning).toContain("Scheduler");
+      expect(warning).toContain("caller_scope");
+      expect(warning).toContain("quota-exceeded.antigravity-credits: false");
+    },
+  );
+
+  it.each([
+    ["zh-CN", "仍然有效", "默认/自由调度"],
+    ["zh-TW", "仍然有效", "預設/自由調度"],
+    ["en", "remains valid", "default/free scheduling"],
+    ["ru", "действительн", "стандартной/свободной диспетчеризации"],
+  ] as const)(
+    "states that disable/delete keeps the top-level key active in %s",
+    (locale, validFragment, schedulingFragment) => {
+      _resetLocale(locale);
+      for (const key of [
+        "mapping.native.unbindNotice",
+        "mapping.native.disableConfirm",
+        "mapping.native.deleteConfirm",
+      ]) {
+        const warning = translate(key, { id: "client-a" });
+        expect(warning).toContain(validFragment);
+        expect(warning).toContain(schedulingFragment);
+      }
+    },
+  );
+
   it("falls back to zh-CN base for a key missing in the requested locale", () => {
     // Strip a key from en's bundle to simulate a not-yet-translated entry.
     // Translate key that exists in zh-CN base; we craft a guaranteed-present

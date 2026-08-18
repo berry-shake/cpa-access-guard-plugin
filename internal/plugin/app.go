@@ -105,12 +105,13 @@ func (a *App) registration() Registration {
 		Metadata: Metadata{
 			Name:             PluginName,
 			Version:          Version,
-			Author:           "cpa-key-policy",
-			GitHubRepository: "https://github.com/router-for-me/CLIProxyAPI",
+			Author:           "origin652 / berry-shake",
+			GitHubRepository: "https://github.com/berry-shake/cpa-key-policy-plugin",
 			ConfigFields: []ConfigField{
 				{Name: "enabled", Type: "boolean", Description: "Enable or disable this plugin without unloading it."},
 				{Name: "state_file", Type: "string", Description: "JSON state file used for key policy changes made through the Management API."},
 				{Name: "keys", Type: "array", Description: "Initial downstream key policy list. State file wins after it exists."},
+				{Name: "native_key_bindings", Type: "array", Description: "Optional caller-scope bindings that constrain CPA-native downstream API keys to credential groups. Requires a Scheduler path carrying caller_scope, Home disabled, no unsupported special route, and quota-exceeded.antigravity-credits=false."},
 			},
 		},
 		Capabilities: Capabilities{
@@ -237,9 +238,12 @@ func (a *App) interceptResponse(raw []byte) ([]byte, error) {
 
 // pickScheduler implements the scheduler.pick host->plugin call. When the
 // routed ModelRule had a Group (codex plan_type / antigravity tier), restrict
-// candidate auths to those whose Attributes carry a matching identity. Any
-// Group "" or a group we can't recognize → defer to the host scheduler
-// (Handled=false), preserving legacy "any auth for the provider" behavior.
+// candidate auths to those whose Attributes carry a matching identity. For a
+// request authenticated by CPA's native config-api-key provider, a persisted
+// caller_scope binding can supply the group instead. A matching native-key
+// binding always wins over generic group metadata: caller_scope is the stable
+// identity CPA derives after authentication, while group has no provider
+// provenance in the Scheduler ABI and must not be able to weaken a binding.
 //
 // The plugin never sees the downstream ModelRule directly here; the group was
 // stamped into request metadata by authenticate(), and the host forwards it as
@@ -254,22 +258,60 @@ func (a *App) interceptResponse(raw []byte) ([]byte, error) {
 //     any tiered one.
 //
 // Among filtered candidates, pick the host's highest-priority one (ties broken
-// by lowest ID for determinism). We do not have access to the model-capability
-// registry here (it's a separate pluginapi capability), so the host still owns
-// the final "is this auth able to serve this model" check via delegate; if a
-// chosen candidate can't serve the model the host falls back. This is the same
-// trust boundary the built-in scheduler operates under.
+// by lowest ID for determinism). CPA filters the scheduler candidate list for
+// the routed model before invoking this plugin. On an execution retry it calls
+// scheduler.pick again with already-tried auths removed, so the group filter is
+// reapplied and exhaustion fails closed instead of falling back across groups.
 func (a *App) pickScheduler(raw []byte) ([]byte, error) {
 	var req SchedulerPickRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return nil, err
 	}
-	group := schedulerGroupFromMetadata(req.Options.Metadata)
-	if group == "" {
-		// No tier narrowed by this downstream key → let the host pick freely.
+	if !a.store.Enabled() {
+		// `enabled: false` disables every policy capability, including native
+		// key bindings. The host remains responsible for its default scheduling.
 		return OKEnvelope(SchedulerPickResponse{Handled: false})
 	}
+	group := ""
+	nativeBinding := false
+	// Native CPA keys are authenticated before scheduler.pick. CPA forwards
+	// their stable (hashed) identity as caller_scope, allowing the policy store
+	// to resolve an auth-file group without exposing or persisting the plaintext
+	// downstream key here. Resolve it before reading group: Scheduler metadata
+	// does not identify which frontend-auth provider supplied an arbitrary group.
+	callerScope, callerScopePresent, callerScopeValid := schedulerCallerScopeFromMetadata(req.Options.Metadata)
+	if callerScopePresent && !callerScopeValid {
+		// CPA owns caller_scope and always emits a 64-character SHA-256 hex
+		// string. If the field exists with any other shape, do not silently treat
+		// the request as unbound or let generic group metadata bypass the identity
+		// check. This indicates an incompatible or corrupted host/plugin path.
+		return ErrorEnvelope("invalid_scheduler_metadata", "cpa-key-policy: invalid caller_scope metadata", http.StatusServiceUnavailable), nil
+	}
+	if callerScope != "" {
+		group, nativeBinding = a.store.ResolveNativeKeyGroup(callerScope, req.Provider, req.Model)
+		group = strings.ToLower(strings.TrimSpace(group))
+	}
+	if nativeBinding {
+		if group == "" {
+			// The store normally rejects empty groups during configuration. Keep
+			// this guard fail-closed in case a future state migration or Store
+			// implementation violates that invariant.
+			return ErrorEnvelope("auth_not_found", "cpa-key-policy: native key binding has no credential group", http.StatusServiceUnavailable), nil
+		}
+	} else {
+		group = schedulerGroupFromMetadata(req.Options.Metadata)
+		if group == "" {
+			// No group narrowed by this downstream key → let the host pick
+			// freely, preserving legacy behavior for unbound native keys.
+			return OKEnvelope(SchedulerPickResponse{Handled: false})
+		}
+	}
 	if len(req.Candidates) == 0 {
+		if nativeBinding {
+			// A resolved native binding is an isolation boundary. Deferring on an
+			// empty candidate list would let a host fallback escape that boundary.
+			return ErrorEnvelope("auth_not_found", "cpa-key-policy: no eligible auth candidate for requested group", http.StatusServiceUnavailable), nil
+		}
 		return OKEnvelope(SchedulerPickResponse{Handled: false})
 	}
 
@@ -417,21 +459,26 @@ func candidateFieldValue(cand SchedulerAuthCandidate, field string) string {
 	return ""
 }
 
-// builtInGroup returns the built-in plan_type/tier group for a candidate,
-// or "supported" if no recognizable claim is present (untiered bucket).
+// builtInGroup mirrors policy.GroupsForCredential. An explicit plan_type/tier
+// is honored for any provider, while the synthetic "supported" bucket exists
+// only for providers that participate in built-in tiering. Other providers are
+// flat when no custom rule matches.
 func builtInGroup(cand SchedulerAuthCandidate) string {
-	if cand.Attributes == nil {
-		return "supported"
+	plan, tier := "", ""
+	if cand.Attributes != nil {
+		plan = strings.ToLower(strings.TrimSpace(cand.Attributes["plan_type"]))
+		tier = strings.ToLower(strings.TrimSpace(cand.Attributes["tier"]))
 	}
-	plan := strings.ToLower(strings.TrimSpace(cand.Attributes["plan_type"]))
-	tier := strings.ToLower(strings.TrimSpace(cand.Attributes["tier"]))
 	if plan != "" {
 		return plan
 	}
 	if tier != "" {
 		return tier
 	}
-	return "supported"
+	if policy.BuiltinTierProviders[strings.ToLower(strings.TrimSpace(cand.Provider))] {
+		return "supported"
+	}
+	return ""
 }
 
 // schedulerGroupFromMetadata reads the group stamped at authenticate time out
@@ -440,7 +487,7 @@ func schedulerGroupFromMetadata(meta map[string]any) string {
 	if meta == nil {
 		return ""
 	}
-	raw, ok := meta["group"]
+	raw, ok := meta[SchedulerGroupMetadataKey]
 	if !ok || raw == nil {
 		return ""
 	}
@@ -450,6 +497,35 @@ func schedulerGroupFromMetadata(meta map[string]any) string {
 	default:
 		return strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", v)))
 	}
+}
+
+// schedulerCallerScopeFromMetadata reads and validates the stable native-key
+// identity CPA stamps into request metadata after authentication. The returned
+// booleans report whether the field was present and, when present, whether it
+// had the host's required 64-character SHA-256 hex representation. Coercing or
+// ignoring arbitrary values could let unrelated metadata bypass a binding.
+func schedulerCallerScopeFromMetadata(meta map[string]any) (value string, present, valid bool) {
+	if meta == nil {
+		return "", false, true
+	}
+	raw, ok := meta[SchedulerCallerScopeMetadataKey]
+	if !ok {
+		return "", false, true
+	}
+	value, ok = raw.(string)
+	if !ok {
+		return "", true, false
+	}
+	value = strings.ToLower(strings.TrimSpace(value))
+	if len(value) != 64 {
+		return "", true, false
+	}
+	for i := 0; i < len(value); i++ {
+		if (value[i] < '0' || value[i] > '9') && (value[i] < 'a' || value[i] > 'f') {
+			return "", true, false
+		}
+	}
+	return value, true, true
 }
 
 // finalized, already-parsed token record here after every request completes —
@@ -487,6 +563,10 @@ func (a *App) managementRegistration() ManagementRegistrationResponse {
 			{Method: http.MethodPost, Path: base + "/keys/reset-rpm", Description: "Reset one downstream CPA key RPM counter by id."},
 			{Method: http.MethodGet, Path: base + "/keys/usage", Description: "Per-alias usage breakdown for one downstream CPA key by id."},
 			{Method: http.MethodGet, Path: base + "/status", Description: "Show cpa-key-policy runtime status."},
+			{Method: http.MethodGet, Path: base + "/native-key-bindings", Description: "List CPA-native downstream API-key auth-file bindings."},
+			{Method: http.MethodPost, Path: base + "/native-key-bindings", Description: "Bind one CPA-native downstream API key to an auth-file group."},
+			{Method: http.MethodPatch, Path: base + "/native-key-bindings", Description: "Update, rotate, enable, or disable one CPA-native key binding."},
+			{Method: http.MethodDelete, Path: base + "/native-key-bindings", Description: "Delete one CPA-native key binding by id."},
 			{Method: http.MethodGet, Path: base + "/aliases", Description: "List the global alias mapping table."},
 			{Method: http.MethodPost, Path: base + "/aliases", Description: "Create or update a global alias mapping."},
 			{Method: http.MethodDelete, Path: base + "/aliases", Description: "Delete a global alias mapping by name."},
@@ -536,6 +616,14 @@ func (a *App) handleManagement(raw []byte) ([]byte, error) {
 		return OKEnvelope(a.keyUsage(idFromRequest(req.Query, req.Body)))
 	case req.Method == http.MethodGet && path == base+"/status":
 		return OKEnvelope(jsonResponse(http.StatusOK, a.store.Status()))
+	case req.Method == http.MethodGet && path == base+"/native-key-bindings":
+		return OKEnvelope(a.listNativeKeyBindings())
+	case req.Method == http.MethodPost && path == base+"/native-key-bindings":
+		return OKEnvelope(a.createNativeKeyBinding(req.Body))
+	case req.Method == http.MethodPatch && path == base+"/native-key-bindings":
+		return OKEnvelope(a.patchNativeKeyBinding(req.Body))
+	case req.Method == http.MethodDelete && path == base+"/native-key-bindings":
+		return OKEnvelope(a.deleteNativeKeyBinding(idFromRequest(req.Query, req.Body)))
 	case req.Method == http.MethodGet && path == base+"/aliases":
 		return OKEnvelope(jsonResponse(http.StatusOK, map[string]any{"aliases": a.store.AliasesSnapshot()}))
 	case req.Method == http.MethodPost && path == base+"/aliases":

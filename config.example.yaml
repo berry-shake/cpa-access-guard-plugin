@@ -1,17 +1,33 @@
 # Example CLIProxyAPI snippet for cpa-key-policy.
 # Replace placeholders. Do not commit real secrets or production hosts.
 
+# Required for native-key auth-file isolation. When enabled, CPA's
+# Antigravity credits fallback bypasses plugin Scheduler selection and can
+# choose an auth outside the binding group.
+quota-exceeded:
+  antigravity-credits: false
+
 plugins:
   enabled: true
   dir: "plugins"
   configs:
     cpa-key-policy:
       enabled: true
-      priority: 10
-      # Runtime source of truth once created (keys, aliases, classify rules, usage).
+      # CPA activates only the highest-priority Scheduler plugin. Keep this
+      # above any other Scheduler when auth-file isolation is required.
+      # Native-key bindings require the normal scheduler.pick path with
+      # caller_scope metadata. Do not run CPA with -home-jwt (Home scheduling),
+      # or use Alpha Search, Codex Live/Realtime, direct plugin-executor, or
+      # another special path that bypasses Scheduler or omits caller_scope.
+      priority: 100
+      # Runtime source of truth once created (keys, native-key bindings,
+      # aliases, classify rules, usage).
+      # Relative paths resolve against the CPA process working directory, not
+      # the plugin directory. Prefer an absolute, backed-up path in production.
       state_file: "cpa-key-policy-state.json"
 
-      # Prefer creating keys/aliases/classify rules via Web UI or Management API.
+      # Prefer creating keys/native bindings/aliases/classify rules via the Web
+      # UI or Management API.
       # Seed keys below are mainly for first boot when state_file does not exist.
       keys:
         - id: "team-a"
@@ -32,3 +48,32 @@ plugins:
           # …or reference global aliases created in the UI / POST /aliases:
           # aliases:
           #   - alias: "cheap-chat"
+
+      # Optional first-boot seed for keys that remain in CPA's top-level
+      # `api-keys`. Do not put the plaintext key here. The caller_scope is:
+      # SHA-256("cli-proxy-api:caller-scope:v1\\x00" + trim(api-key)), encoded
+      # as 64 lowercase hex characters. The Management API/UI computes this
+      # automatically and persists only the scope plus a redacted preview.
+      # Once state_file exists, its native_key_bindings array is authoritative.
+      # Prefer the API/UI: a YAML-seeded caller_scope can be returned by CPA's
+      # generic, Management-key-protected plugin-config endpoint.
+      # Keep this seed commented unless you have computed a real 64-character
+      # lowercase caller_scope. The Web UI / Management API is safer because it
+      # accepts the plaintext key once and computes the scope automatically.
+      # native_key_bindings:
+      #   - id: "native-client-a"
+      #     name: "Native Client A"
+      #     enabled: true
+      #     caller_scope: "0000000000000000000000000000000000000000000000000000000000000000" # synthetic example only
+      #     key_preview: "sk-nati...ent-a"
+      #     group: "classify:client-a"
+
+      # The custom group above should classify the exact Scheduler auth IDs
+      # allowed for this native key. Despite the historical field name,
+      # `filename` matches CPA's auth ID (which may include a subdirectory).
+      classify_rules:
+        - name: "client-a-auth-files"
+          field: "filename"
+          pattern: "^(?:tenant-a/codex-01\\.json|tenant-a/codex-02\\.json)$"
+          group: "client-a"
+          enabled: true

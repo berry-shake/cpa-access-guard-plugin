@@ -54,6 +54,13 @@ func TestGroupsForCredentialBuiltinWhenNoCustom(t *testing.T) {
 	}
 }
 
+func TestGroupsForCredentialAntigravityWithoutTierUsesSupported(t *testing.T) {
+	groups := GroupsForCredential("antigravity", nil, "ag.json", nil)
+	if !reflect.DeepEqual(groups, []string{"supported"}) {
+		t.Fatalf("untiered antigravity should use supported, got %v", groups)
+	}
+}
+
 func TestGroupsForCredentialNonTieredFlat(t *testing.T) {
 	groups := GroupsForCredential("claude", nil, "c.json", nil)
 	if !reflect.DeepEqual(groups, []string{""}) {

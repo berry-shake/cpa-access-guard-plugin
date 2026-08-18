@@ -893,6 +893,67 @@ td.strong { font-weight: 600; color: var(--text); }
 .map-tab.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
 .map-toolbar { display: flex; justify-content: flex-end; margin-bottom: 16px; }
 
+/* CPA top-level API-key bindings */
+.native-binding-notice {
+  display: flex; align-items: flex-start; gap: 12px;
+  margin-bottom: 16px; padding: 14px 16px;
+  background: var(--accent-soft); border: 1px solid var(--accent-ring);
+  border-radius: var(--r-md); font-size: 13px; line-height: 1.5;
+}
+.native-binding-notice-icon { color: var(--accent-3); font-size: 16px; line-height: 1.35; }
+.native-binding-notice strong { display: block; margin-bottom: 3px; }
+.native-binding-notice p { margin: 0; color: var(--muted); }
+.native-binding-notice p + p { margin-top: 4px; }
+.native-binding-notice .native-binding-unbind-warning,
+.native-binding-notice .native-binding-path-warning {
+  margin-top: 9px; padding-top: 9px; color: var(--danger); font-weight: 600;
+  border-top: 1px solid var(--danger-border);
+}
+.native-binding-empty {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 36px 20px; text-align: center;
+  background: var(--panel); border: 1px dashed var(--border-strong);
+  border-radius: var(--r-md); font-size: 13px;
+}
+.native-binding-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;
+}
+.native-binding-card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-md);
+  padding: 16px; transition: border-color var(--t-fast), opacity var(--t-fast);
+}
+.native-binding-card:hover { border-color: var(--border-hover); }
+.native-binding-card.disabled { opacity: .72; }
+.native-binding-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.native-binding-identity { display: flex; flex-direction: column; min-width: 0; }
+.native-binding-identity strong { font-size: 15px; overflow-wrap: anywhere; }
+.native-binding-identity .mono { margin-top: 2px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.native-binding-status {
+  flex: none; font-size: 11px; font-weight: 600; padding: 2px 8px;
+  border-radius: var(--r-full); border: 1px solid transparent;
+}
+.native-binding-status.enabled { color: var(--ok); background: var(--ok-soft); border-color: var(--ok-border); }
+.native-binding-status.disabled { color: var(--muted); background: var(--muted-bg); border-color: var(--border); }
+.native-binding-meta { display: grid; gap: 9px; margin: 16px 0; }
+.native-binding-meta > div { min-width: 0; }
+.native-binding-meta dt {
+  margin-bottom: 2px; color: var(--muted); font-size: 10px;
+  font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+}
+.native-binding-meta dd { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+.native-binding-group {
+  display: inline-block; padding: 2px 8px; background: var(--panel-2);
+  border: 1px solid var(--border); border-radius: var(--r-sm); font-size: 12px;
+}
+.native-binding-actions {
+  display: flex; align-items: center; gap: 8px; padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.native-binding-actions .switch { margin-right: auto; }
+.native-binding-editor .map-form-row input { box-sizing: border-box; background: var(--panel); }
+.native-binding-editor .map-form-row input:disabled { opacity: .65; cursor: not-allowed; }
+.native-binding-field-hint { margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+
 /* Alias cards grid */
 .alias-grid {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;
@@ -937,6 +998,16 @@ td.strong { font-weight: 600; color: var(--text); }
 }
 .rule-builtin-row .info-icon { font-size: 12px; color: var(--accent); }
 .rule-builtin-desc { font-size: 12px; color: var(--muted); margin-top: 8px; }
+.rule-preview-notice {
+  margin: 0 0 14px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--secondary-bg);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
 
 .rule-card {
   background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px;
@@ -1059,7 +1130,12 @@ td.strong { font-weight: 600; color: var(--text); }
 .map-form-foot { display: flex; gap: 12px; margin-top: 24px; }
 
 @media (max-width: 640px) {
+  .map-page { padding: 16px 0; }
+  .map-tabs { overflow-x: auto; }
+  .map-tab { flex: 0 0 auto; padding: 8px 14px; }
   .alias-grid { grid-template-columns: 1fr; }
+  .native-binding-grid { grid-template-columns: 1fr; }
+  .native-binding-actions { flex-wrap: wrap; }
   .rule-list { max-width: 100%; }
   .map-form-page { padding: 16px; }
 }

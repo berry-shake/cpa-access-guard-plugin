@@ -193,4 +193,35 @@ export interface CredentialDescriptor {
 export interface ClassifyPreviewResponse {
   groups: Record<string, string[]>; // group name → credential IDs
   group_counts: Record<string, number>; // group name → count
+  rule_matches: Record<string, string[]>; // rule name → that rule's own credential IDs
+}
+
+// NativeKeyBinding maps a CPA top-level `api-keys` entry to one credential
+// group. The plaintext key and derived caller_scope are deliberately absent
+// from management responses; only a redacted preview is exposed to the UI.
+export interface NativeKeyBinding {
+  id: string;
+  name: string;
+  enabled: boolean;
+  key_preview: string;
+  group: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface NativeKeyBindingCreateRequest {
+  id: string;
+  name?: string;
+  enabled?: boolean;
+  key: string;
+  group: string;
+}
+
+export interface NativeKeyBindingUpdateRequest {
+  id: string;
+  name?: string;
+  enabled?: boolean;
+  // Empty/omitted keeps the currently bound top-level API key.
+  key?: string;
+  group?: string;
 }

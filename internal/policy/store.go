@@ -19,8 +19,13 @@ type Store struct {
 	statePath  string
 	keys       map[string]*KeyConfig
 	keysByHash map[string]*KeyConfig
-	limiter    *RateLimiter
-	usage      *usageLedger
+	// nativeKeyBindings are indexed independently from plugin-owned Keys.
+	// They authorize a CPA-native caller scope to one scheduler group, but do
+	// not participate in frontend authentication.
+	nativeKeyBindings        map[string]*NativeKeyBinding
+	nativeKeyBindingsByScope map[string]*NativeKeyBinding
+	limiter                  *RateLimiter
+	usage                    *usageLedger
 	// flusher for periodically persisting the usage ledger to the state file.
 	flusher *usageFlusher
 	// aliases is the global alias mapping table from config.yaml. Used to
@@ -77,13 +82,15 @@ type AuthDecision struct {
 
 func NewStore() *Store {
 	return &Store{
-		enabled:      DefaultConfig().Enabled,
-		keys:         make(map[string]*KeyConfig),
-		keysByHash:   make(map[string]*KeyConfig),
-		limiter:      NewRateLimiter(),
-		usage:        newUsageLedger(time.Now),
-		rrCounters:   make(map[string]int),
-		pendingPicks: make(map[string][]pendingPick),
+		enabled:                  DefaultConfig().Enabled,
+		keys:                     make(map[string]*KeyConfig),
+		keysByHash:               make(map[string]*KeyConfig),
+		nativeKeyBindings:        make(map[string]*NativeKeyBinding),
+		nativeKeyBindingsByScope: make(map[string]*NativeKeyBinding),
+		limiter:                  NewRateLimiter(),
+		usage:                    newUsageLedger(time.Now),
+		rrCounters:               make(map[string]int),
+		pendingPicks:             make(map[string][]pendingPick),
 	}
 }
 
@@ -117,11 +124,21 @@ func (s *Store) Configure(cfg Config) error {
 	s.StopUsageFlusher()
 
 	keys := cfg.Keys
+	nativeBindings := cfg.NativeKeyBindings
 	var loadedUsage map[string]*UsageState
 	firstBoot := false
+	legacyNativeBindings := false
 	if state, errLoad := LoadState(statePath); errLoad == nil {
 		keys = state.Keys
 		loadedUsage = state.Usage
+		if state.NativeKeyBindings != nil {
+			nativeBindings = state.NativeKeyBindings
+		} else {
+			// Legacy states predate native_key_bindings. Bootstrap once from
+			// config.yaml, then rewrite the state with an explicit array so a
+			// later deletion cannot be resurrected from config.
+			legacyNativeBindings = true
+		}
 		// If config.yaml has no global alias table, fall back to the one
 		// persisted in state (so state-only reloads resolve key alias refs).
 		stateAliases := cfg.Aliases
@@ -134,11 +151,12 @@ func (s *Store) Configure(cfg Config) error {
 		}
 		// Validate state keys against the global alias table. normalizeConfig
 		// also auto-migrates any state keys still using per-key Models.
-		merged := Config{Enabled: cfg.Enabled, StateFile: cfg.StateFile, Keys: keys, Aliases: stateAliases, ClassifyRules: stateRules}
+		merged := Config{Enabled: cfg.Enabled, StateFile: cfg.StateFile, Keys: keys, NativeKeyBindings: nativeBindings, Aliases: stateAliases, ClassifyRules: stateRules}
 		if errNorm := normalizeConfig(&merged); errNorm != nil {
 			return fmt.Errorf("load state: %w", errNorm)
 		}
 		keys = merged.Keys
+		nativeBindings = merged.NativeKeyBindings
 		// Propagate the resolved alias table back to cfg for downstream use.
 		cfg.Aliases = merged.Aliases
 		cfg.ClassifyRules = merged.ClassifyRules
@@ -173,6 +191,19 @@ func (s *Store) Configure(cfg Config) error {
 		}
 		next[item.ID] = &item
 	}
+	nextNative := make(map[string]*NativeKeyBinding, len(nativeBindings))
+	nextNativeByScope := make(map[string]*NativeKeyBinding, len(nativeBindings))
+	for i := range nativeBindings {
+		item := nativeBindings[i]
+		if item.CreatedAt.IsZero() {
+			item.CreatedAt = now
+		}
+		if item.UpdatedAt.IsZero() {
+			item.UpdatedAt = item.CreatedAt
+		}
+		nextNative[item.ID] = &item
+		nextNativeByScope[item.CallerScope] = &item
+	}
 
 	s.mu.Lock()
 	// Stop any prior flusher before rebuilding keys/state path. (StopUsageFlusher
@@ -194,6 +225,8 @@ func (s *Store) Configure(cfg Config) error {
 	}
 	s.classifyRules = cfg.ClassifyRules
 	s.keys = next
+	s.nativeKeyBindings = nextNative
+	s.nativeKeyBindingsByScope = nextNativeByScope
 	s.rebuildKeysByHashLocked()
 	s.rrCounters = make(map[string]int)
 	s.pendingPicks = make(map[string][]pendingPick)
@@ -216,14 +249,14 @@ func (s *Store) Configure(cfg Config) error {
 	var baseUsage map[string]*UsageState
 	var baseAliases []AliasMapping
 	var baseRules []ClassifyRule
-	if firstBoot {
+	if firstBoot || legacyNativeBindings {
 		baseKeys = s.keysSnapshotLocked()
 		baseUsage = s.usageSnapshotLocked()
 		baseAliases = s.aliasesSnapshotLocked()
 		baseRules = s.classifyRulesSnapshotLocked()
 	}
 	s.mu.Unlock()
-	if firstBoot {
+	if firstBoot || legacyNativeBindings {
 		if errSave := s.saveState(statePath, baseKeys, baseUsage, baseAliases, baseRules); errSave != nil {
 			return fmt.Errorf("seed state: %w", errSave)
 		}
@@ -1308,9 +1341,20 @@ func (s *Store) FlushUsage() error {
 }
 
 func (s *Store) saveState(path string, keys []KeyConfig, usage map[string]*UsageState, aliases []AliasMapping, rules []ClassifyRule) error {
+	// All callers must release s.mu before entering saveState. Taking the
+	// binding snapshot here keeps every full-state mutation on the same path
+	// without introducing an s.mu -> persistMu / persistMu -> s.mu inversion.
+	nativeBindings := s.NativeKeyBindingsSnapshot()
+	return s.saveStateWithNativeBindings(path, keys, usage, aliases, rules, nativeBindings)
+}
+
+// saveStateWithNativeBindings writes an explicitly supplied native binding
+// snapshot. Native binding mutations use it to persist a proposed policy
+// before publishing that policy to live scheduler lookups.
+func (s *Store) saveStateWithNativeBindings(path string, keys []KeyConfig, usage map[string]*UsageState, aliases []AliasMapping, rules []ClassifyRule, nativeBindings []NativeKeyBinding) error {
 	s.persistMu.Lock()
 	defer s.persistMu.Unlock()
-	return SaveState(path, keys, usage, aliases, rules)
+	return SaveState(path, keys, usage, aliases, rules, nativeBindings)
 }
 
 func (s *Store) saveUsageOnly(path string, usage map[string]*UsageState) error {
@@ -1379,6 +1423,13 @@ func (s *Store) Status() map[string]any {
 	enabled := s.enabled
 	statePath := s.statePath
 	keys := s.keysSnapshotLocked()
+	nativeBindingCount := len(s.nativeKeyBindings)
+	nativeBindingEnabledCount := 0
+	for _, binding := range s.nativeKeyBindings {
+		if binding.Enabled {
+			nativeBindingEnabledCount++
+		}
+	}
 	limiter := s.limiter
 	usage := s.usage
 	s.mu.RUnlock()
@@ -1387,11 +1438,13 @@ func (s *Store) Status() map[string]any {
 		rpmUsage = limiter.Snapshot()
 	}
 	out := map[string]any{
-		"enabled":    enabled,
-		"state_file": statePath,
-		"key_count":  len(keys),
-		"rpm_usage":  rpmUsage,
-		"usage":      usageSummaryForKeys(usage, keys),
+		"enabled":                          enabled,
+		"state_file":                       statePath,
+		"key_count":                        len(keys),
+		"native_key_binding_count":         nativeBindingCount,
+		"native_key_binding_enabled_count": nativeBindingEnabledCount,
+		"rpm_usage":                        rpmUsage,
+		"usage":                            usageSummaryForKeys(usage, keys),
 	}
 	return out
 }
