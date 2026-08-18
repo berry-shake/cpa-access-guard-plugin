@@ -150,6 +150,14 @@ a:hover { color: var(--accent-2); text-decoration: underline; }
   height: 56px; display: flex; align-items: center; justify-content: space-between;
   gap: 16px;
 }
+/* Embedded in the CPA panel iframe: the panel floats an action pill
+ * (refresh / language / theme / logout) over the viewport's top-right,
+ * ~270px wide including its edge margin. Reserve just enough right padding
+ * so the nav links stay visible; on wide viewports the centered 1200px
+ * container already clears the pill and the calc clamps to 0. */
+:root.embedded .topnav-inner {
+  padding-right: clamp(0px, calc(270px - (100vw - 1200px) / 2), 246px);
+}
 .topnav-brand { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
 .topnav-brand .tn-title { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; color: var(--text); }
 .topnav-brand .tn-sub { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -16,6 +16,19 @@ initThemeSync();
 // language. Falls back to browser default / zh-CN when standalone.
 initLangSync();
 
+// Mark the document when this UI runs inside the CPA panel's iframe. The
+// panel overlays a floating action pill at the viewport's top-right that
+// would otherwise cover the topnav links, so CSS reserves space for it only
+// in embedded mode (cross-origin access to window.top throws — treat that as
+// embedded too).
+try {
+  if (window.self !== window.top) {
+    document.documentElement.classList.add("embedded");
+  }
+} catch {
+  document.documentElement.classList.add("embedded");
+}
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <HashRouter>
