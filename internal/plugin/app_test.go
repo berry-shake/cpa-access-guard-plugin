@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"cpa-key-policy/internal/policy"
+	"cpa-access-guard/internal/policy"
 )
 
 func nearly(a, b float64) bool {
@@ -153,7 +153,7 @@ func TestAppManagementCreateAndRotate(t *testing.T) {
 	createBody := []byte(`{"id":"team-b","models":[{"alias":"sonnet","provider":"claude","target_model":"claude-sonnet"}]}`)
 	req, _ := json.Marshal(ManagementRequest{
 		Method: http.MethodPost,
-		Path:   "/v0/management/plugins/cpa-key-policy/keys",
+		Path:   "/v0/management/plugins/cpa-access-guard/keys",
 		Body:   createBody,
 	})
 	raw, err := app.HandleMethod(MethodManagementHandle, req)
@@ -170,7 +170,7 @@ func TestAppManagementCreateAndRotate(t *testing.T) {
 
 	rotateReq, _ := json.Marshal(ManagementRequest{
 		Method: http.MethodPost,
-		Path:   "/v0/management/plugins/cpa-key-policy/keys/rotate",
+		Path:   "/v0/management/plugins/cpa-access-guard/keys/rotate",
 		Query:  url.Values{"id": {"team-b"}},
 	})
 	raw, err = app.HandleMethod(MethodManagementHandle, rotateReq)
@@ -238,7 +238,7 @@ func TestAppKeysListExposesUsageAndLimits(t *testing.T) {
 	app, _ := configureTestApp(t)
 	req, _ := json.Marshal(ManagementRequest{
 		Method: http.MethodGet,
-		Path:   "/v0/management/plugins/cpa-key-policy/keys",
+		Path:   "/v0/management/plugins/cpa-access-guard/keys",
 	})
 	raw, err := app.HandleMethod(MethodManagementHandle, req)
 	if err != nil {
@@ -287,7 +287,7 @@ func TestAppPatchKeySetsLimits(t *testing.T) {
 	})
 	req, _ := json.Marshal(ManagementRequest{
 		Method: http.MethodPatch,
-		Path:   "/v0/management/plugins/cpa-key-policy/keys",
+		Path:   "/v0/management/plugins/cpa-access-guard/keys",
 		Body:   patchBody,
 	})
 	raw, err := app.HandleMethod(MethodManagementHandle, req)
@@ -340,7 +340,7 @@ func TestHandleManagementServesResourceUI(t *testing.T) {
 	app := NewApp()
 	req, _ := json.Marshal(ManagementRequest{
 		Method: http.MethodGet,
-		Path:   "/v0/resource/plugins/cpa-key-policy/index.html",
+		Path:   "/v0/resource/plugins/cpa-access-guard/index.html",
 	})
 	raw, err := app.HandleMethod(MethodManagementHandle, req)
 	if err != nil {
@@ -362,7 +362,7 @@ func TestHandleManagementResourceUnknownPath404(t *testing.T) {
 	app := NewApp()
 	req, _ := json.Marshal(ManagementRequest{
 		Method: http.MethodGet,
-		Path:   "/v0/resource/plugins/cpa-key-policy/assets/app.js",
+		Path:   "/v0/resource/plugins/cpa-access-guard/assets/app.js",
 	})
 	raw, err := app.HandleMethod(MethodManagementHandle, req)
 	if err != nil {
@@ -639,7 +639,7 @@ func TestManagementKeyUsageEndpoint(t *testing.T) {
 
 	req, _ := json.Marshal(ManagementRequest{
 		Method: http.MethodGet,
-		Path:   "/v0/management/plugins/cpa-key-policy/keys/usage",
+		Path:   "/v0/management/plugins/cpa-access-guard/keys/usage",
 		Query:  url.Values{"id": {"priced"}},
 	})
 	raw, err := app.HandleMethod(MethodManagementHandle, req)
@@ -675,7 +675,7 @@ func TestManagementKeyUsageEndpoint(t *testing.T) {
 	// Missing id → 400.
 	badReq, _ := json.Marshal(ManagementRequest{
 		Method: http.MethodGet,
-		Path:   "/v0/management/plugins/cpa-key-policy/keys/usage",
+		Path:   "/v0/management/plugins/cpa-access-guard/keys/usage",
 	})
 	badResp := managementResponseFromEnvelope(t, mustHandle(t, app, MethodManagementHandle, badReq))
 	if badResp.StatusCode != http.StatusBadRequest {
@@ -685,7 +685,7 @@ func TestManagementKeyUsageEndpoint(t *testing.T) {
 	// Unknown id → 404.
 	nopeReq, _ := json.Marshal(ManagementRequest{
 		Method: http.MethodGet,
-		Path:   "/v0/management/plugins/cpa-key-policy/keys/usage",
+		Path:   "/v0/management/plugins/cpa-access-guard/keys/usage",
 		Query:  url.Values{"id": {"nope"}},
 	})
 	nopeResp := managementResponseFromEnvelope(t, mustHandle(t, app, MethodManagementHandle, nopeReq))

@@ -1,4 +1,4 @@
-# cpa-key-policy
+# CPA Access Guard
 
 Downstream **API key policy** plugin for [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI).
 
@@ -6,9 +6,10 @@ In plain words: you issue your own `cpa_…` keys to clients. Each key only sees
 
 | | |
 |---|---|
-| **Repo** | [berry-shake/cpa-key-policy-plugin](https://github.com/berry-shake/cpa-key-policy-plugin) |
+| **Repo** | [berry-shake/cpa-access-guard-plugin](https://github.com/berry-shake/cpa-access-guard-plugin) |
 | **License** | MIT |
-| **Install** | Build this fork from source for now; the official Plugins Store entry still points to the older upstream release |
+| **Install** | Build from source until the first CPA Access Guard GitHub release is published |
+| **Lineage** | Derived from [origin652/cpa-plugin-key-policy](https://github.com/origin652/cpa-plugin-key-policy) under the MIT license |
 | **中文说明** | [README.zh-CN.md](./README.zh-CN.md) |
 
 ---
@@ -147,7 +148,7 @@ Native-key bindings are deliberately separate from plugin-owned downstream keys:
 
 | Key type | Authentication owner | What this plugin enforces |
 |----------|----------------------|---------------------------|
-| Plugin key (`cpa_…` or a plugin-owned custom `sk-…`) | `cpa-key-policy` | model/alias policy, RPM, budgets, billing, and optional credential group |
+| Plugin key (`cpa_…` or a plugin-owned custom `sk-…`) | `cpa-access-guard` | model/alias policy, RPM, budgets, billing, and optional credential group |
 | CPA top-level `api-keys` entry | CPA's built-in config API-key provider | **auth-file group only**; no automatic model/RPM/budget policy |
 
 After CPA authenticates a native key, it derives a stable one-way `caller_scope`. The plugin persists only that scope, a redacted preview, and the target group — never the plaintext top-level key:
@@ -168,7 +169,7 @@ Requirements and behavior:
 - Unbound native keys and disabled bindings keep CPA's existing unrestricted scheduling behavior.
 - Top-level config and plugin state are not updated atomically. For a strict-isolation rotation, create a second temporary binding for the new key, add and test that key in CPA, remove the old top-level key, and only then delete the old binding.
 - Use a high-entropy native key and do not reuse the same plaintext as a plugin-owned key or another authentication principal. CPA's `caller_scope` identifies the principal text, but does not include the authentication-provider name.
-- CPA activates only the highest-priority Scheduler plugin. `cpa-key-policy` must be the winning Scheduler for isolation to run.
+- CPA activates only the highest-priority Scheduler plugin. `cpa-access-guard` must be the winning Scheduler for isolation to run.
 - CPA may narrow candidates to the highest auth-priority tier before invoking the plugin. Keep isolated pools at compatible priorities so an out-of-group high-priority auth does not hide the intended pool and cause `auth_not_found`.
 - Native-key isolation is enforced only on CPA's normal AuthManager / `scheduler.pick` path when the request forwards `caller_scope` to the Scheduler. **CPA Home scheduling currently bypasses plugin Scheduler selection**; do not start CPA with `-home-jwt` when relying on these bindings. Direct plugin-executor, Alpha Search (`/v1/alpha/search` and `/backend-api/codex/alpha/search`), all Codex Live/Realtime routes (`/v1/live*` and `/v1/realtime*`), and any other route that bypasses `scheduler.pick` or omits `caller_scope` are unsupported.
 - Explicitly set CPA's top-level `quota-exceeded.antigravity-credits: false`. When enabled, that last-resort Antigravity credits path bypasses plugin Scheduler selection and enumerates Antigravity credentials directly, so a request can land outside the bound group. The current plugin ABI cannot enforce a binding inside that fallback.
@@ -207,13 +208,18 @@ make test
 make build-linux          # builds web UI, then linux amd64/arm64 .so
 # or
 make web-build
+mkdir -p dist/linux/amd64
 GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -buildvcs=false -tags cshared \
-  -buildmode=c-shared -o dist/cpa-key-policy_linux_amd64.so ./cmd/cpa-key-policy
+  -buildmode=c-shared -o dist/linux/amd64/cpa-access-guard.so ./cmd/cpa-access-guard
 ```
 
 On Windows, build the `.so` via WSL/Linux. `go test ./...` uses a non-cgo stub so unit tests run without a shared-library toolchain.
 
-Copy the `.so` into CPA `plugins.dir` and enable the plugin in config.
+Copy the library into CPA's matching platform directory, for example
+`plugins/linux/amd64/cpa-access-guard.so`, and enable the plugin in config.
+The library basename must be `cpa-access-guard` (optionally
+`cpa-access-guard-v<version>`); putting `_linux_amd64` in the basename changes
+the plugin ID and prevents `plugins.configs.cpa-access-guard` from matching it.
 
 ---
 
@@ -231,16 +237,17 @@ plugins:
   enabled: true
   dir: "plugins"
   configs:
-    cpa-key-policy:
+    cpa-access-guard:
       enabled: true
       priority: 100 # must beat other Scheduler plugins for credential isolation
-      state_file: "cpa-key-policy-state.json"
+      state_file: "cpa-access-guard-state.json"
 ```
 
 Notes:
 
 - If `state_file` exists, it is the source of truth for keys / native-key bindings / aliases / classify rules / usage.
-- A relative `state_file` is resolved against the **CPA process working directory**, not the plugin `.so` directory. Use an absolute path in production and ensure the CPA user can write it. `GET /v0/management/plugins/cpa-key-policy/status` reports the resolved `state_file`.
+- A relative `state_file` is resolved against the **CPA process working directory**, not the plugin `.so` directory. Use an absolute path in production and ensure the CPA user can write it. `GET /v0/management/plugins/cpa-access-guard/status` reports the resolved `state_file`.
+- When upgrading from `cpa-key-policy` while relying on its default relative state filename, CPA Access Guard copies a valid sibling `cpa-key-policy-state.json` to `cpa-access-guard-state.json` once. The legacy file is retained as a recovery backup. Explicit `state_file` paths are never auto-migrated; copy those files deliberately while CPA is stopped.
 - The plugin creates the state directory with mode `0700` and atomically writes the file with mode `0600`. Back it up, and never place a plaintext top-level API key in it manually.
 - Prefer creating keys, native bindings, and aliases in the **Web UI** or Management API; seed YAML is mainly for first boot.
 - Never commit real key hashes, management secrets, or live host URLs into public docs.
@@ -252,7 +259,7 @@ Notes:
 Embedded in the plugin. After load, open:
 
 ```text
-http://<your-cpa-host>:<api-port>/v0/resource/plugins/cpa-key-policy/index.html
+http://<your-cpa-host>:<api-port>/v0/resource/plugins/cpa-access-guard/index.html
 ```
 
 Login with CPA **management** secret (`remote-management.secret-key` / management password). The secret stays in memory only (not `localStorage`); refresh → re-login.
@@ -307,7 +314,7 @@ Exact paths (no path templates). Auth: CPA management bearer token.
 Create a binding (the plaintext key appears only in this request; neither it nor the full caller scope is returned):
 
 ```bash
-curl -X POST "$CPA/v0/management/plugins/cpa-key-policy/native-key-bindings" \
+curl -X POST "$CPA/v0/management/plugins/cpa-access-guard/native-key-bindings" \
   -H "Authorization: Bearer $MANAGEMENT_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -322,7 +329,7 @@ curl -X POST "$CPA/v0/management/plugins/cpa-key-policy/native-key-bindings" \
 Rotate the key or change the binding:
 
 ```bash
-curl -X PATCH "$CPA/v0/management/plugins/cpa-key-policy/native-key-bindings" \
+curl -X PATCH "$CPA/v0/management/plugins/cpa-access-guard/native-key-bindings" \
   -H "Authorization: Bearer $MANAGEMENT_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -344,7 +351,7 @@ Omit `key` (or send an empty string) in PATCH to keep the existing scope. Direct
 Create key (plain key returned **once**):
 
 ```bash
-curl -X POST "$CPA/v0/management/plugins/cpa-key-policy/keys" \
+curl -X POST "$CPA/v0/management/plugins/cpa-access-guard/keys" \
   -H "Authorization: Bearer $MANAGEMENT_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -360,7 +367,7 @@ curl -X POST "$CPA/v0/management/plugins/cpa-key-policy/keys" \
 Create a multi-target alias:
 
 ```bash
-curl -X POST "$CPA/v0/management/plugins/cpa-key-policy/aliases" \
+curl -X POST "$CPA/v0/management/plugins/cpa-access-guard/aliases" \
   -H "Authorization: Bearer $MANAGEMENT_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -401,7 +408,7 @@ Per-key `allow_models_endpoint`: **binary** — deny (401) or full global list. 
 ## Setup checklist
 
 1. Build / install the `.so` into CPA `plugins.dir`.
-2. Enable `plugins` + `cpa-key-policy` in CPA config; set `state_file`.
+2. Enable `plugins` + `cpa-access-guard` in CPA config; set `state_file`.
 3. Open the Web UI with the management secret.
 4. (Optional) Define **classify rules** if you need custom credential buckets.
 5. (Optional) Bind existing CPA top-level native keys to those groups.

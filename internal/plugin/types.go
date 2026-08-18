@@ -53,8 +53,8 @@ const (
 )
 
 const (
-	PluginID   = "cpa-key-policy"
-	PluginName = "cpa-key-policy"
+	PluginID   = "cpa-access-guard"
+	PluginName = "CPA Access Guard"
 	Version    = "0.5.0"
 )
 

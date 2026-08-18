@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"cpa-key-policy/internal/policy"
+	"cpa-access-guard/internal/policy"
 )
 
 // nativeKeyBindingWriteRequest is used by both create and patch operations.

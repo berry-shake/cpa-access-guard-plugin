@@ -1,4 +1,4 @@
-// Shapes mirrored from the cpa-key-policy plugin (internal/policy/config.go)
+// Shapes mirrored from CPA Access Guard (internal/policy/config.go).
 // and CPA management responses. Only the fields the UI needs are declared.
 
 export interface ModelRule {

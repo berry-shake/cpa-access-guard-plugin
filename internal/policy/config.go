@@ -14,6 +14,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	defaultStateFileName       = "cpa-access-guard-state.json"
+	legacyDefaultStateFileName = "cpa-key-policy-state.json"
+)
+
 type Config struct {
 	Enabled   bool        `yaml:"enabled" json:"enabled"`
 	StateFile string      `yaml:"state_file" json:"state_file"`
@@ -294,7 +299,7 @@ type State struct {
 func DefaultConfig() Config {
 	return Config{
 		Enabled:   true,
-		StateFile: "cpa-key-policy-state.json",
+		StateFile: defaultStateFileName,
 	}
 }
 
@@ -651,6 +656,44 @@ func ResolveStatePath(path string) (string, error) {
 		return "", err
 	}
 	return abs, nil
+}
+
+// migrateLegacyDefaultStateFile preserves state for installations that relied
+// on the pre-rename default filename. It copies rather than moves the legacy
+// file, leaving a recovery backup while all future writes use the new name.
+// Explicit custom state_file paths are never considered for this migration.
+func migrateLegacyDefaultStateFile(requestedPath, resolvedPath string) error {
+	requestedPath = strings.TrimSpace(requestedPath)
+	if requestedPath == "" {
+		requestedPath = defaultStateFileName
+	}
+	if requestedPath != defaultStateFileName {
+		return nil
+	}
+	if _, err := os.Stat(resolvedPath); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect renamed state file: %w", err)
+	}
+
+	legacyPath := filepath.Join(filepath.Dir(resolvedPath), legacyDefaultStateFileName)
+	if filepath.Clean(legacyPath) == filepath.Clean(resolvedPath) {
+		return nil
+	}
+	raw, err := os.ReadFile(legacyPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read legacy state file: %w", err)
+	}
+	if _, err = LoadState(legacyPath); err != nil {
+		return fmt.Errorf("validate legacy state file: %w", err)
+	}
+	if err = atomicWriteStateFile(resolvedPath, raw); err != nil {
+		return fmt.Errorf("copy legacy state file to renamed path: %w", err)
+	}
+	return nil
 }
 
 func LoadState(path string) (*State, error) {

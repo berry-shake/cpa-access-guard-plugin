@@ -1,4 +1,4 @@
-# Example CLIProxyAPI snippet for cpa-key-policy.
+# Example CLIProxyAPI snippet for CPA Access Guard.
 # Replace placeholders. Do not commit real secrets or production hosts.
 
 # Required for native-key auth-file isolation. When enabled, CPA's
@@ -11,7 +11,7 @@ plugins:
   enabled: true
   dir: "plugins"
   configs:
-    cpa-key-policy:
+    cpa-access-guard:
       enabled: true
       # CPA activates only the highest-priority Scheduler plugin. Keep this
       # above any other Scheduler when auth-file isolation is required.
@@ -24,7 +24,7 @@ plugins:
       # aliases, classify rules, usage).
       # Relative paths resolve against the CPA process working directory, not
       # the plugin directory. Prefer an absolute, backed-up path in production.
-      state_file: "cpa-key-policy-state.json"
+      state_file: "cpa-access-guard-state.json"
 
       # Prefer creating keys/native bindings/aliases/classify rules via the Web
       # UI or Management API.

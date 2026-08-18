@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"cpa-key-policy/internal/policy"
+	"cpa-access-guard/internal/policy"
 )
 
 // --- Alias mapping management handlers ---

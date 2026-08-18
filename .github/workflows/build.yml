@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 env:
-  PLUGIN_ID: cpa-key-policy
+  PLUGIN_ID: cpa-access-guard
 
 jobs:
   test:
@@ -104,7 +104,7 @@ jobs:
           CGO_ENABLED=1 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
             go build -trimpath -buildvcs=false -tags cshared -buildmode=c-shared \
               -ldflags "-s -w" \
-              -o "dist/${LIB_NAME}" ./cmd/cpa-key-policy
+              -o "dist/${LIB_NAME}" ./cmd/cpa-access-guard
           rm -f "dist/${PLUGIN_ID}.h"
 
       - name: Package plugin
@@ -156,7 +156,7 @@ jobs:
         env:
           GOFLAGS: -trimpath -buildmode=c-shared
         with:
-          dir: ./cmd/cpa-key-policy
+          dir: ./cmd/cpa-access-guard
           packages: .
           targets: windows-arm64
           out-dir: dist/windows-arm64

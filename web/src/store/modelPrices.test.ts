@@ -115,7 +115,7 @@ describe("getPriceTable caching", () => {
     expect(lookupPrice(t2, "gpt-4o")).not.toBeNull();
 
     // cache written to sessionStorage as a stamped envelope
-    const raw = sessionStorage.getItem("cpa-key-policy:litellm-prices");
+    const raw = sessionStorage.getItem("cpa-access-guard:litellm-prices");
     expect(raw).not.toBeNull();
     const env = JSON.parse(raw!);
     expect(typeof env.fetchedAt).toBe("number");
@@ -127,7 +127,7 @@ describe("getPriceTable caching", () => {
     const t = await getPriceTable();
     expect(t).toBeNull();
     // failed fetch must not write a cache
-    expect(sessionStorage.getItem("cpa-key-policy:litellm-prices")).toBeNull();
+    expect(sessionStorage.getItem("cpa-access-guard:litellm-prices")).toBeNull();
   });
 
   it("returns null when fetch throws (network)", async () => {
@@ -142,7 +142,7 @@ describe("getPriceTable caching", () => {
       fetchedAt: Date.now() - 25 * 60 * 60 * 1000, // 25h ago
       table: [["stale-model", { input_price_per_million: 0, output_price_per_million: 0, cache_read_price_per_million: 0 }]],
     };
-    sessionStorage.setItem("cpa-key-policy:litellm-prices", JSON.stringify(expired));
+    sessionStorage.setItem("cpa-access-guard:litellm-prices", JSON.stringify(expired));
 
     vi.stubGlobal(
       "fetch",

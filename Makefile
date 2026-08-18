@@ -1,5 +1,5 @@
-PLUGIN := cpa-key-policy
-PKG := ./cmd/cpa-key-policy
+PLUGIN := cpa-access-guard
+PKG := ./cmd/cpa-access-guard
 DIST := dist
 WEB := web
 EMBED_INDEX := internal/plugin/web/dist/index.html
@@ -15,12 +15,12 @@ web-build:
 	cp $(WEB)/dist/index.html $(EMBED_INDEX)
 
 build-linux-amd64: web-build
-	mkdir -p $(DIST)
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -buildvcs=false -tags cshared -buildmode=c-shared -o $(DIST)/$(PLUGIN)_linux_amd64.so $(PKG)
+	mkdir -p $(DIST)/linux/amd64
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -buildvcs=false -tags cshared -buildmode=c-shared -o $(DIST)/linux/amd64/$(PLUGIN).so $(PKG)
 
 build-linux-arm64: web-build
-	mkdir -p $(DIST)
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=1 go build -buildvcs=false -tags cshared -buildmode=c-shared -o $(DIST)/$(PLUGIN)_linux_arm64.so $(PKG)
+	mkdir -p $(DIST)/linux/arm64
+	GOOS=linux GOARCH=arm64 CGO_ENABLED=1 go build -buildvcs=false -tags cshared -buildmode=c-shared -o $(DIST)/linux/arm64/$(PLUGIN).so $(PKG)
 
 build-linux: build-linux-amd64 build-linux-arm64
 

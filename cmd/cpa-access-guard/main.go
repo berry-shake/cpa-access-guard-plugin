@@ -41,7 +41,7 @@ import "C"
 import (
 	"unsafe"
 
-	"cpa-key-policy/internal/plugin"
+	"cpa-access-guard/internal/plugin"
 )
 
 var app = plugin.NewApp()

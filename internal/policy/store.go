@@ -122,6 +122,9 @@ func (s *Store) Configure(cfg Config) error {
 	// path that skipped persist) would be lost when LoadState reads a stale disk
 	// snapshot. StopUsageFlusher stops the background loop and flushes once.
 	s.StopUsageFlusher()
+	if err := migrateLegacyDefaultStateFile(cfg.StateFile, statePath); err != nil {
+		return err
+	}
 
 	keys := cfg.Keys
 	nativeBindings := cfg.NativeKeyBindings

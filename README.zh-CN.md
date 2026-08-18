@@ -1,4 +1,4 @@
-# cpa-key-policy（中文说明）
+# CPA Access Guard（中文说明）
 
 面向 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 的**下游 API Key 策略插件**。
 
@@ -6,9 +6,10 @@
 
 | | |
 |---|---|
-| **仓库** | [berry-shake/cpa-key-policy-plugin](https://github.com/berry-shake/cpa-key-policy-plugin) |
+| **仓库** | [berry-shake/cpa-access-guard-plugin](https://github.com/berry-shake/cpa-access-guard-plugin) |
 | **协议** | MIT |
-| **安装** | 此 fork 的功能目前需从源码编译；官方插件商店条目仍指向旧上游版本 |
+| **安装** | 首个 CPA Access Guard GitHub Release 发布前请从源码编译 |
+| **沿袭** | 基于 MIT 协议的 [origin652/cpa-plugin-key-policy](https://github.com/origin652/cpa-plugin-key-policy) 演进而来 |
 | **English** | [README.md](./README.md) |
 
 ---
@@ -145,7 +146,7 @@ storage  authorization  auth_header  proxy_url
 
 | 类型 | 谁负责鉴权 | 本插件负责什么 |
 |------|------------|----------------|
-| 插件 Key（`cpa_…` 或插件托管的自定义 `sk-…`） | `cpa-key-policy` | 模型 / Alias、RPM、额度、计费和可选凭证组 |
+| 插件 Key（`cpa_…` 或插件托管的自定义 `sk-…`） | `cpa-access-guard` | 模型 / Alias、RPM、额度、计费和可选凭证组 |
 | CPA 顶层 `api-keys` | CPA 原生 config API-key provider | **只限制认证文件组**；不自动增加模型、RPM 或额度策略 |
 
 CPA 原生鉴权成功后会产生稳定、不可逆的 `caller_scope`。插件只保存这个 scope、脱敏预览与目标组，不保存顶层 Key 明文：
@@ -166,7 +167,7 @@ CPA 原生鉴权成功后会产生稳定、不可逆的 `caller_scope`。插件�
 - 未绑定或禁用绑定的原生 Key 保持 CPA 原来的自由调度行为。
 - CPA 顶层配置与插件 state 不能原子更新。严格隔离的安全轮换方式是：先为新 Key 新建第二条临时绑定，再把新 Key 加入 CPA 并验证，随后删除旧顶层 Key，最后删除旧绑定。
 - 顶层 Key 应使用高熵随机值，并且不要与插件托管 Key 或其它认证来源的 principal 重用同一明文。CPA 的 `caller_scope` 标识的是 principal 文本，不包含认证 provider 名称。
-- CPA 只启用优先级最高的一个 Scheduler。必须确保 `cpa-key-policy` 是实际获胜的 Scheduler，否则文件隔离不会执行。
+- CPA 只启用优先级最高的一个 Scheduler。必须确保 `cpa-access-guard` 是实际获胜的 Scheduler，否则文件隔离不会执行。
 - CPA 可能在调用插件前先把候选缩到最高 auth priority 档。各隔离池应使用兼容的优先级，避免组外高优先级认证遮住目标池并触发 `auth_not_found`。
 - 原生 Key 隔离只覆盖 CPA 正常的 AuthManager / `scheduler.pick` 且向 Scheduler 转发 `caller_scope` 的路径。**CPA Home 调度目前会绕过插件 Scheduler**；依赖这些绑定时不要用 `-home-jwt` 启动 CPA。直接 plugin-executor、Alpha Search（`/v1/alpha/search` 与 `/backend-api/codex/alpha/search`）、全部 Codex Live/Realtime 路由（`/v1/live*` 与 `/v1/realtime*`），以及其它绕过 `scheduler.pick` 或未转发 `caller_scope` 的路径均不受支持。
 - 必须在 CPA 顶层配置中显式设置 `quota-exceeded.antigravity-credits: false`。启用后，该 Antigravity 最终额度回退会绕过插件 Scheduler，直接枚举 Antigravity 凭证，因此请求可能落到绑定组之外；当前插件 ABI 无法在这个回退阶段强制绑定。
@@ -205,13 +206,18 @@ make test
 make build-linux          # 先编前端，再编 linux amd64/arm64 .so
 # 或
 make web-build
+mkdir -p dist/linux/amd64
 GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -buildvcs=false -tags cshared \
-  -buildmode=c-shared -o dist/cpa-key-policy_linux_amd64.so ./cmd/cpa-key-policy
+  -buildmode=c-shared -o dist/linux/amd64/cpa-access-guard.so ./cmd/cpa-access-guard
 ```
 
 Windows 上请用 WSL/Linux 编 `.so`。`go test ./...` 可用非 cgo stub，不依赖动态库工具链。
 
-把 `.so` 放进 CPA 的 `plugins.dir`，并在配置里启用插件。
+把动态库放进 CPA 对应平台目录，例如
+`plugins/linux/amd64/cpa-access-guard.so`，并在配置里启用插件。动态库 basename
+必须是 `cpa-access-guard`（也可用 `cpa-access-guard-v<版本>`）；不要把
+`_linux_amd64` 写进 basename，否则 CPA 会把它识别成另一个插件 ID，无法命中
+`plugins.configs.cpa-access-guard`。
 
 ---
 
@@ -228,16 +234,17 @@ plugins:
   enabled: true
   dir: "plugins"
   configs:
-    cpa-key-policy:
+    cpa-access-guard:
       enabled: true
       priority: 100 # 必须高于其它 Scheduler，才能执行凭证隔离
-      state_file: "cpa-key-policy-state.json"
+      state_file: "cpa-access-guard-state.json"
 ```
 
 说明：
 
 - 若已有 `state_file`，则以其中的 keys / 原生 Key 绑定 / 别名 / 归类 / 用量为准。
-- 相对 `state_file` 会按 **CPA 进程当前工作目录**解析为绝对路径，不是相对插件 `.so`。生产环境建议写绝对路径，并确保 CPA 运行用户可写；可通过 `GET /v0/management/plugins/cpa-key-policy/status` 的 `state_file` 查看最终解析位置。
+- 相对 `state_file` 会按 **CPA 进程当前工作目录**解析为绝对路径，不是相对插件 `.so`。生产环境建议写绝对路径，并确保 CPA 运行用户可写；可通过 `GET /v0/management/plugins/cpa-access-guard/status` 的 `state_file` 查看最终解析位置。
+- 从 `cpa-key-policy` 升级且一直使用旧版默认相对文件名时，CPA Access Guard 会一次性把同目录中校验有效的 `cpa-key-policy-state.json` 复制为 `cpa-access-guard-state.json`；旧文件会保留作恢复备份。显式配置的 `state_file` 不会自动迁移，请先停掉 CPA，再人工、精确地复制。
 - state 目录由插件按 `0700` 创建，文件按 `0600` 原子写入。请纳入备份，不要手工写入顶层 API Key 明文。
 - 日常请用**网页**或管理 API 建 key、原生绑定和别名；YAML 种子数据主要用于首次启动。
 - 公开文档里不要写真实管理密钥、主机名或凭证内容。
@@ -249,7 +256,7 @@ plugins:
 插件内嵌。加载后访问：
 
 ```text
-http://<你的-cpa-主机>:<api端口>/v0/resource/plugins/cpa-key-policy/index.html
+http://<你的-cpa-主机>:<api端口>/v0/resource/plugins/cpa-access-guard/index.html
 ```
 
 用 CPA **管理密钥**登录（`remote-management.secret-key` 或管理密码）。密钥只放在内存，不写 `localStorage`；刷新页面需重新登录。
@@ -291,7 +298,7 @@ VITE_CPA_BASE=http://127.0.0.1:8317 npm run dev
 创建绑定（Key 明文只在请求中出现一次；响应不返回明文或完整 caller scope）：
 
 ```bash
-curl -X POST "$CPA/v0/management/plugins/cpa-key-policy/native-key-bindings" \
+curl -X POST "$CPA/v0/management/plugins/cpa-access-guard/native-key-bindings" \
   -H "Authorization: Bearer $MANAGEMENT_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -306,7 +313,7 @@ curl -X POST "$CPA/v0/management/plugins/cpa-key-policy/native-key-bindings" \
 轮换 Key 或修改绑定：
 
 ```bash
-curl -X PATCH "$CPA/v0/management/plugins/cpa-key-policy/native-key-bindings" \
+curl -X PATCH "$CPA/v0/management/plugins/cpa-access-guard/native-key-bindings" \
   -H "Authorization: Bearer $MANAGEMENT_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -328,7 +335,7 @@ PATCH 省略 `key` 或传空字符串时保留原 scope。直接替换 `key` 会
 创建 key（`plain_key` **只返回一次**）：
 
 ```bash
-curl -X POST "$CPA/v0/management/plugins/cpa-key-policy/keys" \
+curl -X POST "$CPA/v0/management/plugins/cpa-access-guard/keys" \
   -H "Authorization: Bearer $MANAGEMENT_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -344,7 +351,7 @@ curl -X POST "$CPA/v0/management/plugins/cpa-key-policy/keys" \
 多目标别名示例：
 
 ```bash
-curl -X POST "$CPA/v0/management/plugins/cpa-key-policy/aliases" \
+curl -X POST "$CPA/v0/management/plugins/cpa-access-guard/aliases" \
   -H "Authorization: Bearer $MANAGEMENT_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -385,7 +392,7 @@ curl -X POST "$CPA/v0/management/plugins/cpa-key-policy/aliases" \
 ## 上手清单
 
 1. 编译/安装 `.so` 到 CPA `plugins.dir`。
-2. 启用 `plugins` 与 `cpa-key-policy`，配置 `state_file`。
+2. 启用 `plugins` 与 `cpa-access-guard`，配置 `state_file`。
 3. 用管理密钥打开网页 UI。
 4. （可选）配置**凭证归类**规则。
 5. （可选）把已有 CPA 顶层原生 Key 绑定到这些组。

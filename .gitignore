@@ -8,7 +8,10 @@
 .gocache/
 .go-appdata/
 .go-localappdata/
+# Ignore both names during the rename window so a legacy runtime state can
+# never be staged accidentally.
 cpa-key-policy-state.json
+cpa-access-guard-state.json
 coverage.out
 
 # CPA reference checkout used for research, not part of this project

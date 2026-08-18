@@ -1,4 +1,4 @@
-module cpa-key-policy
+module cpa-access-guard
 
 go 1.23
 

@@ -1,6 +1,6 @@
 {
   "header": {
-    "title": "Управление cpa-key-policy",
+    "title": "Управление CPA Access Guard",
     "keyList": "Ключи",
     "newKey": "Новый ключ",
     "logout": "Выйти",

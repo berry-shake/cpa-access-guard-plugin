@@ -9,8 +9,8 @@ import (
 	"strings"
 	"sync"
 
-	"cpa-key-policy/internal/plugin/web"
-	"cpa-key-policy/internal/policy"
+	"cpa-access-guard/internal/plugin/web"
+	"cpa-access-guard/internal/policy"
 )
 
 type App struct {
@@ -24,7 +24,7 @@ const classifyCacheCapacity = 4096
 func NewApp() *App {
 	// Defer persistent state initialization until the host sends the lifecycle
 	// configuration. Configuring defaults here would create a stray
-	// cpa-key-policy-state.json in the host process working directory before the
+	// cpa-access-guard-state.json in the host process working directory before the
 	// configured state_file path is known.
 	return &App{store: policy.NewStore(), classifyCache: make(map[string][]string)}
 }
@@ -108,11 +108,11 @@ func (a *App) registration() Registration {
 			Name:             PluginName,
 			Version:          Version,
 			Author:           "origin652 / berry-shake",
-			GitHubRepository: "https://github.com/berry-shake/cpa-key-policy-plugin",
+			GitHubRepository: "https://github.com/berry-shake/cpa-access-guard-plugin",
 			ConfigFields: []ConfigField{
 				{Name: "enabled", Type: "boolean", Description: "Enable or disable this plugin without unloading it."},
-				{Name: "state_file", Type: "string", Description: "JSON state file used for key policy changes made through the Management API."},
-				{Name: "keys", Type: "array", Description: "Initial downstream key policy list. State file wins after it exists."},
+				{Name: "state_file", Type: "string", Description: "JSON state file used for access-policy changes made through the Management API."},
+				{Name: "keys", Type: "array", Description: "Initial downstream API-key access-policy list. State file wins after it exists."},
 				{Name: "native_key_bindings", Type: "array", Description: "Optional caller-scope bindings that constrain CPA-native downstream API keys to credential groups. Requires a Scheduler path carrying caller_scope, Home disabled, no unsupported special route, and quota-exceeded.antigravity-credits=false."},
 			},
 		},
@@ -174,7 +174,7 @@ func (a *App) routeModel(raw []byte) ([]byte, error) {
 		TargetKind:  "provider",
 		Target:      resolveProviderKey(rule.Provider, req.AvailableProviders),
 		TargetModel: rule.TargetModel,
-		Reason:      "cpa-key-policy:" + keyID,
+		Reason:      "cpa-access-guard:" + keyID,
 	})
 }
 
@@ -287,7 +287,7 @@ func (a *App) pickScheduler(raw []byte) ([]byte, error) {
 		// string. If the field exists with any other shape, do not silently treat
 		// the request as unbound or let generic group metadata bypass the identity
 		// check. This indicates an incompatible or corrupted host/plugin path.
-		return ErrorEnvelope("invalid_scheduler_metadata", "cpa-key-policy: invalid caller_scope metadata", http.StatusServiceUnavailable), nil
+		return ErrorEnvelope("invalid_scheduler_metadata", "cpa-access-guard: invalid caller_scope metadata", http.StatusServiceUnavailable), nil
 	}
 	if callerScope != "" {
 		group, nativeBinding = a.store.ResolveNativeKeyGroup(callerScope, req.Provider, req.Model)
@@ -298,7 +298,7 @@ func (a *App) pickScheduler(raw []byte) ([]byte, error) {
 			// The store normally rejects empty groups during configuration. Keep
 			// this guard fail-closed in case a future state migration or Store
 			// implementation violates that invariant.
-			return ErrorEnvelope("auth_not_found", "cpa-key-policy: native key binding has no credential group", http.StatusServiceUnavailable), nil
+			return ErrorEnvelope("auth_not_found", "cpa-access-guard: native key binding has no credential group", http.StatusServiceUnavailable), nil
 		}
 	} else {
 		group = schedulerGroupFromMetadata(req.Options.Metadata)
@@ -312,7 +312,7 @@ func (a *App) pickScheduler(raw []byte) ([]byte, error) {
 		if nativeBinding {
 			// A resolved native binding is an isolation boundary. Deferring on an
 			// empty candidate list would let a host fallback escape that boundary.
-			return ErrorEnvelope("auth_not_found", "cpa-key-policy: no eligible auth candidate for requested group", http.StatusServiceUnavailable), nil
+			return ErrorEnvelope("auth_not_found", "cpa-access-guard: no eligible auth candidate for requested group", http.StatusServiceUnavailable), nil
 		}
 		return OKEnvelope(SchedulerPickResponse{Handled: false})
 	}
@@ -332,7 +332,7 @@ func (a *App) pickScheduler(raw []byte) ([]byte, error) {
 		// Handled=false would let the host pick ANY auth including other tiers.
 		// Instead we report an explicit "auth_not_found" so the caller sees the
 		// intent honored (no available tier-matching auth) rather than a leak.
-		return ErrorEnvelope("auth_not_found", "cpa-key-policy: no eligible auth candidate for requested group", http.StatusServiceUnavailable), nil
+		return ErrorEnvelope("auth_not_found", "cpa-access-guard: no eligible auth candidate for requested group", http.StatusServiceUnavailable), nil
 	}
 
 	best := matched[0]
@@ -558,13 +558,13 @@ func (a *App) managementRegistration() ManagementRegistrationResponse {
 	return ManagementRegistrationResponse{
 		Routes: []ManagementRoute{
 			{Method: http.MethodGet, Path: base + "/keys", Description: "List downstream CPA key policies."},
-			{Method: http.MethodPost, Path: base + "/keys", Description: "Create a downstream CPA key policy."},
-			{Method: http.MethodPatch, Path: base + "/keys", Description: "Update a downstream CPA key policy by id."},
-			{Method: http.MethodDelete, Path: base + "/keys", Description: "Delete a downstream CPA key policy by id."},
+			{Method: http.MethodPost, Path: base + "/keys", Description: "Create a downstream API-key access policy."},
+			{Method: http.MethodPatch, Path: base + "/keys", Description: "Update a downstream API-key access policy by id."},
+			{Method: http.MethodDelete, Path: base + "/keys", Description: "Delete a downstream API-key access policy by id."},
 			{Method: http.MethodPost, Path: base + "/keys/rotate", Description: "Rotate one downstream CPA key by id."},
 			{Method: http.MethodPost, Path: base + "/keys/reset-rpm", Description: "Reset one downstream CPA key RPM counter by id."},
 			{Method: http.MethodGet, Path: base + "/keys/usage", Description: "Per-alias usage breakdown for one downstream CPA key by id."},
-			{Method: http.MethodGet, Path: base + "/status", Description: "Show cpa-key-policy runtime status."},
+			{Method: http.MethodGet, Path: base + "/status", Description: "Show CPA Access Guard runtime status."},
 			{Method: http.MethodGet, Path: base + "/native-key-bindings", Description: "List CPA-native downstream API-key auth-file bindings."},
 			{Method: http.MethodPost, Path: base + "/native-key-bindings", Description: "Bind one CPA-native downstream API key to an auth-file group."},
 			{Method: http.MethodPatch, Path: base + "/native-key-bindings", Description: "Update, rotate, enable, or disable one CPA-native key binding."},
@@ -580,7 +580,7 @@ func (a *App) managementRegistration() ManagementRegistrationResponse {
 			{Method: http.MethodPost, Path: base + "/catalog", Description: "Build auth-file model picker catalog with classify + built-in groups."},
 		},
 		Resources: []ResourceRoute{
-			{Path: web.IndexPath, Menu: "Key Policy", Description: "Web UI for managing downstream CPA key policies (create keys, pick models)."},
+			{Path: web.IndexPath, Menu: "Access Guard", Description: "Web UI for CPA Access Guard (create keys, bind credentials, and pick models)."},
 		},
 	}
 }
