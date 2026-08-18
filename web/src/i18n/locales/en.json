@@ -319,8 +319,8 @@
       "groupPlaceholder": "Select a credential group",
       "manualGroupOption": "Enter another group manually…",
       "manualGroupLabel": "Other credential group",
-      "groupHint": "The list includes built-in groups and enabled custom classification groups. To use another valid group, choose the manual-entry option.",
-      "enableBinding": "Enable this binding",
+      "groupHint": "Includes built-in and enabled classification groups; enter another group manually if needed.",
+      "enableBinding": "Enable binding",
       "saving": "Saving…"
     }
   }

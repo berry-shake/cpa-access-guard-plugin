@@ -184,7 +184,7 @@ describe("NativeKeyBindingsTab", () => {
     ) as HTMLInputElement;
     const switchLabel = enabledInput.closest("label");
     expect(switchLabel?.classList.contains("native-binding-enable-switch")).toBe(true);
-    expect(switchLabel?.textContent).toContain("启用此绑定");
+    expect(switchLabel?.textContent).toContain("启用绑定");
     expect(switchLabel?.querySelector(":scope > .track > .thumb")).toBeTruthy();
     expect(enabledInput.labels?.[0]).toBe(switchLabel);
     await act(async () => { enabledInput.click(); });
@@ -241,6 +241,7 @@ describe("NativeKeyBindingsTab", () => {
 
     const groupSelect = container.querySelector("#native-binding-group") as HTMLSelectElement;
     expect(groupSelect.tagName).toBe("SELECT");
+    expect(groupSelect.classList.contains("native-binding-group-select")).toBe(true);
     expect(container.querySelector("datalist")).toBeNull();
     const optionValues = Array.from(groupSelect.options)
       .map((option) => (option as HTMLOptionElement).value);

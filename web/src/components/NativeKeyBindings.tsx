@@ -481,23 +481,25 @@ function NativeKeyBindingEditor({
               </p>
             </div>
           )}
-          <div className="map-form-row">
+          <div className="map-form-row native-binding-group-row">
             <label htmlFor="native-binding-group">{t("mapping.native.groupField")}</label>
-            <select
-              id="native-binding-group"
-              className="mono"
-              value={selectedGroup}
-              onChange={(e) => setSelectedGroup(e.target.value)}
-              disabled={saving}
-              aria-describedby="native-binding-group-hint"
-              required
-            >
-              <option value="" disabled>{t("mapping.native.groupPlaceholder")}</option>
-              {groupOptions.map((option) => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-              <option value={MANUAL_GROUP_OPTION}>{t("mapping.native.manualGroupOption")}</option>
-            </select>
+            <div className="native-binding-select-wrap">
+              <select
+                id="native-binding-group"
+                className="native-binding-group-select"
+                value={selectedGroup}
+                onChange={(e) => setSelectedGroup(e.target.value)}
+                disabled={saving}
+                aria-describedby="native-binding-group-hint"
+                required
+              >
+                <option value="" disabled>{t("mapping.native.groupPlaceholder")}</option>
+                {groupOptions.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+                <option value={MANUAL_GROUP_OPTION}>{t("mapping.native.manualGroupOption")}</option>
+              </select>
+            </div>
             {usesManualGroup && (
               <div className="native-binding-manual-group">
                 <label htmlFor="native-binding-manual-group">{t("mapping.native.manualGroupLabel")}</label>
@@ -521,6 +523,7 @@ function NativeKeyBindingEditor({
           </div>
           <div className="map-form-row native-binding-enable-row">
             <label className="switch native-binding-enable-switch">
+              <span className="native-binding-enable-label">{t("mapping.native.enableBinding")}</span>
               <input
                 type="checkbox"
                 checked={enabled}
@@ -528,7 +531,6 @@ function NativeKeyBindingEditor({
                 disabled={saving}
               />
               <span className="track" aria-hidden="true"><span className="thumb" /></span>
-              <span className="native-binding-enable-label">{t("mapping.native.enableBinding")}</span>
             </label>
           </div>
           {error && <div className="error" role="alert">{error}</div>}

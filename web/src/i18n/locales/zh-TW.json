@@ -311,8 +311,8 @@
       "groupPlaceholder": "請選擇憑證群組",
       "manualGroupOption": "手動輸入其他群組…",
       "manualGroupLabel": "其他憑證群組",
-      "groupHint": "下拉清單包含內建群組和已啟用的自訂分類群組；如需使用其他有效群組，請選擇「手動輸入其他群組」。",
-      "enableBinding": "啟用此綁定",
+      "groupHint": "包含內建群組和已啟用的分類群組；找不到時可手動輸入。",
+      "enableBinding": "啟用綁定",
       "saving": "儲存中…"
     }
   }

@@ -319,8 +319,8 @@
       "groupPlaceholder": "请选择凭证组",
       "manualGroupOption": "手动输入其他组…",
       "manualGroupLabel": "其他凭证组",
-      "groupHint": "下拉列表包含内置组和已启用的自定义分类组；如需使用其他有效组，请选择“手动输入其他组”。",
-      "enableBinding": "启用此绑定",
+      "groupHint": "包含内置组和已启用的分类组；找不到时可手动输入。",
+      "enableBinding": "启用绑定",
       "saving": "保存中…"
     }
   }
