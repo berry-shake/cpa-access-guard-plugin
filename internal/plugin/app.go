@@ -109,6 +109,7 @@ func (a *App) registration() Registration {
 			Version:          Version,
 			Author:           "origin652 / berry-shake",
 			GitHubRepository: "https://github.com/berry-shake/cpa-access-guard-plugin",
+			Logo:             "/v0/resource/plugins/" + PluginID + web.LogoPath,
 			ConfigFields: []ConfigField{
 				{Name: "enabled", Type: "boolean", Description: "Enable or disable this plugin without unloading it."},
 				{Name: "state_file", Type: "string", Description: "JSON state file used for access-policy changes made through the Management API."},
@@ -582,6 +583,7 @@ func (a *App) managementRegistration() ManagementRegistrationResponse {
 		},
 		Resources: []ResourceRoute{
 			{Path: web.IndexPath, Menu: "Access Guard", Description: "Web UI for CPA Access Guard (create keys, bind credentials, and pick models)."},
+			{Path: web.LogoPath, Description: "Plugin logo shown in the panel plugin list."},
 		},
 	}
 }

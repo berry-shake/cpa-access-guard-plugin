@@ -4,7 +4,9 @@
     "keyList": "Keys",
     "newKey": "New Key",
     "logout": "Log out",
-    "mapping": "Mapping"
+    "mapping": "Mapping",
+    "brand": "Access Guard",
+    "tagline": "Scope credentials and models for each downstream key."
   },
   "login": {
     "subTitle": "Sign in to CLIProxyAPI",

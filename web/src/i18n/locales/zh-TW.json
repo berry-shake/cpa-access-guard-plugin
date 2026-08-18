@@ -4,7 +4,9 @@
     "keyList": "Key 列表",
     "newKey": "新建 Key",
     "mapping": "映射",
-    "logout": "登出"
+    "logout": "登出",
+    "brand": "Access Guard",
+    "tagline": "為每個下游 Key 限定可用憑證與模型。"
   },
   "login": {
     "subTitle": "登入 CLIProxyAPI",

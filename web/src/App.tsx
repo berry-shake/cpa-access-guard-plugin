@@ -16,9 +16,10 @@ function useAuthTick() {
   return isAuthed();
 }
 
-// Desktop top horizontal nav. Mirrors the Stitch "Quiet Paper" design: left =
-// app title + base url, right = nav links + logout. Mobile keeps the legacy
-// .header (hidden on desktop via CSS) and bottom tab bar instead.
+// Desktop top horizontal nav, styled after the Model Limiter page header:
+// left = logo mark + product name + one-line tagline, right = nav links +
+// logout as a plain text link. Mobile keeps the legacy .header (hidden on
+// desktop via CSS) and bottom tab bar instead.
 function TopNav() {
   const t = useT();
   const nav = useNavigate();
@@ -33,15 +34,27 @@ function TopNav() {
     <div className="topnav">
       <div className="topnav-inner">
         <div className="topnav-brand">
-          <span className="tn-title">{t("header.title")}</span>
-          <span className="tn-sub">{s.baseUrl}</span>
+          <span className="tn-logo" aria-hidden="true">
+            <svg viewBox="0 0 256 256" width="20" height="20">
+              <path
+                d="M128 58 L182 78 V130 C182 166 160 190 128 202 C96 190 74 166 74 130 V78 Z"
+                fill="none" stroke="currentColor" strokeWidth="16" strokeLinejoin="round"
+              />
+              <circle cx="128" cy="120" r="12" fill="currentColor" />
+              <path d="M128 126 V156" stroke="currentColor" strokeWidth="14" strokeLinecap="round" />
+            </svg>
+          </span>
+          <span className="tn-text">
+            <span className="tn-title">{t("header.brand")}</span>
+            <span className="tn-sub">{t("header.tagline")}</span>
+          </span>
         </div>
         <div className="topnav-actions">
           <Link to="/keys" className={"tn-link" + (onKeys && !onNew ? " active" : "")}>{t("header.keyList")}</Link>
           <Link to="/keys/new" className={"tn-link" + (onNew ? " active" : "")}>{t("header.newKey")}</Link>
           <Link to="/mapping" className={"tn-link" + (onMapping ? " active" : "")}>{t("header.mapping")}</Link>
           <button
-            className="btn sm"
+            className="tn-link tn-logout"
             onClick={() => { clearSession(); nav("/login"); }}
           >
             {t("header.logout")}

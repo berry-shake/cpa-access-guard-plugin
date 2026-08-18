@@ -4,7 +4,9 @@
     "keyList": "Ключи",
     "newKey": "Новый ключ",
     "logout": "Выйти",
-    "mapping": "Маппинг"
+    "mapping": "Маппинг",
+    "brand": "Access Guard",
+    "tagline": "Ограничение учётных данных и моделей для каждого ключа."
   },
   "login": {
     "subTitle": "Вход в CLIProxyAPI",

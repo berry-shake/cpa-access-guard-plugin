@@ -136,8 +136,10 @@ a:hover { color: var(--accent-2); text-decoration: underline; }
  * Mobile keeps the old .header (stacked) via the max-width block. */
 .app { max-width: 1200px; margin: 0 auto; padding: 24px 24px 80px; }
 
-/* Top horizontal nav (desktop). Mirrors the Stitch 'Quiet Paper' design:
- * paper bg, bottom border, left = title + base url, right = nav + actions. */
+/* Top horizontal nav (desktop). Styled after the Model Limiter header: logo
+ * mark in a soft accent square, product name + muted tagline, light nav links
+ * on the right. Border stays hairline so the sticky bar reads as part of the
+ * page, not a separate chrome strip. */
 .topnav {
   position: sticky; top: 0; z-index: 50;
   background: var(--bg);
@@ -147,7 +149,7 @@ a:hover { color: var(--accent-2); text-decoration: underline; }
 }
 .topnav-inner {
   max-width: 1200px; margin: 0 auto;
-  height: 56px; display: flex; align-items: center; justify-content: space-between;
+  height: 64px; display: flex; align-items: center; justify-content: space-between;
   gap: 16px;
 }
 /* Embedded in the CPA panel iframe: the panel floats an action pill
@@ -158,17 +160,25 @@ a:hover { color: var(--accent-2); text-decoration: underline; }
 :root.embedded .topnav-inner {
   padding-right: clamp(0px, calc(270px - (100vw - 1200px) / 2), 246px);
 }
-.topnav-brand { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
-.topnav-brand .tn-title { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; color: var(--text); }
+.topnav-brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.topnav-brand .tn-logo {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; border-radius: 11px;
+  background: var(--accent-soft); color: var(--accent);
+}
+.topnav-brand .tn-text { display: flex; flex-direction: column; line-height: 1.3; min-width: 0; }
+.topnav-brand .tn-title { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; color: var(--text); }
 .topnav-brand .tn-sub { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.topnav-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.topnav-actions { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
 .topnav-actions .tn-link {
-  font-size: 14px; font-weight: 600; color: var(--muted); text-decoration: none; padding: 6px 4px;
+  font-size: 14px; font-weight: 500; color: var(--muted); text-decoration: none; padding: 6px 2px;
+  border: none; background: none; cursor: pointer; font-family: inherit; line-height: inherit;
   border-bottom: 2px solid transparent; transition: color var(--t-fast), border-color var(--t-fast);
 }
-.topnav-actions .tn-link:hover { color: var(--accent-2); text-decoration: none; }
-.topnav-actions .tn-link.active { color: var(--accent); border-bottom-color: var(--accent); }
+.topnav-actions .tn-link:hover { color: var(--text); text-decoration: none; }
+.topnav-actions .tn-link.active { color: var(--accent); font-weight: 600; border-bottom-color: var(--accent); }
 .topnav-actions .tn-link.danger:hover { color: var(--danger); }
+.topnav-actions .tn-logout:hover { color: var(--danger); }
 
 /* Legacy .header kept for mobile (max-width:640px) stacked layout. */
 .header {
