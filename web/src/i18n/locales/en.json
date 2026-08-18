@@ -294,6 +294,7 @@
       "topLevelPosition": "api-keys item {{index}}",
       "keyPreview": "Top-level API key",
       "group": "Credential group",
+      "groupField": "Credential group *",
       "defaultScheduling": "Default / free scheduling",
       "unboundHint": "Currently free to use host credentials",
       "orphanHint": "This binding's key is no longer in CPA's top-level api-keys. The binding is inactive; keep it for rotation or delete it.",
@@ -315,7 +316,10 @@
       "rotateKey": "Replace top-level API key (optional)",
       "keepKeyPlaceholder": "Leave blank to keep the current key",
       "rotateKeyHint": "Leave blank to keep the current binding. If entered, synchronize the same new key to CPA's top-level api-keys setting.",
-      "groupHint": "Choose free, team, plus, supported, or an enabled classify:<group> suggestion. You may also enter another valid group manually.",
+      "groupPlaceholder": "Select a credential group",
+      "manualGroupOption": "Enter another group manually…",
+      "manualGroupLabel": "Other credential group",
+      "groupHint": "The list includes built-in groups and enabled custom classification groups. To use another valid group, choose the manual-entry option.",
       "enableBinding": "Enable this binding",
       "saving": "Saving…"
     }

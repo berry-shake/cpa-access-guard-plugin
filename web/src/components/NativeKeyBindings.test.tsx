@@ -41,6 +41,12 @@ function change(input: HTMLInputElement, value: string) {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+function changeSelect(select: HTMLSelectElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
+  setter?.call(select, value);
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
 beforeEach(() => {
   _resetLocale("zh-CN");
   vi.spyOn(window, "confirm").mockReturnValue(true);
@@ -52,7 +58,10 @@ beforeEach(() => {
     orphan_bindings: [],
   });
   apiMocks.fetchClassifyRules.mockResolvedValue([
-    { name: "vip", field: "filename", pattern: "vip", group: "VIP", enabled: true },
+    { name: "sample-tenant-a-filename", field: "filename", pattern: "tenant-a", group: "tenant-a", enabled: true },
+    { name: "sample-claude-provider", field: "provider", pattern: "claude", group: "claude-auth", enabled: true },
+    { name: "sample-codex-team-plan", field: "plan_type", pattern: "team", group: "codex-premium", enabled: true },
+    { name: "sample-antigravity-paid-tier", field: "tier", pattern: "paid", group: "antigravity-paid", enabled: true },
   ] satisfies ClassifyRule[]);
   apiMocks.createNativeKeyBinding.mockResolvedValue(existing);
   apiMocks.updateNativeKeyBinding.mockResolvedValue(existing);
@@ -173,6 +182,11 @@ describe("NativeKeyBindingsTab", () => {
     const enabledInput = container.querySelector(
       '.native-binding-editor input[type="checkbox"]',
     ) as HTMLInputElement;
+    const switchLabel = enabledInput.closest("label");
+    expect(switchLabel?.classList.contains("native-binding-enable-switch")).toBe(true);
+    expect(switchLabel?.textContent).toContain("启用此绑定");
+    expect(switchLabel?.querySelector(":scope > .track > .thumb")).toBeTruthy();
+    expect(enabledInput.labels?.[0]).toBe(switchLabel);
     await act(async () => { enabledInput.click(); });
     expect(enabledInput.checked).toBe(false);
 
@@ -198,7 +212,7 @@ describe("NativeKeyBindingsTab", () => {
     });
   });
 
-  it("renders existing bindings and creates one with free-form group support", async () => {
+  it("renders an explicit group selector and creates a binding from a suggested group", async () => {
     await act(async () => {
       root = createRoot(container);
       root.render(<NativeKeyBindingsTab />);
@@ -225,16 +239,39 @@ describe("NativeKeyBindingsTab", () => {
     expect(newButton).toBeTruthy();
     await act(async () => { newButton!.click(); });
 
-    const optionValues = Array.from(container.querySelectorAll("datalist option"))
+    const groupSelect = container.querySelector("#native-binding-group") as HTMLSelectElement;
+    expect(groupSelect.tagName).toBe("SELECT");
+    expect(container.querySelector("datalist")).toBeNull();
+    const optionValues = Array.from(groupSelect.options)
       .map((option) => (option as HTMLOptionElement).value);
-    expect(optionValues).toContain("classify:vip");
+    expect(optionValues).toEqual(expect.arrayContaining([
+      "free",
+      "team",
+      "plus",
+      "supported",
+      "classify:tenant-a",
+      "classify:claude-auth",
+      "classify:codex-premium",
+      "classify:antigravity-paid",
+    ]));
+    const optionLabels = Array.from(groupSelect.options).map((option) => option.textContent);
+    expect(optionLabels).toEqual(expect.arrayContaining([
+      "free",
+      "team",
+      "plus",
+      "supported",
+      "classify:tenant-a",
+      "classify:claude-auth",
+      "classify:codex-premium",
+      "classify:antigravity-paid",
+      "手动输入其他组…",
+    ]));
 
     await act(async () => {
       change(container.querySelector("#native-binding-id") as HTMLInputElement, "client-b");
       change(container.querySelector("#native-binding-name") as HTMLInputElement, "Client B");
       change(container.querySelector("#native-binding-key") as HTMLInputElement, "sk-client-b-secret");
-      // This value is intentionally not in the datalist: manual groups remain supported.
-      change(container.querySelector("#native-binding-group") as HTMLInputElement, "classify:manual");
+      changeSelect(groupSelect, "classify:tenant-a");
     });
 
     const form = container.querySelector(".native-binding-editor form") as HTMLFormElement;
@@ -248,6 +285,50 @@ describe("NativeKeyBindingsTab", () => {
       name: "Client B",
       enabled: true,
       key: "sk-client-b-secret",
+      group: "classify:tenant-a",
+    });
+  });
+
+  it("shows a separate input for a manually entered group", async () => {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<NativeKeyBindingsTab />);
+      await tick();
+    });
+
+    const newButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("新建绑定"));
+    await act(async () => { newButton!.click(); });
+
+    const groupSelect = container.querySelector("#native-binding-group") as HTMLSelectElement;
+    const manualOption = Array.from(groupSelect.options)
+      .find((option) => option.textContent === "手动输入其他组…");
+    expect(manualOption).toBeTruthy();
+
+    await act(async () => {
+      change(container.querySelector("#native-binding-id") as HTMLInputElement, "client-manual");
+      change(container.querySelector("#native-binding-key") as HTMLInputElement, "sk-client-manual-secret");
+      changeSelect(groupSelect, manualOption!.value);
+    });
+
+    const manualInput = container.querySelector("#native-binding-manual-group") as HTMLInputElement;
+    expect(manualInput).toBeTruthy();
+    expect(manualInput.labels?.[0]?.textContent).toBe("其他凭证组");
+    expect(container.querySelector('.map-form-foot button[type="submit"]')?.hasAttribute("disabled")).toBe(true);
+    await act(async () => { change(manualInput, "classify:manual"); });
+    expect(container.querySelector('.map-form-foot button[type="submit"]')?.hasAttribute("disabled")).toBe(false);
+
+    const form = container.querySelector(".native-binding-editor form") as HTMLFormElement;
+    await act(async () => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await tick();
+    });
+
+    expect(apiMocks.createNativeKeyBinding).toHaveBeenCalledWith({
+      id: "client-manual",
+      name: undefined,
+      enabled: true,
+      key: "sk-client-manual-secret",
       group: "classify:manual",
     });
   });
@@ -308,7 +389,10 @@ describe("NativeKeyBindingsTab", () => {
     expect(container.innerHTML).not.toContain(secret);
 
     await act(async () => {
-      change(container.querySelector("#native-binding-group") as HTMLInputElement, "classify:vip");
+      changeSelect(
+        container.querySelector("#native-binding-group") as HTMLSelectElement,
+        "classify:codex-premium",
+      );
     });
     const form = container.querySelector(".native-binding-editor form") as HTMLFormElement;
     await act(async () => {
@@ -321,7 +405,43 @@ describe("NativeKeyBindingsTab", () => {
       name: "顶层 API Key 1",
       enabled: true,
       key: secret,
-      group: "classify:vip",
+      group: "classify:codex-premium",
+    });
+  });
+
+  it("preserves an existing group that is not in the suggestion list", async () => {
+    const legacy = { ...existing, group: "classify:legacy-customer" };
+    apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValue({
+      entries: [{ key_index: 0, key_preview: legacy.key_preview, binding: legacy }],
+      orphan_bindings: [],
+    });
+
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<NativeKeyBindingsTab />);
+      await tick();
+    });
+
+    const editButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("编辑 / 轮换"));
+    await act(async () => { editButton!.click(); });
+
+    const groupSelect = container.querySelector("#native-binding-group") as HTMLSelectElement;
+    expect(groupSelect.selectedOptions[0]?.textContent).toBe("手动输入其他组…");
+    expect((container.querySelector("#native-binding-manual-group") as HTMLInputElement).value)
+      .toBe("classify:legacy-customer");
+
+    const form = container.querySelector(".native-binding-editor form") as HTMLFormElement;
+    await act(async () => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await tick();
+    });
+
+    expect(apiMocks.updateNativeKeyBinding).toHaveBeenCalledWith({
+      id: "client-a",
+      name: "Client A",
+      enabled: true,
+      group: "classify:legacy-customer",
     });
   });
 

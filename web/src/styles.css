@@ -961,8 +961,20 @@ td.strong { font-weight: 600; color: var(--text); }
 }
 .native-binding-actions .switch { margin-right: auto; }
 .native-binding-free-hint { margin-right: auto; font-size: 12px; }
-.native-binding-editor .map-form-row input { box-sizing: border-box; background: var(--panel); }
-.native-binding-editor .map-form-row input:disabled { opacity: .65; cursor: not-allowed; }
+.native-binding-editor .map-form-row input:not([type="checkbox"]),
+.native-binding-editor .map-form-row select { box-sizing: border-box; background: var(--panel); }
+.native-binding-editor .map-form-row input:not([type="checkbox"]):disabled,
+.native-binding-editor .map-form-row select:disabled { opacity: .65; cursor: not-allowed; }
+.native-binding-manual-group { margin-top: 10px; }
+.native-binding-editor .map-form-row > label.native-binding-enable-switch {
+  display: inline-flex; align-items: center; gap: 8px; margin-bottom: 0;
+}
+.native-binding-editor .map-form-row .native-binding-enable-switch > input[type="checkbox"] {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
+  overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+.native-binding-enable-switch .track { display: block; flex: 0 0 44px; }
+.native-binding-enable-label { line-height: 24px; }
 .native-binding-field-hint { margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
 .native-binding-selected-key {
   padding: 9px 12px; background: var(--muted-bg); border: 1px solid var(--border);

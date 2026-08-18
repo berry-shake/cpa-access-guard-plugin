@@ -12,12 +12,13 @@ import {
 import type { ClassifyRule, NativeKeyBinding, NativeKeyBindingCatalog } from "../types";
 
 const BUILTIN_GROUPS = ["free", "team", "plus", "supported"] as const;
+const MANUAL_GROUP_OPTION = "__manual_group__";
 
 /**
- * Return the safe suggestions shown by the group datalist. The input remains
- * free-form so operators can use host/provider groups introduced after this
- * UI was built. Disabled classify rules are omitted because they cannot match
- * a credential until re-enabled.
+ * Return the safe suggestions shown by the group selector. Operators can
+ * switch to a separate manual input for host/provider groups introduced after
+ * this UI was built. Disabled classify rules are omitted because they cannot
+ * match a credential until re-enabled.
  */
 export function buildNativeBindingGroupOptions(rules: ClassifyRule[]): string[] {
   const options = new Set<string>(BUILTIN_GROUPS);
@@ -363,10 +364,17 @@ function NativeKeyBindingEditor({
   const [name, setName] = useState(binding?.name ?? initialName ?? "");
   const [enabled, setEnabled] = useState(binding?.enabled ?? true);
   const [plainKey, setPlainKey] = useState("");
-  const [group, setGroup] = useState(binding?.group ?? "");
+  const initialGroup = binding?.group ?? "";
+  const initialGroupIsManual = initialGroup !== "" && !groupOptions.includes(initialGroup);
+  const [selectedGroup, setSelectedGroup] = useState(
+    initialGroupIsManual ? MANUAL_GROUP_OPTION : initialGroup,
+  );
+  const [manualGroup, setManualGroup] = useState(initialGroupIsManual ? initialGroup : "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  const usesManualGroup = selectedGroup === MANUAL_GROUP_OPTION;
+  const group = usesManualGroup ? manualGroup : selectedGroup;
   const createKey = selectedKey?.apiKey ?? plainKey;
   const canSave = id.trim() !== "" && group.trim() !== "" && (editing || createKey.trim() !== "");
 
@@ -474,33 +482,53 @@ function NativeKeyBindingEditor({
             </div>
           )}
           <div className="map-form-row">
-            <label htmlFor="native-binding-group">{t("mapping.native.group")}</label>
-            <input
+            <label htmlFor="native-binding-group">{t("mapping.native.groupField")}</label>
+            <select
               id="native-binding-group"
               className="mono"
-              list="native-binding-group-options"
-              value={group}
-              onChange={(e) => setGroup(e.target.value)}
+              value={selectedGroup}
+              onChange={(e) => setSelectedGroup(e.target.value)}
               disabled={saving}
-              autoComplete="off"
-              placeholder="team / classify:vip"
+              aria-describedby="native-binding-group-hint"
               required
-            />
-            <datalist id="native-binding-group-options">
-              {groupOptions.map((option) => <option key={option} value={option} />)}
-            </datalist>
-            <p className="native-binding-field-hint">{t("mapping.native.groupHint")}</p>
+            >
+              <option value="" disabled>{t("mapping.native.groupPlaceholder")}</option>
+              {groupOptions.map((option) => (
+                <option key={option} value={option}>{option}</option>
+              ))}
+              <option value={MANUAL_GROUP_OPTION}>{t("mapping.native.manualGroupOption")}</option>
+            </select>
+            {usesManualGroup && (
+              <div className="native-binding-manual-group">
+                <label htmlFor="native-binding-manual-group">{t("mapping.native.manualGroupLabel")}</label>
+                <input
+                  id="native-binding-manual-group"
+                  className="mono"
+                  value={manualGroup}
+                  onChange={(e) => setManualGroup(e.target.value)}
+                  disabled={saving}
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="classify:vip"
+                  aria-describedby="native-binding-group-hint"
+                  required
+                />
+              </div>
+            )}
+            <p id="native-binding-group-hint" className="native-binding-field-hint">
+              {t("mapping.native.groupHint")}
+            </p>
           </div>
-          <div className="map-form-row">
-            <label className="switch">
+          <div className="map-form-row native-binding-enable-row">
+            <label className="switch native-binding-enable-switch">
               <input
                 type="checkbox"
                 checked={enabled}
                 onChange={(e) => setEnabled(e.target.checked)}
                 disabled={saving}
               />
-              <span className="track"><span className="thumb" /></span>
-              <span>{t("mapping.native.enableBinding")}</span>
+              <span className="track" aria-hidden="true"><span className="thumb" /></span>
+              <span className="native-binding-enable-label">{t("mapping.native.enableBinding")}</span>
             </label>
           </div>
           {error && <div className="error" role="alert">{error}</div>}
