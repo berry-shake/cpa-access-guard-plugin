@@ -296,7 +296,7 @@ func (a *App) pickScheduler(raw []byte) ([]byte, error) {
 		// with no limits configured passes through with zero side effects.
 		if decision, limited := a.store.CheckNativeKeyQuota(callerScope); limited {
 			return ErrorEnvelope("quota_exceeded",
-				fmt.Sprintf("cpa-access-guard: native key quota exceeded (%s)", decision.Reason),
+				fmt.Sprintf("cpa-access-guard: quota exceeded (%s)", decision.Reason),
 				http.StatusTooManyRequests), nil
 		}
 		group, nativeBinding = a.store.ResolveNativeKeyGroup(callerScope, req.Provider, req.Model)
