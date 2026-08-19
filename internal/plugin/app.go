@@ -213,11 +213,12 @@ func nativeQuotaError(decision policy.NativeQuotaDecision, model string) (code, 
 	return "quota_exceeded", string(body)
 }
 
-// noCandidateMessage renders the group-isolation rejection in the same shape
-// the host uses for its own "no auth available" errors:
-// "<base> (providers=..., model=...)" plus the requested group, so the caller
-// can see exactly which boundary rejected the request.
+// noCandidateMessage renders the group-isolation rejection exactly like the
+// host's own "no auth available" error (see enrichAuthSelectionError), so the
+// client cannot distinguish a group-boundary rejection from a plain missing
+// credential — the grouping policy stays invisible.
 func noCandidateMessage(req SchedulerPickRequest, group string) string {
+	_ = group
 	providers := req.Providers
 	if len(providers) == 0 && req.Provider != "" {
 		providers = []string{req.Provider}
@@ -230,8 +231,7 @@ func noCandidateMessage(req SchedulerPickRequest, group string) string {
 	if model == "" {
 		model = "unknown"
 	}
-	return fmt.Sprintf("no eligible auth candidate for requested group (providers=%s, model=%s, group=%s)",
-		providerText, model, group)
+	return fmt.Sprintf("no auth available (providers=%s, model=%s)", providerText, model)
 }
 
 func resolveProviderKey(provider string, availableProviders []string) string {
