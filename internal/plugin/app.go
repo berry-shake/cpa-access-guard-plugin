@@ -195,36 +195,22 @@ func (a *App) routeModel(raw []byte) ([]byte, error) {
 // openai-compatible- prefixed form. If neither matches we return the
 // bare name and let CPA's availability check skip us (the native path
 // still resolves true model names).
-// nativeQuotaError renders a quota rejection in OpenAI's 429 style: RPM
-// limits read like their rate-limit error (with a retry hint), budget limits
-// read like their insufficient-quota error (with reset timestamps).
+// nativeQuotaError renders a quota rejection. The message is a complete JSON
+// error body: CPA's BuildErrorResponseBody returns pre-JSON error text
+// verbatim, so the client receives this object as-is.
 func nativeQuotaError(decision policy.NativeQuotaDecision, model string) (code, message string) {
-	u := decision.Usage
-	switch decision.Reason {
-	case "rpm_exceeded":
-		retry := int(decision.RetryAfter.Seconds())
-		if retry <= 0 {
-			retry = 60
-		}
-		return "rate_limit_exceeded",
-			fmt.Sprintf("Rate limit reached for %s on requests per min (RPM): Limit %d, Used %d. Please try again in %ds.",
-				model, u.RPMLimit, u.RPMUsed, retry)
-	case "daily_exceeded":
-		return "insufficient_quota",
-			fmt.Sprintf("You exceeded your current quota, please check your plan and billing details. Daily limit $%.2f, used $%.2f, resets at %s.",
-				u.DailyUSDLimit, u.DailyUSDUsed, resetHint(u.DailyResetAt))
-	default: // weekly_exceeded
-		return "insufficient_quota",
-			fmt.Sprintf("You exceeded your current quota, please check your plan and billing details. Weekly limit $%.2f, used $%.2f, resets at %s.",
-				u.WeeklyUSDLimit, u.WeeklyUSDUsed, resetHint(u.WeeklyResetAt))
+	_ = decision
+	_ = model
+	body, err := json.Marshal(map[string]any{
+		"error": map[string]any{
+			"type":    "usage_limit_reached",
+			"message": "The usage limit has been reached",
+		},
+	})
+	if err != nil {
+		return "quota_exceeded", "The usage limit has been reached"
 	}
-}
-
-func resetHint(resetAt string) string {
-	if resetAt == "" {
-		return "the start of the next window"
-	}
-	return resetAt
+	return "quota_exceeded", string(body)
 }
 
 func resolveProviderKey(provider string, availableProviders []string) string {
