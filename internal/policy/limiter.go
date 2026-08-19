@@ -66,3 +66,19 @@ func (l *RateLimiter) Snapshot() map[string]int {
 	}
 	return out
 }
+
+// SnapshotID returns the current in-minute allowance usage for one id (0
+// when no bucket exists yet).
+func (l *RateLimiter) SnapshotID(id string) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	bucket, ok := l.buckets[id]
+	if !ok {
+		return 0
+	}
+	now := l.now().UTC()
+	if bucket.windowStart.IsZero() || now.Sub(bucket.windowStart) >= time.Minute || now.Before(bucket.windowStart) {
+		return 0
+	}
+	return bucket.count
+}

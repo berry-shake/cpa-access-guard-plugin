@@ -269,6 +269,42 @@ export default function NativeKeyBindingsTab() {
                 {!row.present && (
                   <p className="native-binding-orphan-note">{t("mapping.native.orphanHint")}</p>
                 )}
+                {binding?.enabled && binding.usage && (
+                  <dl className="native-binding-meta native-binding-usage">
+                    {binding.usage.rpm_limit > 0 && (
+                      <div>
+                        <dt>{t("mapping.native.rpm")}</dt>
+                        <dd className={`mono${binding.usage.rpm_used >= binding.usage.rpm_limit ? " native-quota-full" : ""}`}>
+                          {binding.usage.rpm_used}/{binding.usage.rpm_limit}
+                        </dd>
+                      </div>
+                    )}
+                    {binding.usage.daily_usd_limit > 0 && (
+                      <div>
+                        <dt>{t("mapping.native.dailyUsd")}</dt>
+                        <dd className={`mono${binding.usage.daily_usd_used >= binding.usage.daily_usd_limit ? " native-quota-full" : ""}`}>
+                          ${binding.usage.daily_usd_used.toFixed(2)}/${binding.usage.daily_usd_limit.toFixed(2)}
+                        </dd>
+                      </div>
+                    )}
+                    {binding.usage.weekly_usd_limit > 0 && (
+                      <div>
+                        <dt>{t("mapping.native.weeklyUsd")}</dt>
+                        <dd className={`mono${binding.usage.weekly_usd_used >= binding.usage.weekly_usd_limit ? " native-quota-full" : ""}`}>
+                          ${binding.usage.weekly_usd_used.toFixed(2)}/${binding.usage.weekly_usd_limit.toFixed(2)}
+                        </dd>
+                      </div>
+                    )}
+                    {(binding.usage.daily_calls > 0 || binding.usage.weekly_calls > 0) && (
+                      <div>
+                        <dt>{t("mapping.native.calls")}</dt>
+                        <dd className="mono">
+                          {binding.usage.daily_calls}/{binding.usage.weekly_calls}
+                        </dd>
+                      </div>
+                    )}
+                  </dl>
+                )}
                 <div className="native-binding-actions">
                   {binding ? (
                     <>
@@ -370,13 +406,34 @@ function NativeKeyBindingEditor({
     initialGroupIsManual ? MANUAL_GROUP_OPTION : initialGroup,
   );
   const [manualGroup, setManualGroup] = useState(initialGroupIsManual ? initialGroup : "");
+  const [rpm, setRpm] = useState(binding?.rpm ? String(binding.rpm) : "");
+  const [dailyUsd, setDailyUsd] = useState(binding?.daily_usd ? String(binding.daily_usd) : "");
+  const [weeklyUsd, setWeeklyUsd] = useState(binding?.weekly_usd ? String(binding.weekly_usd) : "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  const parseLimitNumber = (raw: string): number | undefined => {
+    const trimmed = raw.trim();
+    if (!trimmed) return 0; // empty input = explicitly clear the limit
+    const value = Number(trimmed);
+    if (!Number.isFinite(value) || value < 0) return undefined; // invalid → block save
+    return value;
+  };
+  const rpmValue = parseLimitNumber(rpm);
+  const dailyValue = parseLimitNumber(dailyUsd);
+  const weeklyValue = parseLimitNumber(weeklyUsd);
+  const limitsValid = rpmValue !== undefined && dailyValue !== undefined && weeklyValue !== undefined;
+  // Omit limit fields entirely when neither the form nor the existing binding
+  // carries a limit — keeps the wire payload identical to the pre-limits UI.
+  // An explicit 0 is sent only when clearing a previously configured limit.
+  const hadLimits = !!(binding && (binding.rpm || binding.daily_usd || binding.weekly_usd));
+  const limitField = (value: number | undefined) =>
+    value !== undefined && (value > 0 || hadLimits) ? value : undefined;
 
   const usesManualGroup = selectedGroup === MANUAL_GROUP_OPTION;
   const group = usesManualGroup ? manualGroup : selectedGroup;
   const createKey = selectedKey?.apiKey ?? plainKey;
-  const canSave = id.trim() !== "" && group.trim() !== "" && (editing || createKey.trim() !== "");
+  const canSave = limitsValid && id.trim() !== "" && group.trim() !== "" && (editing || createKey.trim() !== "");
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -394,6 +451,9 @@ function NativeKeyBindingEditor({
           name: name.trim(),
           enabled,
           group: group.trim(),
+          rpm: limitField(rpmValue),
+          daily_usd: limitField(dailyValue),
+          weekly_usd: limitField(weeklyValue),
           ...(plainKey.trim() ? { key: plainKey.trim() } : {}),
         };
         await updateNativeKeyBinding(input);
@@ -404,6 +464,9 @@ function NativeKeyBindingEditor({
           enabled,
           key: createKey.trim(),
           group: group.trim(),
+          rpm: limitField(rpmValue),
+          daily_usd: limitField(dailyValue),
+          weekly_usd: limitField(weeklyValue),
         });
       }
       // Drop the only editable UI-held plaintext copy before closing. A key
@@ -520,6 +583,57 @@ function NativeKeyBindingEditor({
             <p id="native-binding-group-hint" className="native-binding-field-hint">
               {t("mapping.native.groupHint")}
             </p>
+          </div>
+          <div className="map-form-row native-binding-limits-row">
+            <label>{t("mapping.native.limitsTitle")}</label>
+            <div className="native-binding-limits">
+              <div>
+                <label htmlFor="native-binding-rpm">{t("mapping.native.rpm")}</label>
+                <input
+                  id="native-binding-rpm"
+                  type="number"
+                  min={0}
+                  step={1}
+                  inputMode="numeric"
+                  value={rpm}
+                  onChange={(e) => setRpm(e.target.value)}
+                  disabled={saving}
+                  placeholder={t("mapping.native.unlimited")}
+                />
+              </div>
+              <div>
+                <label htmlFor="native-binding-daily">{t("mapping.native.dailyUsd")}</label>
+                <input
+                  id="native-binding-daily"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  inputMode="decimal"
+                  value={dailyUsd}
+                  onChange={(e) => setDailyUsd(e.target.value)}
+                  disabled={saving}
+                  placeholder={t("mapping.native.unlimited")}
+                />
+              </div>
+              <div>
+                <label htmlFor="native-binding-weekly">{t("mapping.native.weeklyUsd")}</label>
+                <input
+                  id="native-binding-weekly"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  inputMode="decimal"
+                  value={weeklyUsd}
+                  onChange={(e) => setWeeklyUsd(e.target.value)}
+                  disabled={saving}
+                  placeholder={t("mapping.native.unlimited")}
+                />
+              </div>
+            </div>
+            {!limitsValid && (
+              <p className="native-binding-field-hint error">{t("mapping.native.limitsInvalid")}</p>
+            )}
+            <p className="native-binding-field-hint">{t("mapping.native.limitsHint")}</p>
           </div>
           <div className="map-form-row native-binding-enable-row">
             <label className="switch native-binding-enable-switch">

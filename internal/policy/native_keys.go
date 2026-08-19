@@ -28,29 +28,41 @@ type NativeKeyBinding struct {
 	CallerScope string    `yaml:"caller_scope" json:"caller_scope"`
 	KeyPreview  string    `yaml:"key_preview,omitempty" json:"key_preview,omitempty"`
 	Group       string    `yaml:"group" json:"group"`
-	CreatedAt   time.Time `yaml:"created_at,omitempty" json:"created_at,omitempty"`
-	UpdatedAt   time.Time `yaml:"updated_at,omitempty" json:"updated_at,omitempty"`
+	// Optional usage limits, same semantics as the downstream KeyConfig
+	// equivalents: 0 = unlimited. Pricing for the USD limits comes from the
+	// global alias table (bindings do not carry their own price sheet).
+	RPM       int     `yaml:"rpm,omitempty" json:"rpm,omitempty"`
+	DailyUSD  float64 `yaml:"daily_usd,omitempty" json:"daily_usd,omitempty"`
+	WeeklyUSD float64 `yaml:"weekly_usd,omitempty" json:"weekly_usd,omitempty"`
+	CreatedAt time.Time `yaml:"created_at,omitempty" json:"created_at,omitempty"`
+	UpdatedAt time.Time `yaml:"updated_at,omitempty" json:"updated_at,omitempty"`
 }
 
 // CreateNativeKeyBindingInput is deliberately separate from the persisted
 // NativeKeyBinding. APIKey is consumed once to derive CallerScope and
 // KeyPreview and can never be serialized accidentally.
 type CreateNativeKeyBindingInput struct {
-	ID      string `json:"-" yaml:"-"`
-	Name    string `json:"-" yaml:"-"`
-	Enabled bool   `json:"-" yaml:"-"`
-	APIKey  string `json:"-" yaml:"-"`
-	Group   string `json:"-" yaml:"-"`
+	ID        string   `json:"-" yaml:"-"`
+	Name      string   `json:"-" yaml:"-"`
+	Enabled   bool     `json:"-" yaml:"-"`
+	APIKey    string   `json:"-" yaml:"-"`
+	Group     string   `json:"-" yaml:"-"`
+	RPM       *int     `json:"-" yaml:"-"`
+	DailyUSD  *float64 `json:"-" yaml:"-"`
+	WeeklyUSD *float64 `json:"-" yaml:"-"`
 }
 
 // UpdateNativeKeyBindingInput replaces the mutable display/policy fields. An
 // empty APIKey keeps the existing scope; a non-empty APIKey rotates the
 // binding to that native CPA key without persisting the plaintext.
 type UpdateNativeKeyBindingInput struct {
-	Name    *string `json:"-" yaml:"-"`
-	Enabled *bool   `json:"-" yaml:"-"`
-	APIKey  string  `json:"-" yaml:"-"`
-	Group   *string `json:"-" yaml:"-"`
+	Name      *string  `json:"-" yaml:"-"`
+	Enabled   *bool    `json:"-" yaml:"-"`
+	APIKey    string   `json:"-" yaml:"-"`
+	Group     *string  `json:"-" yaml:"-"`
+	RPM       *int     `json:"-" yaml:"-"`
+	DailyUSD  *float64 `json:"-" yaml:"-"`
+	WeeklyUSD *float64 `json:"-" yaml:"-"`
 }
 
 // NativeCallerScope mirrors CLIProxyAPI's session.CallerScope exactly. The
@@ -116,6 +128,15 @@ func normalizeNativeKeyBindings(bindings []NativeKeyBinding) error {
 			}
 			binding.Group = ClassifyGroupPrefix + suffix
 		}
+		if binding.RPM < 0 {
+			return fmt.Errorf("native key binding %q: rpm must be >= 0", binding.ID)
+		}
+		if binding.DailyUSD < 0 {
+			return fmt.Errorf("native key binding %q: daily_usd must be >= 0", binding.ID)
+		}
+		if binding.WeeklyUSD < 0 {
+			return fmt.Errorf("native key binding %q: weekly_usd must be >= 0", binding.ID)
+		}
 	}
 	return nil
 }
@@ -155,6 +176,15 @@ func (s *Store) CreateNativeKeyBinding(input CreateNativeKeyBindingInput) (Nativ
 		Group:       input.Group,
 		CreatedAt:   now,
 		UpdatedAt:   now,
+	}
+	if input.RPM != nil {
+		candidate.RPM = *input.RPM
+	}
+	if input.DailyUSD != nil {
+		candidate.DailyUSD = *input.DailyUSD
+	}
+	if input.WeeklyUSD != nil {
+		candidate.WeeklyUSD = *input.WeeklyUSD
 	}
 
 	s.mu.RLock()
@@ -225,6 +255,15 @@ func (s *Store) UpdateNativeKeyBinding(id string, input UpdateNativeKeyBindingIn
 	}
 	if input.Group != nil {
 		candidate.Group = *input.Group
+	}
+	if input.RPM != nil {
+		candidate.RPM = *input.RPM
+	}
+	if input.DailyUSD != nil {
+		candidate.DailyUSD = *input.DailyUSD
+	}
+	if input.WeeklyUSD != nil {
+		candidate.WeeklyUSD = *input.WeeklyUSD
 	}
 	if rawAPIKey := strings.TrimSpace(input.APIKey); rawAPIKey != "" {
 		candidate.CallerScope = NativeCallerScope(rawAPIKey)

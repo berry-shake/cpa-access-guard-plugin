@@ -291,6 +291,14 @@ func (a *App) pickScheduler(raw []byte) ([]byte, error) {
 		return ErrorEnvelope("invalid_scheduler_metadata", "cpa-access-guard: invalid caller_scope metadata", http.StatusServiceUnavailable), nil
 	}
 	if callerScope != "" {
+		// Usage-limit gate for native keys: RPM decrements here (concurrency
+		// safe), USD limits compare against the usage.handle ledger. A binding
+		// with no limits configured passes through with zero side effects.
+		if decision, limited := a.store.CheckNativeKeyQuota(callerScope); limited {
+			return ErrorEnvelope("quota_exceeded",
+				fmt.Sprintf("cpa-access-guard: native key quota exceeded (%s)", decision.Reason),
+				http.StatusTooManyRequests), nil
+		}
 		group, nativeBinding = a.store.ResolveNativeKeyGroup(callerScope, req.Provider, req.Model)
 		group = strings.ToLower(strings.TrimSpace(group))
 	}

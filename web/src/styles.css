@@ -1274,3 +1274,28 @@ td.strong { font-weight: 600; color: var(--text); }
   background: var(--accent-soft); border-color: var(--accent); color: var(--accent);
   font-weight: 600;
 }
+
+/* Native binding usage limits */
+.native-binding-limits-row .native-binding-limits {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+.native-binding-limits label {
+  font-size: 0.78rem;
+  opacity: 0.85;
+  margin-bottom: 0.25rem;
+  display: block;
+}
+.native-binding-limits input {
+  width: 100%;
+}
+.native-binding-usage dd.native-quota-full {
+  color: var(--danger, #d92d20);
+  font-weight: 600;
+}
+@media (max-width: 640px) {
+  .native-binding-limits-row .native-binding-limits {
+    grid-template-columns: 1fr;
+  }
+}

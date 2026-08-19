@@ -323,7 +323,15 @@
       "manualGroupLabel": "其他凭证组",
       "groupHint": "包含内置组和已启用的分类组；找不到时可手动输入。",
       "enableBinding": "启用绑定",
-      "saving": "保存中…"
+      "saving": "保存中…",
+      "limitsTitle": "用量限制（可选）",
+      "rpm": "RPM",
+      "dailyUsd": "日额度 (USD)",
+      "weeklyUsd": "周额度 (USD)",
+      "unlimited": "不限",
+      "limitsInvalid": "额度必须是 0 或正数。",
+      "limitsHint": "留空或 0 = 不限。美元用量按全局别名表计价；未配置价格的模型只计次数、按 $0 计费。",
+      "calls": "调用次数（日/周）"
     }
   }
 }

@@ -199,12 +199,29 @@ export interface ClassifyPreviewResponse {
 // NativeKeyBinding maps a CPA top-level `api-keys` entry to one credential
 // group. The plaintext key and derived caller_scope are deliberately absent
 // from management responses; only a redacted preview is exposed to the UI.
+export interface NativeBindingUsageSummary {
+  rpm_limit: number;
+  daily_usd_limit: number;
+  weekly_usd_limit: number;
+  rpm_used: number;
+  daily_usd_used: number;
+  weekly_usd_used: number;
+  daily_calls: number;
+  weekly_calls: number;
+}
+
 export interface NativeKeyBinding {
   id: string;
   name: string;
   enabled: boolean;
   key_preview: string;
   group: string;
+  // Usage limits; 0/omitted = unlimited. Pricing comes from the global
+  // alias table.
+  rpm?: number;
+  daily_usd?: number;
+  weekly_usd?: number;
+  usage?: NativeBindingUsageSummary;
   created_at?: string;
   updated_at?: string;
 }
@@ -215,6 +232,9 @@ export interface NativeKeyBindingCreateRequest {
   enabled?: boolean;
   key: string;
   group: string;
+  rpm?: number;
+  daily_usd?: number;
+  weekly_usd?: number;
 }
 
 export interface NativeKeyBindingUpdateRequest {
@@ -224,6 +244,9 @@ export interface NativeKeyBindingUpdateRequest {
   // Empty/omitted keeps the currently bound top-level API key.
   key?: string;
   group?: string;
+  rpm?: number;
+  daily_usd?: number;
+  weekly_usd?: number;
 }
 
 // NativeKeyCatalogEntry correlates one CPA top-level api-keys item with an

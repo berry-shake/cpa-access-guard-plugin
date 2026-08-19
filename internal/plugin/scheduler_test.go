@@ -528,3 +528,89 @@ func unmarshalOK(raw []byte, v any) error {
 	}
 	return json.Unmarshal(env.Result, v)
 }
+
+// configureNativeBindingWithLimits builds an app whose native binding carries
+// usage limits (yaml `rpm` / `daily_usd` / `weekly_usd`), for the quota gate.
+func configureNativeBindingWithLimits(t *testing.T, rpm, dailyUSD, weeklyUSD int) *App {
+	t.Helper()
+	app := NewApp()
+	yaml := []byte(fmt.Sprintf(`
+enabled: true
+state_file: %q
+native_key_bindings:
+  - id: native-quota
+    enabled: true
+    caller_scope: %q
+    key_preview: "sk-nat...quota"
+    group: team
+    rpm: %d
+    daily_usd: %d
+    weekly_usd: %d
+keys: []
+`, filepath.ToSlash(filepath.Join(t.TempDir(), "state.json")), testNativeCallerScope, rpm, dailyUSD, weeklyUSD))
+	req, _ := json.Marshal(LifecycleRequest{ConfigYAML: yaml})
+	if _, err := app.HandleMethod(MethodPluginReconfigure, req); err != nil {
+		t.Fatalf("configure native quota app: %v", err)
+	}
+	t.Cleanup(app.Shutdown)
+	return app
+}
+
+func nativeQuotaPickRequest() []byte {
+	req, _ := json.Marshal(SchedulerPickRequest{
+		Provider: "codex",
+		Model:    "gpt-5-codex",
+		Options: SchedulerPickOptions{Metadata: map[string]any{
+			SchedulerCallerScopeMetadataKey: testNativeCallerScope,
+		}},
+		Candidates: []SchedulerAuthCandidate{
+			{ID: "codex-team", Provider: "codex", Attributes: map[string]string{"plan_type": "team"}},
+		},
+	})
+	return req
+}
+
+func TestSchedulerPickNativeQuotaUnlimitedPasses(t *testing.T) {
+	// Zero limits must be bit-for-bit identical to the pre-quota behavior:
+	// group filter still applies, normal scheduling outcome.
+	app := configureNativeBindingWithLimits(t, 0, 0, 0)
+	raw, err := app.HandleMethod(MethodSchedulerPick, nativeQuotaPickRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resp SchedulerPickResponse
+	if err := unmarshalOK(raw, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Handled || resp.AuthID != "codex-team" {
+		t.Fatalf("unlimited binding must schedule normally, got %+v", resp)
+	}
+}
+
+func TestSchedulerPickNativeQuotaRPMExceeded(t *testing.T) {
+	app := configureNativeBindingWithLimits(t, 1, 0, 0)
+	// First request consumes the single allowance and schedules normally.
+	raw, err := app.HandleMethod(MethodSchedulerPick, nativeQuotaPickRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resp SchedulerPickResponse
+	if err := unmarshalOK(raw, &resp); err != nil || !resp.Handled {
+		t.Fatalf("first request must pass, resp=%+v err=%v", resp, err)
+	}
+	// Second request hits the quota gate: 429 quota_exceeded.
+	raw, err = app.HandleMethod(MethodSchedulerPick, nativeQuotaPickRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var env Envelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		t.Fatal(err)
+	}
+	if env.OK || env.Error == nil || env.Error.Code != "quota_exceeded" || env.Error.HTTPStatus != http.StatusTooManyRequests {
+		t.Fatalf("expected quota_exceeded 429, got %+v", env)
+	}
+	if !strings.Contains(env.Error.Message, "rpm_exceeded") {
+		t.Fatalf("error message must carry the reason, got %q", env.Error.Message)
+	}
+}

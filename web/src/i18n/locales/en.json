@@ -323,7 +323,15 @@
       "manualGroupLabel": "Other credential group",
       "groupHint": "Includes built-in and enabled classification groups; enter another group manually if needed.",
       "enableBinding": "Enable binding",
-      "saving": "Saving…"
+      "saving": "Saving…",
+      "limitsTitle": "Usage limits (optional)",
+      "rpm": "RPM",
+      "dailyUsd": "Daily USD",
+      "weeklyUsd": "Weekly USD",
+      "unlimited": "unlimited",
+      "limitsInvalid": "Limits must be zero or positive numbers.",
+      "limitsHint": "Empty or 0 = unlimited. USD usage is priced via the global alias table; models without a priced alias count calls but bill $0.",
+      "calls": "Calls (day/week)"
     }
   }
 }

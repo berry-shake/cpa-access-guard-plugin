@@ -315,7 +315,15 @@
       "manualGroupLabel": "其他憑證群組",
       "groupHint": "包含內建群組和已啟用的分類群組；找不到時可手動輸入。",
       "enableBinding": "啟用綁定",
-      "saving": "儲存中…"
+      "saving": "儲存中…",
+      "limitsTitle": "用量限制（可選）",
+      "rpm": "RPM",
+      "dailyUsd": "日額度 (USD)",
+      "weeklyUsd": "週額度 (USD)",
+      "unlimited": "不限",
+      "limitsInvalid": "額度必須是 0 或正數。",
+      "limitsHint": "留空或 0 = 不限。美元用量按全域別名表計價；未配置價格的模型只計次數、按 $0 計費。",
+      "calls": "呼叫次數（日/週）"
     }
   }
 }

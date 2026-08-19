@@ -15,11 +15,14 @@ import (
 // persisted. Pointer fields let PATCH distinguish an omitted field from a
 // deliberate false/empty value.
 type nativeKeyBindingWriteRequest struct {
-	ID      string  `json:"id"`
-	Name    *string `json:"name,omitempty"`
-	Enabled *bool   `json:"enabled,omitempty"`
-	Key     string  `json:"key,omitempty"`
-	Group   *string `json:"group,omitempty"`
+	ID        string   `json:"id"`
+	Name      *string  `json:"name,omitempty"`
+	Enabled   *bool    `json:"enabled,omitempty"`
+	Key       string   `json:"key,omitempty"`
+	Group     *string  `json:"group,omitempty"`
+	RPM       *int     `json:"rpm,omitempty"`
+	DailyUSD  *float64 `json:"daily_usd,omitempty"`
+	WeeklyUSD *float64 `json:"weekly_usd,omitempty"`
 }
 
 // publicNativeKeyBinding deliberately omits CallerScope. Although the scope is
@@ -31,6 +34,10 @@ type publicNativeKeyBinding struct {
 	Enabled    bool   `json:"enabled"`
 	KeyPreview string `json:"key_preview"`
 	Group      string `json:"group"`
+	RPM        int    `json:"rpm,omitempty"`
+	DailyUSD   float64 `json:"daily_usd,omitempty"`
+	WeeklyUSD  float64 `json:"weekly_usd,omitempty"`
+	Usage      *policy.NativeBindingUsageSummary `json:"usage,omitempty"`
 	CreatedAt  string `json:"created_at,omitempty"`
 	UpdatedAt  string `json:"updated_at,omitempty"`
 }
@@ -55,7 +62,7 @@ func (a *App) listNativeKeyBindings() ManagementResponse {
 	bindings := a.store.NativeKeyBindingsSnapshot()
 	public := make([]publicNativeKeyBinding, 0, len(bindings))
 	for _, binding := range bindings {
-		public = append(public, publicNativeKeyBindingFromPolicy(binding))
+		public = append(public, a.publicNativeKeyBindingWithUsage(binding))
 	}
 	return jsonResponse(http.StatusOK, map[string]any{"bindings": public})
 }
@@ -91,7 +98,7 @@ func (a *App) catalogNativeKeyBindings(body []byte) ManagementResponse {
 			KeyPreview: policy.NativeKeyPreview(key),
 		}
 		if binding, ok := bindingsByScope[callerScope]; ok {
-			publicBinding := publicNativeKeyBindingFromPolicy(binding)
+			publicBinding := a.publicNativeKeyBindingWithUsage(binding)
 			entry.Binding = &publicBinding
 			matchedScopes[callerScope] = struct{}{}
 		}
@@ -103,7 +110,7 @@ func (a *App) catalogNativeKeyBindings(body []byte) ManagementResponse {
 		if _, matched := matchedScopes[binding.CallerScope]; matched {
 			continue
 		}
-		orphanBindings = append(orphanBindings, publicNativeKeyBindingFromPolicy(binding))
+		orphanBindings = append(orphanBindings, a.publicNativeKeyBindingWithUsage(binding))
 	}
 
 	return jsonResponse(http.StatusOK, map[string]any{
@@ -137,11 +144,14 @@ func (a *App) createNativeKeyBinding(body []byte) ManagementResponse {
 		name = strings.TrimSpace(*req.Name)
 	}
 	binding, err := a.store.CreateNativeKeyBinding(policy.CreateNativeKeyBindingInput{
-		ID:      req.ID,
-		Name:    name,
-		Enabled: applyBool(req.Enabled, true),
-		APIKey:  key,
-		Group:   group,
+		ID:        req.ID,
+		Name:      name,
+		Enabled:   applyBool(req.Enabled, true),
+		APIKey:    key,
+		Group:     group,
+		RPM:       req.RPM,
+		DailyUSD:  req.DailyUSD,
+		WeeklyUSD: req.WeeklyUSD,
 	})
 	if err != nil {
 		return nativeKeyBindingStoreError(err)
@@ -162,10 +172,13 @@ func (a *App) patchNativeKeyBinding(body []byte) ManagementResponse {
 	}
 
 	binding, err := a.store.UpdateNativeKeyBinding(id, policy.UpdateNativeKeyBindingInput{
-		Name:    trimmedOptionalString(req.Name),
-		Enabled: req.Enabled,
-		APIKey:  strings.TrimSpace(req.Key),
-		Group:   trimmedOptionalString(req.Group),
+		Name:      trimmedOptionalString(req.Name),
+		Enabled:   req.Enabled,
+		APIKey:    strings.TrimSpace(req.Key),
+		Group:     trimmedOptionalString(req.Group),
+		RPM:       req.RPM,
+		DailyUSD:  req.DailyUSD,
+		WeeklyUSD: req.WeeklyUSD,
 	})
 	if err != nil {
 		return nativeKeyBindingStoreError(err)
@@ -210,12 +223,28 @@ func trimmedOptionalString(value *string) *string {
 }
 
 func publicNativeKeyBindingFromPolicy(binding policy.NativeKeyBinding) publicNativeKeyBinding {
+	return publicNativeKeyBindingFromPolicyWithUsage(binding, nil)
+}
+
+// publicNativeKeyBindingFromPolicyWithUsage attaches live usage counters when
+// the caller has a store at hand (list endpoints); write endpoints skip the
+// extra lookup and return the persisted policy only.
+func (a *App) publicNativeKeyBindingWithUsage(binding policy.NativeKeyBinding) publicNativeKeyBinding {
+	usage := a.store.NativeBindingUsage(binding)
+	return publicNativeKeyBindingFromPolicyWithUsage(binding, &usage)
+}
+
+func publicNativeKeyBindingFromPolicyWithUsage(binding policy.NativeKeyBinding, usage *policy.NativeBindingUsageSummary) publicNativeKeyBinding {
 	out := publicNativeKeyBinding{
 		ID:         binding.ID,
 		Name:       binding.Name,
 		Enabled:    binding.Enabled,
 		KeyPreview: binding.KeyPreview,
 		Group:      binding.Group,
+		RPM:        binding.RPM,
+		DailyUSD:   binding.DailyUSD,
+		WeeklyUSD:  binding.WeeklyUSD,
+		Usage:      usage,
 	}
 	if !binding.CreatedAt.IsZero() {
 		out.CreatedAt = binding.CreatedAt.UTC().Format(time.RFC3339)

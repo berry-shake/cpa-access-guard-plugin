@@ -600,6 +600,13 @@ func (s *Store) RecordUsage(apiKeyOrID, alias, model string, failed bool, detail
 		key = s.findBySecret(apiKeyOrID)
 	}
 	if key == nil || !key.Enabled {
+		// Native-key fallback: the config-api-key provider reports the
+		// plaintext key as Principal, so the record can still be billed to a
+		// native binding's ledger account (see native_quota.go). Bindings
+		// without limits still benefit from the usage report.
+		if binding := s.findNativeBindingByScope(NativeCallerScope(apiKeyOrID)); binding != nil && binding.Enabled {
+			return s.recordNativeUsage(*binding, alias, model, failed, detail)
+		}
 		return 0
 	}
 	_, usageLedger := s.runtimeComponents()
