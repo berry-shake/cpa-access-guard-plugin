@@ -96,11 +96,11 @@ func TestComputeCost(t *testing.T) {
 
 func TestPriceForAlias(t *testing.T) {
 	k := &KeyConfig{Models: []ModelRule{{Alias: "fast", InputPricePerMillion: 2, OutputPricePerMillion: 8, CacheReadPricePerMillion: 0.2}}}
-	in, out, cache, ok := k.PriceForAlias("Fast") // case-insensitive
-	if !ok || in != 2 || out != 8 || cache != 0.2 {
-		t.Fatalf("got in=%v out=%v cache=%v ok=%v", in, out, cache, ok)
+	in, out, cache, cacheWrite, ok := k.PriceForAlias("Fast") // case-insensitive
+	if !ok || in != 2 || out != 8 || cache != 0.2 || cacheWrite != 0 {
+		t.Fatalf("got in=%v out=%v cache=%v cw=%v ok=%v", in, out, cache, cacheWrite, ok)
 	}
-	if _, _, _, ok := k.PriceForAlias("missing"); ok {
+	if _, _, _, _, ok := k.PriceForAlias("missing"); ok {
 		t.Fatal("missing alias should not be priced")
 	}
 }
@@ -123,7 +123,7 @@ func TestComputeCacheCostSubsetProvider(t *testing.T) {
 		InputTokens: 1_000_000, OutputTokens: 500_000,
 		CachedTokens: 200_000, // subset of input
 	}
-	got := ComputeCacheCost("openai", 3, 15, 0.30, true, detail)
+	got := ComputeCacheCost("openai", PriceSheet{Input: 3, Output: 15, CacheRead: 0.30, Priced: true}, detail)
 	if !nearly(got, 9.96) {
 		t.Fatalf("subset cache cost = %v, want 9.96", got)
 	}
@@ -141,7 +141,7 @@ func TestComputeCacheCostAdditiveProvider(t *testing.T) {
 		CacheReadTokens:     200_000,
 		CacheCreationTokens: 100_000,
 	}
-	got := ComputeCacheCost("claude", 3, 15, 0.30, true, detail)
+	got := ComputeCacheCost("claude", PriceSheet{Input: 3, Output: 15, CacheRead: 0.30, Priced: true}, detail)
 	if !nearly(got, 10.26) {
 		t.Fatalf("additive cache cost = %v, want 10.26", got)
 	}
@@ -153,7 +153,7 @@ func TestComputeCacheCostAdditiveProvider(t *testing.T) {
 // 1M input (incl 200K cached) + 500K output @ $3/$15 → 3 + 7.5 = 10.5.
 func TestComputeCacheCostNoCachePriceFallsBackToInput(t *testing.T) {
 	detail := UsageDetail{InputTokens: 1_000_000, OutputTokens: 500_000, CachedTokens: 200_000}
-	got := ComputeCacheCost("openai", 3, 15, 0, true, detail)
+	got := ComputeCacheCost("openai", PriceSheet{Input: 3, Output: 15, Priced: true}, detail)
 	if !nearly(got, 10.5) {
 		t.Fatalf("fallback cost = %v, want 10.5", got)
 	}
@@ -161,7 +161,7 @@ func TestComputeCacheCostNoCachePriceFallsBackToInput(t *testing.T) {
 	// must add them at the input price (matching pre-cache-pricing behavior).
 	// 800K input + 200K cacheRead + 500K output @ $3/$15 → 1M*3 + 0.5M*15 = 10.5.
 	detail2 := UsageDetail{InputTokens: 800_000, OutputTokens: 500_000, CacheReadTokens: 200_000}
-	got2 := ComputeCacheCost("claude", 3, 15, 0, true, detail2)
+	got2 := ComputeCacheCost("claude", PriceSheet{Input: 3, Output: 15, Priced: true}, detail2)
 	if !nearly(got2, 10.5) {
 		t.Fatalf("additive fallback cost = %v, want 10.5", got2)
 	}
@@ -171,7 +171,7 @@ func TestComputeCacheCostNoCachePriceFallsBackToInput(t *testing.T) {
 // tokens and cache configured.
 func TestComputeCacheCostUnpricedZero(t *testing.T) {
 	detail := UsageDetail{InputTokens: 1_000_000, OutputTokens: 1_000_000, CachedTokens: 500_000}
-	if c := ComputeCacheCost("openai", 3, 15, 0.3, false, detail); c != 0 {
+	if c := ComputeCacheCost("openai", PriceSheet{Input: 3, Output: 15, CacheRead: 0.3}, detail); c != 0 {
 		t.Fatalf("unpriced cost = %v, want 0", c)
 	}
 }
@@ -183,7 +183,7 @@ func TestComputeCacheCostUnpricedZero(t *testing.T) {
 // cacheReadTokens = 200K. nonCache input billed at input price = 800K.
 func TestComputeCacheCostBreakdown(t *testing.T) {
 	detail := UsageDetail{InputTokens: 1_000_000, OutputTokens: 500_000, CachedTokens: 200_000}
-	total, cacheCost, cacheRead := ComputeCacheCostBreakdown("openai", 3, 15, 0.30, true, detail)
+	total, cacheCost, cacheRead, _, _ := ComputeCacheCostBreakdown("openai", PriceSheet{Input: 3, Output: 15, CacheRead: 0.30, Priced: true}, detail)
 	if !nearly(total, 9.96) {
 		t.Fatalf("total = %v, want 9.96", total)
 	}
@@ -200,7 +200,7 @@ func TestComputeCacheCostBreakdown(t *testing.T) {
 // priced) even though cacheRead is still reported for hit-rate accounting.
 func TestComputeCacheCostBreakdownNoCachePrice(t *testing.T) {
 	detail := UsageDetail{InputTokens: 1_000_000, OutputTokens: 500_000, CachedTokens: 200_000}
-	total, cacheCost, cacheRead := ComputeCacheCostBreakdown("openai", 3, 15, 0, true, detail)
+	total, cacheCost, cacheRead, _, _ := ComputeCacheCostBreakdown("openai", PriceSheet{Input: 3, Output: 15, Priced: true}, detail)
 	if !nearly(total, 10.5) {
 		t.Fatalf("total = %v, want 10.5", total)
 	}
@@ -223,7 +223,13 @@ func TestComputeCacheCostBreakdownAdditive(t *testing.T) {
 		CacheReadTokens:     200_000,
 		CacheCreationTokens: 100_000,
 	}
-	total, cacheCost, cacheRead := ComputeCacheCostBreakdown("claude", 3, 15, 0.30, true, detail)
+	total, cacheCost, cacheRead, cacheWriteCost, cacheWriteTokens := ComputeCacheCostBreakdown("claude", PriceSheet{Input: 3, Output: 15, CacheRead: 0.30, Priced: true}, detail)
+	if cacheWriteCost != 0 {
+		t.Fatalf("cacheWriteCost = %v, want 0 (no write price: folded into input)", cacheWriteCost)
+	}
+	if cacheWriteTokens != 100_000 {
+		t.Fatalf("cacheWriteTokens = %d, want 100000 (reported regardless of price)", cacheWriteTokens)
+	}
 	if !nearly(total, 10.26) {
 		t.Fatalf("total = %v, want 10.26", total)
 	}
@@ -327,5 +333,37 @@ func TestRecordUsageMatchesByID(t *testing.T) {
 	d := store.Authenticate("POST", "/v1/chat/completions", hdr, nil, []byte(`{"model":"fast"}`))
 	if d.Allowed || !d.CostLimited || d.Reason != "daily_exceeded" {
 		t.Fatalf("ID-matched usage should bill & block: %+v", d)
+	}
+}
+
+// TestComputeCacheCostWritePrice: cache-creation tokens billed at the
+// dedicated write price (e.g. Anthropic 1.25x input) instead of the input
+// price. Additive provider, no write price → legacy input-price fallback.
+func TestComputeCacheCostWritePrice(t *testing.T) {
+	detail := UsageDetail{
+		InputTokens:         800_000,
+		OutputTokens:        0,
+		CacheReadTokens:     0,
+		CacheCreationTokens: 1_000_000,
+	}
+	// Write price 3.75 (1.25x input of 3): 800K input @3 + 1M writes @3.75 = 6.15.
+	got := ComputeCacheCost("claude", PriceSheet{Input: 3, Output: 15, CacheWrite: 3.75, Priced: true}, detail)
+	if !nearly(got, 6.15) {
+		t.Fatalf("write-priced cost = %v, want 6.15", got)
+	}
+	// Breakdown reports separable write spend + tokens.
+	total, _, _, wCost, wTokens := ComputeCacheCostBreakdown("claude", PriceSheet{Input: 3, Output: 15, CacheWrite: 3.75, Priced: true}, detail)
+	if !nearly(total, 6.15) || !nearly(wCost, 3.75) || wTokens != 1_000_000 {
+		t.Fatalf("write breakdown = %v/%v/%d, want 6.15/3.75/1000000", total, wCost, wTokens)
+	}
+	// No write price configured: writes fall back to the input price: 2.4 + 3.
+	got = ComputeCacheCost("claude", PriceSheet{Input: 3, Output: 15, Priced: true}, detail)
+	if !nearly(got, 5.4) {
+		t.Fatalf("fallback write cost = %v, want 5.4", got)
+	}
+	// Write price also works for subset providers (writes are always additive).
+	got = ComputeCacheCost("openai", PriceSheet{Input: 3, Output: 15, CacheWrite: 3.75, Priced: true}, detail)
+	if !nearly(got, 6.15) {
+		t.Fatalf("subset write cost = %v, want 6.15", got)
 	}
 }

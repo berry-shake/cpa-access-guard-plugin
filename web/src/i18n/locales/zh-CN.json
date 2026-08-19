@@ -120,7 +120,9 @@
       "sectionAccess": "访问",
       "sectionModels": "模型与计价"
     },
-    "existingAliases": "已有别名（快捷引用全局别名）"
+    "existingAliases": "已有别名（快捷引用全局别名）",
+    "colCacheWrite": "缓存写 $/M",
+    "colCacheWriteHint": "每 1M 缓存写入 token 的价格。0 = 按输入价计费。"
   },
   "picker": {
     "title": "选择模型",

@@ -14,6 +14,7 @@ export interface ModelRule {
   input_price_per_million?: number;
   output_price_per_million?: number;
   cache_read_price_per_million?: number;
+  cache_write_price_per_million?: number;
   // billing_mode selects how this alias is billed per successful request:
   //   - "tokens" (default): bill by token counts using the three prices above.
   //   - "per_call": bill a fixed per_call_usd per successful request, ignoring
@@ -38,6 +39,10 @@ export interface UsageSummary {
   weekly_cache_cost_usd?: number;
   daily_cache_read_tokens?: number;
   weekly_cache_read_tokens?: number;
+  daily_cache_write_tokens?: number;
+  weekly_cache_write_tokens?: number;
+  daily_cache_write_cost_usd?: number;
+  weekly_cache_write_cost_usd?: number;
   daily_input_tokens?: number;
   weekly_input_tokens?: number;
   // Call counts: successful requests billed into the window (token or
@@ -160,6 +165,7 @@ export interface AliasMapping {
   input_price_per_million?: number;
   output_price_per_million?: number;
   cache_read_price_per_million?: number;
+  cache_write_price_per_million?: number;
   per_call_usd?: number;
 }
 
@@ -179,6 +185,7 @@ export interface KeyAliasRef {
   input_price_per_million?: number | null;
   output_price_per_million?: number | null;
   cache_read_price_per_million?: number | null;
+  cache_write_price_per_million?: number | null;
   per_call_usd?: number | null;
 }
 

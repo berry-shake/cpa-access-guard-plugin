@@ -354,9 +354,13 @@ func TestCacheStatsAdditiveExcludesCreation(t *testing.T) {
 	if s.DailyCacheReadTokens != 200_000 {
 		t.Fatalf("daily cacheRead = %d, want 200000 (creation excluded)", s.DailyCacheReadTokens)
 	}
-	// nonCache input = input + creation = 900K (additive bills creation at input price).
-	if s.DailyInputTokens != 900_000 {
-		t.Fatalf("daily non-cache input = %d, want 900000", s.DailyInputTokens)
+	// nonCache input = plain input only = 800K: writes are now separately
+	// tracked (DailyCacheWriteTokens), no longer folded into the input line.
+	if s.DailyInputTokens != 800_000 {
+		t.Fatalf("daily non-cache input = %d, want 800000", s.DailyInputTokens)
+	}
+	if s.DailyCacheWriteTokens != 100_000 {
+		t.Fatalf("daily cacheWrite = %d, want 100000", s.DailyCacheWriteTokens)
 	}
 }
 

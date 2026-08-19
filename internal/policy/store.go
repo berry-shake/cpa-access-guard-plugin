@@ -551,7 +551,7 @@ func (s *Store) RecordResponseCost(headers http.Header, query map[string][]strin
 	if !usage.Found {
 		return 0
 	}
-	inputPerMillion, outputPerMillion, _, priced := key.PriceForAlias(alias)
+	inputPerMillion, outputPerMillion, _, _, priced := key.PriceForAlias(alias)
 	cost := ComputeCost(inputPerMillion, outputPerMillion, priced, usage)
 	if priced && usage.Found && usageLedger != nil {
 		// Record even when cost == 0 (a priced-but-free alias: input/output/cache
@@ -564,7 +564,7 @@ func (s *Store) RecordResponseCost(headers http.Header, query map[string][]strin
 		// input tokens for hit-rate denominator parity (treat all prompt tokens
 		// as non-cache input on this path, since we can't tell otherwise).
 		// callCount=1: this was a successful, token-billed request.
-		usageLedger.RecordCost(key.ID, alias, cost, 0, 0, int64(usage.PromptTokens), int64(usage.CompletionTokens), 1)
+		usageLedger.RecordCost(key.ID, alias, cost, 0, 0, 0, 0, int64(usage.PromptTokens), int64(usage.CompletionTokens), 1)
 	}
 	return cost
 }
@@ -637,7 +637,7 @@ func (s *Store) RecordUsage(apiKeyOrID, alias, model string, failed bool, detail
 		}
 		if usageLedger != nil {
 			// callCount=1 regardless of cost (even free calls count toward volume).
-			usageLedger.RecordCost(key.ID, resolved, cost, 0, 0, 0, 0, 1)
+			usageLedger.RecordCost(key.ID, resolved, cost, 0, 0, 0, 0, 0, 0, 1)
 		}
 		return cost
 	}
@@ -659,15 +659,18 @@ func (s *Store) RecordUsage(apiKeyOrID, alias, model string, failed bool, detail
 	if rule.Alias != "" {
 		provider = rule.Provider
 	}
-	inputPerMillion, outputPerMillion, cacheReadPerMillion, priced := key.PriceForAlias(resolved)
-	cost, cacheCost, cacheReadTokens := ComputeCacheCostBreakdown(provider, inputPerMillion, outputPerMillion, cacheReadPerMillion, priced, detail)
+	inputPerMillion, outputPerMillion, cacheReadPerMillion, cacheWritePerMillion, priced := key.PriceForAlias(resolved)
+	sheet := PriceSheet{Input: inputPerMillion, Output: outputPerMillion, CacheRead: cacheReadPerMillion, CacheWrite: cacheWritePerMillion, Priced: priced}
+	cost, cacheCost, cacheReadTokens, cacheWriteCost, cacheWriteTokens := ComputeCacheCostBreakdown(provider, sheet, detail)
 	// Non-cache input tokens billed at the input price — the denominator partner
 	// for hit-rate = cacheRead / (cacheRead + input). Must mirror the biller's
 	// internal split so the reported rate matches the actual pricing.
 	var nonCacheInput int64
 	if priced && (detail.InputTokens > 0 || detail.OutputTokens > 0) {
 		if isCacheAdditiveProvider(provider) {
-			nonCacheInput = detail.InputTokens + detail.CacheCreationTokens
+			// Cache writes are now separately priced, so the hit-rate
+			// denominator excludes them (they are not regular input tokens).
+			nonCacheInput = detail.InputTokens
 		} else {
 			cr := detail.CacheReadTokens
 			if cr == 0 {
@@ -685,7 +688,7 @@ func (s *Store) RecordUsage(apiKeyOrID, alias, model string, failed bool, detail
 		// reports usage volume and hit-rate; USD stays 0. Previously `cost > 0`
 		// dropped free-but-priced requests entirely, hiding their volume.
 		// callCount=1: this was a successful, token-billed request.
-		usageLedger.RecordCost(key.ID, resolved, cost, cacheCost, cacheReadTokens, nonCacheInput, int64(detail.OutputTokens), 1)
+		usageLedger.RecordCost(key.ID, resolved, cost, cacheCost, cacheReadTokens, cacheWriteCost, cacheWriteTokens, nonCacheInput, int64(detail.OutputTokens), 1)
 	}
 	return cost
 }

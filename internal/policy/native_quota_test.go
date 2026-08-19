@@ -177,12 +177,12 @@ func TestNativeWeeklyWindowAgesOut(t *testing.T) {
 	now := time.Now()
 	l := newUsageLedger(func() time.Time { return now })
 	account := nativeUsageLedgerID("abc")
-	l.RecordCost(account, "fast", 8, 0, 0, 0, 0, 1)
+	l.RecordCost(account, "fast", 8, 0, 0, 0, 0, 0, 0, 1)
 	if l.entries[account].Weekly.TotalUSD != 8 {
 		t.Fatal("seed failed")
 	}
 	l.now = func() time.Time { return now.Add(weekWindow + time.Minute) }
-	l.RecordCost(account, "fast", 1, 0, 0, 0, 0, 1)
+	l.RecordCost(account, "fast", 1, 0, 0, 0, 0, 0, 0, 1)
 	if got := l.entries[account].Weekly.TotalUSD; got != 1 {
 		t.Fatalf("weekly window must reset after 7 days, got %v", got)
 	}

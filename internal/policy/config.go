@@ -91,6 +91,10 @@ type ModelRule struct {
 	// tokens in both cases, replacing the input price for that subset.
 	// Only used when BillingMode == "" or "tokens"; ignored under "per_call".
 	CacheReadPricePerMillion float64 `yaml:"cache_read_price_per_million,omitempty" json:"cache_read_price_per_million,omitempty"`
+	// CacheWritePricePerMillion is the USD price per 1M cache-creation (write)
+	// tokens, e.g. Anthropic prompt-caching writes at 1.25x input.
+	// 0 = bill cache writes at the regular input price (legacy behavior).
+	CacheWritePricePerMillion float64 `yaml:"cache_write_price_per_million,omitempty" json:"cache_write_price_per_million,omitempty"`
 	// BillingMode selects how this alias is billed per successful request:
 	//   - "" or "tokens" (default): bill by token counts using the three prices
 	//     above (existing behavior).
@@ -120,6 +124,7 @@ type AliasMapping struct {
 	InputPricePerMillion     float64 `yaml:"input_price_per_million,omitempty" json:"input_price_per_million,omitempty"`
 	OutputPricePerMillion    float64 `yaml:"output_price_per_million,omitempty" json:"output_price_per_million,omitempty"`
 	CacheReadPricePerMillion float64 `yaml:"cache_read_price_per_million,omitempty" json:"cache_read_price_per_million,omitempty"`
+	CacheWritePricePerMillion float64 `yaml:"cache_write_price_per_million,omitempty" json:"cache_write_price_per_million,omitempty"`
 	PerCallUSD               float64 `yaml:"per_call_usd,omitempty" json:"per_call_usd,omitempty"`
 }
 
@@ -166,6 +171,7 @@ type KeyAliasRef struct {
 	InputPricePerMillion     *float64 `yaml:"input_price_per_million,omitempty" json:"input_price_per_million,omitempty"`
 	OutputPricePerMillion    *float64 `yaml:"output_price_per_million,omitempty" json:"output_price_per_million,omitempty"`
 	CacheReadPricePerMillion *float64 `yaml:"cache_read_price_per_million,omitempty" json:"cache_read_price_per_million,omitempty"`
+	CacheWritePricePerMillion *float64 `yaml:"cache_write_price_per_million,omitempty" json:"cache_write_price_per_million,omitempty"`
 	PerCallUSD               *float64 `yaml:"per_call_usd,omitempty" json:"per_call_usd,omitempty"`
 }
 
@@ -265,8 +271,10 @@ func hasJSONKey(raw json.RawMessage, key string) bool {
 type UsageWindow struct {
 	TotalUSD        float64   `json:"total_usd"`
 	WindowStart     time.Time `json:"window_start,omitempty"`
-	CacheReadTokens int64     `json:"cache_read_tokens,omitempty"`
-	CacheCostUSD    float64   `json:"cache_cost_usd,omitempty"`
+	CacheReadTokens  int64     `json:"cache_read_tokens,omitempty"`
+	CacheCostUSD     float64   `json:"cache_cost_usd,omitempty"`
+	CacheWriteTokens int64     `json:"cache_write_tokens,omitempty"`
+	CacheWriteCostUSD float64  `json:"cache_write_cost_usd,omitempty"`
 	InputTokens     int64     `json:"input_tokens,omitempty"`
 	// OutputTokens is the non-cache completion-token count billed in this
 	// window (tokens charged at the output price). Reported for display on the

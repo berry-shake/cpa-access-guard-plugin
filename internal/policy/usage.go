@@ -127,7 +127,7 @@ func sameDay(a, b time.Time) bool {
 // count for the record; inputTokens is the non-cache input-token count charged
 // at the regular input price (the denominator partner for hit-rate);
 // outputTokens is the completion-token count charged at the output price.
-func (l *usageLedger) RecordCost(id, alias string, amount, cacheCost float64, cacheReadTokens, inputTokens, outputTokens int64, callCount int64) {
+func (l *usageLedger) RecordCost(id, alias string, amount, cacheCost float64, cacheReadTokens int64, cacheWriteCost float64, cacheWriteTokens, inputTokens, outputTokens int64, callCount int64) {
 	if id == "" {
 		return
 	}
@@ -149,6 +149,14 @@ func (l *usageLedger) RecordCost(id, alias string, amount, cacheCost float64, ca
 		st.Daily.CacheCostUSD += cacheCost
 		st.Weekly.CacheCostUSD += cacheCost
 	}
+	if cacheWriteTokens > 0 {
+		st.Daily.CacheWriteTokens += cacheWriteTokens
+		st.Weekly.CacheWriteTokens += cacheWriteTokens
+	}
+	if cacheWriteCost > 0 {
+		st.Daily.CacheWriteCostUSD += cacheWriteCost
+		st.Weekly.CacheWriteCostUSD += cacheWriteCost
+	}
 	if inputTokens > 0 {
 		st.Daily.InputTokens += inputTokens
 		st.Weekly.InputTokens += inputTokens
@@ -169,6 +177,10 @@ func (l *usageLedger) RecordCost(id, alias string, amount, cacheCost float64, ca
 	aliasEntry.Weekly.CacheReadTokens += cacheReadTokens
 	aliasEntry.Daily.CacheCostUSD += cacheCost
 	aliasEntry.Weekly.CacheCostUSD += cacheCost
+	aliasEntry.Daily.CacheWriteTokens += cacheWriteTokens
+	aliasEntry.Weekly.CacheWriteTokens += cacheWriteTokens
+	aliasEntry.Daily.CacheWriteCostUSD += cacheWriteCost
+	aliasEntry.Weekly.CacheWriteCostUSD += cacheWriteCost
 	aliasEntry.Daily.InputTokens += inputTokens
 	aliasEntry.Weekly.InputTokens += inputTokens
 	aliasEntry.Daily.OutputTokens += outputTokens
@@ -191,6 +203,10 @@ type UsageSummary struct {
 	WeeklyCacheCostUSD    float64   `json:"weekly_cache_cost_usd,omitempty"`
 	DailyCacheReadTokens  int64     `json:"daily_cache_read_tokens,omitempty"`
 	WeeklyCacheReadTokens int64     `json:"weekly_cache_read_tokens,omitempty"`
+	DailyCacheWriteTokens  int64    `json:"daily_cache_write_tokens,omitempty"`
+	WeeklyCacheWriteTokens int64    `json:"weekly_cache_write_tokens,omitempty"`
+	DailyCacheWriteCostUSD  float64  `json:"daily_cache_write_cost_usd,omitempty"`
+	WeeklyCacheWriteCostUSD float64  `json:"weekly_cache_write_cost_usd,omitempty"`
 	DailyInputTokens      int64     `json:"daily_input_tokens,omitempty"`
 	WeeklyInputTokens     int64     `json:"weekly_input_tokens,omitempty"`
 	// DailyCallCount / WeeklyCallCount: number of successful requests billed
@@ -230,6 +246,10 @@ func (l *usageLedger) Summary(key KeyConfig) UsageSummary {
 	summary.WeeklyCacheCostUSD = ensureSt.Weekly.CacheCostUSD
 	summary.DailyCacheReadTokens = ensureSt.Daily.CacheReadTokens
 	summary.WeeklyCacheReadTokens = ensureSt.Weekly.CacheReadTokens
+	summary.DailyCacheWriteTokens = ensureSt.Daily.CacheWriteTokens
+	summary.WeeklyCacheWriteTokens = ensureSt.Weekly.CacheWriteTokens
+	summary.DailyCacheWriteCostUSD = ensureSt.Daily.CacheWriteCostUSD
+	summary.WeeklyCacheWriteCostUSD = ensureSt.Weekly.CacheWriteCostUSD
 	summary.DailyInputTokens = ensureSt.Daily.InputTokens
 	summary.WeeklyInputTokens = ensureSt.Weekly.InputTokens
 	summary.DailyCallCount = ensureSt.Daily.CallCount

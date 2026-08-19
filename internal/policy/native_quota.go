@@ -84,8 +84,8 @@ func (s *Store) recordNativeUsage(binding NativeKeyBinding, alias, model string,
 	// Price from the global alias table. A native key has no per-key model
 	// rules, so the alias's own price sheet is the single source of truth.
 	var (
-		inputPerMillion, outputPerMillion, cacheReadPerMillion float64
-		priced, perCall                                        bool
+		inputPerMillion, outputPerMillion, cacheReadPerMillion, cacheWritePerMillion float64
+		priced, perCall                                                               bool
 		perCallUSD                                             float64
 		provider                                               string
 	)
@@ -102,6 +102,7 @@ func (s *Store) recordNativeUsage(binding NativeKeyBinding, alias, model string,
 			inputPerMillion = mapping.InputPricePerMillion
 			outputPerMillion = mapping.OutputPricePerMillion
 			cacheReadPerMillion = mapping.CacheReadPricePerMillion
+			cacheWritePerMillion = mapping.CacheWritePricePerMillion
 			priced = true
 		}
 		break
@@ -114,7 +115,7 @@ func (s *Store) recordNativeUsage(binding NativeKeyBinding, alias, model string,
 		if cost < 0 {
 			cost = 0
 		}
-		usageLedger.RecordCost(account, resolved, cost, 0, 0, 0, 0, 1)
+		usageLedger.RecordCost(account, resolved, cost, 0, 0, 0, 0, 0, 0, 1)
 		return cost
 	}
 
@@ -126,11 +127,12 @@ func (s *Store) recordNativeUsage(binding NativeKeyBinding, alias, model string,
 	if !usage.Found {
 		return 0
 	}
-	cost, cacheCost, cacheReadTokens := ComputeCacheCostBreakdown(provider, inputPerMillion, outputPerMillion, cacheReadPerMillion, priced, detail)
+	sheet := PriceSheet{Input: inputPerMillion, Output: outputPerMillion, CacheRead: cacheReadPerMillion, CacheWrite: cacheWritePerMillion, Priced: priced}
+	cost, cacheCost, cacheReadTokens, cacheWriteCost, cacheWriteTokens := ComputeCacheCostBreakdown(provider, sheet, detail)
 	var nonCacheInput int64
 	if priced {
 		if isCacheAdditiveProvider(provider) {
-			nonCacheInput = detail.InputTokens + detail.CacheCreationTokens
+			nonCacheInput = detail.InputTokens
 		} else {
 			cr := detail.CacheReadTokens
 			if cr == 0 {
@@ -145,7 +147,7 @@ func (s *Store) recordNativeUsage(binding NativeKeyBinding, alias, model string,
 	// Record even when unpriced (priced=false → cost 0) so CallCount and
 	// token volume stay visible in the UI; USD stays 0 until the operator
 	// prices the alias.
-	usageLedger.RecordCost(account, resolved, cost, cacheCost, cacheReadTokens, nonCacheInput, int64(detail.OutputTokens), 1)
+	usageLedger.RecordCost(account, resolved, cost, cacheCost, cacheReadTokens, cacheWriteCost, cacheWriteTokens, nonCacheInput, int64(detail.OutputTokens), 1)
 	return cost
 }
 

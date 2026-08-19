@@ -115,7 +115,9 @@
       "sectionLimits": "用量上限",
       "sectionAccess": "存取",
       "sectionModels": "模型與計價"
-    }
+    },
+    "colCacheWrite": "快取寫 $/M",
+    "colCacheWriteHint": "每 1M 快取寫入 token 的價格。0 = 按輸入價計費。"
   },
   "picker": {
     "loading": "載入可用模型…",

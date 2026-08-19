@@ -19,8 +19,9 @@ type aliasUpsertRequest struct {
 	BillingMode              string               `json:"billing_mode"`
 	InputPricePerMillion     float64              `json:"input_price_per_million"`
 	OutputPricePerMillion    float64              `json:"output_price_per_million"`
-	CacheReadPricePerMillion float64              `json:"cache_read_price_per_million"`
-	PerCallUSD               float64              `json:"per_call_usd"`
+	CacheReadPricePerMillion  float64             `json:"cache_read_price_per_million"`
+	CacheWritePricePerMillion float64             `json:"cache_write_price_per_million"`
+	PerCallUSD                float64             `json:"per_call_usd"`
 }
 
 func (a *App) upsertAlias(raw []byte) ManagementResponse {
@@ -36,8 +37,9 @@ func (a *App) upsertAlias(raw []byte) ManagementResponse {
 		BillingMode:              req.BillingMode,
 		InputPricePerMillion:     req.InputPricePerMillion,
 		OutputPricePerMillion:    req.OutputPricePerMillion,
-		CacheReadPricePerMillion: req.CacheReadPricePerMillion,
-		PerCallUSD:               req.PerCallUSD,
+		CacheReadPricePerMillion:  req.CacheReadPricePerMillion,
+		CacheWritePricePerMillion: req.CacheWritePricePerMillion,
+		PerCallUSD:                req.PerCallUSD,
 	}
 	if err := a.store.UpsertAlias(alias); err != nil {
 		return jsonError(http.StatusBadRequest, "validation_error", err.Error())

@@ -120,7 +120,9 @@
       "sectionAccess": "Доступ",
       "sectionModels": "Модели и цены"
     },
-    "existingAliases": "Существующие псевдонимы"
+    "existingAliases": "Существующие псевдонимы",
+    "colCacheWrite": "Запись кэша $/M",
+    "colCacheWriteHint": "Цена за 1M токенов записи кэша. 0 = по цене входных токенов."
   },
   "picker": {
     "title": "Выбор моделей",

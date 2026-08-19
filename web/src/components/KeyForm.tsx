@@ -46,6 +46,7 @@ interface PriceRow {
   input_price_per_million: number;
   output_price_per_million: number;
   cache_read_price_per_million: number;
+  cache_write_price_per_million: number;
   // per-call billing toggle + fixed charge. billing_mode "tokens" (default)
   // uses the three token prices; "per_call" uses per_call_usd per successful
   // request and ignores the token prices (kept dormant for round-tripping).
@@ -97,6 +98,7 @@ export default function KeyForm({
         input_price_per_million: m.input_price_per_million ?? 0,
         output_price_per_million: m.output_price_per_million ?? 0,
         cache_read_price_per_million: m.cache_read_price_per_million ?? 0,
+        cache_write_price_per_million: m.cache_write_price_per_million ?? 0,
         billing_mode: m.billing_mode === "per_call" ? "per_call" : "tokens",
         per_call_usd: m.per_call_usd ?? 0,
       };
@@ -161,6 +163,7 @@ export default function KeyForm({
         input_price_per_million: a.input_price_per_million ?? 0,
         output_price_per_million: a.output_price_per_million ?? 0,
         cache_read_price_per_million: a.cache_read_price_per_million ?? 0,
+        cache_write_price_per_million: a.cache_write_price_per_million ?? 0,
         per_call_usd: a.per_call_usd ?? 0,
       }));
       setModels((prev) => {
@@ -175,6 +178,7 @@ export default function KeyForm({
             input_price_per_million: a.input_price_per_million ?? 0,
             output_price_per_million: a.output_price_per_million ?? 0,
             cache_read_price_per_million: a.cache_read_price_per_million ?? 0,
+            cache_write_price_per_million: a.cache_write_price_per_million ?? 0,
             billing_mode: a.billing_mode === "per_call" ? "per_call" : "tokens",
             per_call_usd: a.per_call_usd ?? 0,
           };
@@ -214,7 +218,7 @@ export default function KeyForm({
       const updated: Record<string, PriceRow> = {};
       for (const m of next) {
         const key = priceKey(m);
-        updated[key] = prev[key] ?? { input_price_per_million: 0, output_price_per_million: 0, cache_read_price_per_million: 0, billing_mode: "tokens", per_call_usd: 0 };
+        updated[key] = prev[key] ?? { input_price_per_million: 0, output_price_per_million: 0, cache_read_price_per_million: 0, cache_write_price_per_million: 0, billing_mode: "tokens", per_call_usd: 0 };
       }
       // Rows for (group,alias) pairs no longer selected simply aren't copied.
       return updated;
@@ -246,6 +250,8 @@ export default function KeyForm({
         input_price_per_million: row.input_price_per_million,
         output_price_per_million: row.output_price_per_million,
         cache_read_price_per_million: row.cache_read_price_per_million,
+        // The LiteLLM catalog has no cache-write column: keep the user's value.
+        cache_write_price_per_million: prev[key]?.cache_write_price_per_million ?? 0,
         // Recommend fills token prices; it does not change the billing mode. If
         // the row was on per_call, keep it (the recommended token prices stay
         // dormant until the user switches back to tokens).
@@ -270,6 +276,7 @@ export default function KeyForm({
         input_price_per_million: row?.input_price_per_million ?? 0,
         output_price_per_million: row?.output_price_per_million ?? 0,
         cache_read_price_per_million: row?.cache_read_price_per_million ?? 0,
+        cache_write_price_per_million: row?.cache_write_price_per_million ?? 0,
         billing_mode: row?.billing_mode === "per_call" ? "per_call" : "tokens",
         per_call_usd: row?.per_call_usd ?? 0,
       };
@@ -316,6 +323,7 @@ export default function KeyForm({
       input_price_per_million: 0,
       output_price_per_million: 0,
       cache_read_price_per_million: 0,
+      cache_write_price_per_million: 0,
       billing_mode: "tokens" as const,
       per_call_usd: 0,
     };
@@ -389,6 +397,17 @@ export default function KeyForm({
                   step="0.01"
                   value={row.cache_read_price_per_million}
                   onChange={(e) => setPrice(m, "cache_read_price_per_million", e.target.value)}
+                />
+              </div>
+              <div className="form-row">
+                <label title={t("keyForm.colCacheWriteHint")}>{t("keyForm.colCacheWrite")}</label>
+                <input
+                  className="input"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={row.cache_write_price_per_million}
+                  onChange={(e) => setPrice(m, "cache_write_price_per_million", e.target.value)}
                 />
               </div>
               {hint && (
@@ -472,6 +491,16 @@ export default function KeyForm({
                   step="0.01"
                   value={row.cache_read_price_per_million}
                   onChange={(e) => setPrice(m, "cache_read_price_per_million", e.target.value)}
+                />
+              </td>
+              <td>
+                <input
+                  className="input"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={row.cache_write_price_per_million}
+                  onChange={(e) => setPrice(m, "cache_write_price_per_million", e.target.value)}
                 />
               </td>
             </>
@@ -817,6 +846,7 @@ export default function KeyForm({
                   <th>{t("keyForm.colInput")}</th>
                   <th>{t("keyForm.colOutput")}</th>
                   <th title={t("keyForm.colCacheReadHint")}>{t("keyForm.colCacheRead")}</th>
+                  <th title={t("keyForm.colCacheWriteHint")}>{t("keyForm.colCacheWrite")}</th>
                   <th title={t("keyForm.colRecommendHint")}>{t("keyForm.colRecommend")}</th>
                 </tr>
               </thead>
