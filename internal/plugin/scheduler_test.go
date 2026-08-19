@@ -598,7 +598,7 @@ func TestSchedulerPickNativeQuotaRPMExceeded(t *testing.T) {
 	if err := unmarshalOK(raw, &resp); err != nil || !resp.Handled {
 		t.Fatalf("first request must pass, resp=%+v err=%v", resp, err)
 	}
-	// Second request hits the quota gate: 429 quota_exceeded.
+	// Second request hits the quota gate: OpenAI-style 429 rate_limit_exceeded.
 	raw, err = app.HandleMethod(MethodSchedulerPick, nativeQuotaPickRequest())
 	if err != nil {
 		t.Fatal(err)
@@ -607,10 +607,12 @@ func TestSchedulerPickNativeQuotaRPMExceeded(t *testing.T) {
 	if err := json.Unmarshal(raw, &env); err != nil {
 		t.Fatal(err)
 	}
-	if env.OK || env.Error == nil || env.Error.Code != "quota_exceeded" || env.Error.HTTPStatus != http.StatusTooManyRequests {
-		t.Fatalf("expected quota_exceeded 429, got %+v", env)
+	if env.OK || env.Error == nil || env.Error.Code != "rate_limit_exceeded" || env.Error.HTTPStatus != http.StatusTooManyRequests {
+		t.Fatalf("expected rate_limit_exceeded 429, got %+v", env)
 	}
-	if !strings.Contains(env.Error.Message, "rpm_exceeded") {
-		t.Fatalf("error message must carry the reason, got %q", env.Error.Message)
+	if !strings.Contains(env.Error.Message, "Rate limit reached for gpt-5-codex") ||
+		!strings.Contains(env.Error.Message, "Limit 1, Used 1") ||
+		!strings.Contains(env.Error.Message, "Please try again in ") {
+		t.Fatalf("OpenAI-style message expected, got %q", env.Error.Message)
 	}
 }

@@ -82,3 +82,19 @@ func (l *RateLimiter) SnapshotID(id string) int {
 	}
 	return bucket.count
 }
+
+// RetryAfter reports how long until the id's current rate window expires (0
+// when no active bucket). Used for client-facing retry hints.
+func (l *RateLimiter) RetryAfter(id string) time.Duration {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	bucket, ok := l.buckets[id]
+	if !ok || bucket.windowStart.IsZero() {
+		return 0
+	}
+	remaining := time.Minute - l.now().UTC().Sub(bucket.windowStart)
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
+}

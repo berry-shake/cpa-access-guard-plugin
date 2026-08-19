@@ -2,6 +2,7 @@ package policy
 
 import (
 	"strings"
+	"time"
 )
 
 // Native usage accounting and quota enforcement for CPA-native downstream
@@ -39,6 +40,8 @@ type NativeBindingUsageSummary struct {
 	WeeklyUSDUsed  float64 `json:"weekly_usd_used"`
 	DailyCalls     int64   `json:"daily_calls"`
 	WeeklyCalls    int64   `json:"weekly_calls"`
+	DailyResetAt   string  `json:"daily_reset_at,omitempty"`
+	WeeklyResetAt  string  `json:"weekly_reset_at,omitempty"`
 }
 
 // findNativeBindingByScope returns the binding for a caller scope, or nil.
@@ -151,6 +154,9 @@ type NativeQuotaDecision struct {
 	// Reason is "rpm_exceeded", "daily_exceeded", or "weekly_exceeded" when
 	// limited; empty when allowed.
 	Reason string
+	// RetryAfter is the client-facing wait hint for RPM decisions (how long
+	// until the current rate window expires).
+	RetryAfter time.Duration
 	// Usage carries the live counters at decision time (for error bodies
 	// and logging).
 	Usage NativeBindingUsageSummary
@@ -174,6 +180,9 @@ func (s *Store) CheckNativeKeyQuota(callerScope string) (NativeQuotaDecision, bo
 	if binding.RPM > 0 {
 		if limiter == nil || !limiter.Allow(nativeUsageLedgerID(binding.CallerScope), binding.RPM) {
 			decision.Reason = "rpm_exceeded"
+			if limiter != nil {
+				decision.RetryAfter = limiter.RetryAfter(nativeUsageLedgerID(binding.CallerScope))
+			}
 			return decision, true
 		}
 		decision.Usage.RPMUsed = limiter.SnapshotID(nativeUsageLedgerID(binding.CallerScope))
@@ -212,6 +221,12 @@ func (s *Store) NativeBindingUsage(binding NativeKeyBinding) NativeBindingUsageS
 	summary.WeeklyUSDUsed = ledgerSummary.WeeklyUSD
 	summary.DailyCalls = ledgerSummary.DailyCallCount
 	summary.WeeklyCalls = ledgerSummary.WeeklyCallCount
+	if !ledgerSummary.DailyResetAt.IsZero() {
+		summary.DailyResetAt = ledgerSummary.DailyResetAt.UTC().Format(time.RFC3339)
+	}
+	if !ledgerSummary.WeeklyResetAt.IsZero() {
+		summary.WeeklyResetAt = ledgerSummary.WeeklyResetAt.UTC().Format(time.RFC3339)
+	}
 	if limiter, _ := s.runtimeComponents(); limiter != nil {
 		summary.RPMUsed = limiter.SnapshotID(nativeUsageLedgerID(binding.CallerScope))
 	}

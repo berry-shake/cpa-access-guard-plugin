@@ -195,6 +195,38 @@ func (a *App) routeModel(raw []byte) ([]byte, error) {
 // openai-compatible- prefixed form. If neither matches we return the
 // bare name and let CPA's availability check skip us (the native path
 // still resolves true model names).
+// nativeQuotaError renders a quota rejection in OpenAI's 429 style: RPM
+// limits read like their rate-limit error (with a retry hint), budget limits
+// read like their insufficient-quota error (with reset timestamps).
+func nativeQuotaError(decision policy.NativeQuotaDecision, model string) (code, message string) {
+	u := decision.Usage
+	switch decision.Reason {
+	case "rpm_exceeded":
+		retry := int(decision.RetryAfter.Seconds())
+		if retry <= 0 {
+			retry = 60
+		}
+		return "rate_limit_exceeded",
+			fmt.Sprintf("Rate limit reached for %s on requests per min (RPM): Limit %d, Used %d. Please try again in %ds.",
+				model, u.RPMLimit, u.RPMUsed, retry)
+	case "daily_exceeded":
+		return "insufficient_quota",
+			fmt.Sprintf("You exceeded your current quota, please check your plan and billing details. Daily limit $%.2f, used $%.2f, resets at %s.",
+				u.DailyUSDLimit, u.DailyUSDUsed, resetHint(u.DailyResetAt))
+	default: // weekly_exceeded
+		return "insufficient_quota",
+			fmt.Sprintf("You exceeded your current quota, please check your plan and billing details. Weekly limit $%.2f, used $%.2f, resets at %s.",
+				u.WeeklyUSDLimit, u.WeeklyUSDUsed, resetHint(u.WeeklyResetAt))
+	}
+}
+
+func resetHint(resetAt string) string {
+	if resetAt == "" {
+		return "the start of the next window"
+	}
+	return resetAt
+}
+
 func resolveProviderKey(provider string, availableProviders []string) string {
 	p := strings.ToLower(strings.TrimSpace(provider))
 	if p == "" {
@@ -295,9 +327,8 @@ func (a *App) pickScheduler(raw []byte) ([]byte, error) {
 		// safe), USD limits compare against the usage.handle ledger. A binding
 		// with no limits configured passes through with zero side effects.
 		if decision, limited := a.store.CheckNativeKeyQuota(callerScope); limited {
-			return ErrorEnvelope("quota_exceeded",
-				fmt.Sprintf("quota exceeded (%s)", decision.Reason),
-				http.StatusTooManyRequests), nil
+			code, message := nativeQuotaError(decision, req.Model)
+			return ErrorEnvelope(code, message, http.StatusTooManyRequests), nil
 		}
 		group, nativeBinding = a.store.ResolveNativeKeyGroup(callerScope, req.Provider, req.Model)
 		group = strings.ToLower(strings.TrimSpace(group))
