@@ -288,7 +288,7 @@ func (a *App) pickScheduler(raw []byte) ([]byte, error) {
 		// string. If the field exists with any other shape, do not silently treat
 		// the request as unbound or let generic group metadata bypass the identity
 		// check. This indicates an incompatible or corrupted host/plugin path.
-		return ErrorEnvelope("invalid_scheduler_metadata", "cpa-access-guard: invalid caller_scope metadata", http.StatusServiceUnavailable), nil
+		return ErrorEnvelope("invalid_scheduler_metadata", "invalid caller_scope metadata", http.StatusServiceUnavailable), nil
 	}
 	if callerScope != "" {
 		// Usage-limit gate for native keys: RPM decrements here (concurrency
@@ -296,7 +296,7 @@ func (a *App) pickScheduler(raw []byte) ([]byte, error) {
 		// with no limits configured passes through with zero side effects.
 		if decision, limited := a.store.CheckNativeKeyQuota(callerScope); limited {
 			return ErrorEnvelope("quota_exceeded",
-				fmt.Sprintf("cpa-access-guard: quota exceeded (%s)", decision.Reason),
+				fmt.Sprintf("quota exceeded (%s)", decision.Reason),
 				http.StatusTooManyRequests), nil
 		}
 		group, nativeBinding = a.store.ResolveNativeKeyGroup(callerScope, req.Provider, req.Model)
@@ -307,7 +307,7 @@ func (a *App) pickScheduler(raw []byte) ([]byte, error) {
 			// The store normally rejects empty groups during configuration. Keep
 			// this guard fail-closed in case a future state migration or Store
 			// implementation violates that invariant.
-			return ErrorEnvelope("auth_not_found", "cpa-access-guard: native key binding has no credential group", http.StatusServiceUnavailable), nil
+			return ErrorEnvelope("auth_not_found", "native key binding has no credential group", http.StatusServiceUnavailable), nil
 		}
 	} else {
 		group = schedulerGroupFromMetadata(req.Options.Metadata)
@@ -321,7 +321,7 @@ func (a *App) pickScheduler(raw []byte) ([]byte, error) {
 		if nativeBinding {
 			// A resolved native binding is an isolation boundary. Deferring on an
 			// empty candidate list would let a host fallback escape that boundary.
-			return ErrorEnvelope("auth_not_found", "cpa-access-guard: no eligible auth candidate for requested group", http.StatusServiceUnavailable), nil
+			return ErrorEnvelope("auth_not_found", "no eligible auth candidate for requested group", http.StatusServiceUnavailable), nil
 		}
 		return OKEnvelope(SchedulerPickResponse{Handled: false})
 	}
@@ -341,7 +341,7 @@ func (a *App) pickScheduler(raw []byte) ([]byte, error) {
 		// Handled=false would let the host pick ANY auth including other tiers.
 		// Instead we report an explicit "auth_not_found" so the caller sees the
 		// intent honored (no available tier-matching auth) rather than a leak.
-		return ErrorEnvelope("auth_not_found", "cpa-access-guard: no eligible auth candidate for requested group", http.StatusServiceUnavailable), nil
+		return ErrorEnvelope("auth_not_found", "no eligible auth candidate for requested group", http.StatusServiceUnavailable), nil
 	}
 
 	best := matched[0]
