@@ -17,12 +17,18 @@ import (
 const (
 	defaultStateFileName       = "cpa-access-guard-state.json"
 	legacyDefaultStateFileName = "cpa-key-policy-state.json"
+	defaultPricingFileName     = "cpa-access-guard-model-pricing.json"
 )
 
 type Config struct {
-	Enabled   bool        `yaml:"enabled" json:"enabled"`
-	StateFile string      `yaml:"state_file" json:"state_file"`
-	Keys      []KeyConfig `yaml:"keys" json:"keys"`
+	Enabled   bool   `yaml:"enabled" json:"enabled"`
+	StateFile string `yaml:"state_file" json:"state_file"`
+	// PricingFile is the standalone model price catalog (USD per 1M tokens).
+	// Empty = sibling of state_file named cpa-access-guard-model-pricing.json.
+	// Relative paths resolve against the CPA process working directory, same
+	// as state_file.
+	PricingFile string      `yaml:"pricing_file,omitempty" json:"pricing_file,omitempty"`
+	Keys        []KeyConfig `yaml:"keys" json:"keys"`
 	// NativeKeyBindings constrain CPA's built-in downstream API keys to an
 	// auth-file group. Unlike Keys, these entries do not authenticate the
 	// caller and never persist the plaintext API key: CallerScope is the
@@ -36,6 +42,15 @@ type Config struct {
 	// BEFORE the built-in plan_type/tier detection and can override it. Built-in
 	// rules (always present, read-only) handle unrecognized credentials.
 	ClassifyRules []ClassifyRule `yaml:"classify_rules,omitempty" json:"classify_rules,omitempty"`
+	// PricingSync controls the models.dev catalog refresh. Auto-sync always
+	// runs (startup + IntervalHours, default 24). URL overrides the public
+	// catalog endpoint.
+	PricingSync PricingSyncConfig `yaml:"pricing_sync,omitempty" json:"pricing_sync,omitempty"`
+}
+
+type PricingSyncConfig struct {
+	IntervalHours int    `yaml:"interval_hours,omitempty" json:"interval_hours,omitempty"`
+	URL           string `yaml:"url,omitempty" json:"url,omitempty"`
 }
 
 type KeyConfig struct {
@@ -121,11 +136,11 @@ type AliasMapping struct {
 	// Pricing fields (same semantics as ModelRule). When BillingMode == "tokens",
 	// InputPricePerMillion / OutputPricePerMillion / CacheReadPricePerMillion
 	// are used. When BillingMode == "per_call", PerCallUSD is used.
-	InputPricePerMillion     float64 `yaml:"input_price_per_million,omitempty" json:"input_price_per_million,omitempty"`
-	OutputPricePerMillion    float64 `yaml:"output_price_per_million,omitempty" json:"output_price_per_million,omitempty"`
-	CacheReadPricePerMillion float64 `yaml:"cache_read_price_per_million,omitempty" json:"cache_read_price_per_million,omitempty"`
+	InputPricePerMillion      float64 `yaml:"input_price_per_million,omitempty" json:"input_price_per_million,omitempty"`
+	OutputPricePerMillion     float64 `yaml:"output_price_per_million,omitempty" json:"output_price_per_million,omitempty"`
+	CacheReadPricePerMillion  float64 `yaml:"cache_read_price_per_million,omitempty" json:"cache_read_price_per_million,omitempty"`
 	CacheWritePricePerMillion float64 `yaml:"cache_write_price_per_million,omitempty" json:"cache_write_price_per_million,omitempty"`
-	PerCallUSD               float64 `yaml:"per_call_usd,omitempty" json:"per_call_usd,omitempty"`
+	PerCallUSD                float64 `yaml:"per_call_usd,omitempty" json:"per_call_usd,omitempty"`
 }
 
 // AliasTarget is one selectable destination for an alias. Group optionally
@@ -168,11 +183,11 @@ func (r *ClassifyRule) Compiled() *regexp.Regexp {
 type KeyAliasRef struct {
 	Alias string `yaml:"alias" json:"alias"`
 	// Optional per-key price overrides. nil = use global alias pricing.
-	InputPricePerMillion     *float64 `yaml:"input_price_per_million,omitempty" json:"input_price_per_million,omitempty"`
-	OutputPricePerMillion    *float64 `yaml:"output_price_per_million,omitempty" json:"output_price_per_million,omitempty"`
-	CacheReadPricePerMillion *float64 `yaml:"cache_read_price_per_million,omitempty" json:"cache_read_price_per_million,omitempty"`
+	InputPricePerMillion      *float64 `yaml:"input_price_per_million,omitempty" json:"input_price_per_million,omitempty"`
+	OutputPricePerMillion     *float64 `yaml:"output_price_per_million,omitempty" json:"output_price_per_million,omitempty"`
+	CacheReadPricePerMillion  *float64 `yaml:"cache_read_price_per_million,omitempty" json:"cache_read_price_per_million,omitempty"`
 	CacheWritePricePerMillion *float64 `yaml:"cache_write_price_per_million,omitempty" json:"cache_write_price_per_million,omitempty"`
-	PerCallUSD               *float64 `yaml:"per_call_usd,omitempty" json:"per_call_usd,omitempty"`
+	PerCallUSD                *float64 `yaml:"per_call_usd,omitempty" json:"per_call_usd,omitempty"`
 }
 
 // UsageState holds per-key dollar usage accounting persisted in the state JSON.
@@ -269,13 +284,13 @@ func hasJSONKey(raw json.RawMessage, key string) bool {
 //     Used as the denominator of hit-rate = cacheRead /
 //     (cacheRead + InputTokens).
 type UsageWindow struct {
-	TotalUSD        float64   `json:"total_usd"`
-	WindowStart     time.Time `json:"window_start,omitempty"`
-	CacheReadTokens  int64     `json:"cache_read_tokens,omitempty"`
-	CacheCostUSD     float64   `json:"cache_cost_usd,omitempty"`
-	CacheWriteTokens int64     `json:"cache_write_tokens,omitempty"`
-	CacheWriteCostUSD float64  `json:"cache_write_cost_usd,omitempty"`
-	InputTokens     int64     `json:"input_tokens,omitempty"`
+	TotalUSD          float64   `json:"total_usd"`
+	WindowStart       time.Time `json:"window_start,omitempty"`
+	CacheReadTokens   int64     `json:"cache_read_tokens,omitempty"`
+	CacheCostUSD      float64   `json:"cache_cost_usd,omitempty"`
+	CacheWriteTokens  int64     `json:"cache_write_tokens,omitempty"`
+	CacheWriteCostUSD float64   `json:"cache_write_cost_usd,omitempty"`
+	InputTokens       int64     `json:"input_tokens,omitempty"`
 	// OutputTokens is the non-cache completion-token count billed in this
 	// window (tokens charged at the output price). Reported for display on the
 	// per-alias detail page; not used for limit enforcement.
@@ -551,7 +566,7 @@ func normalizeConfig(cfg *Config) error {
 		default:
 			return fmt.Errorf("alias %q billing_mode %q must be \"tokens\" or \"per_call\"", a.Alias, a.BillingMode)
 		}
-		if a.InputPricePerMillion < 0 || a.OutputPricePerMillion < 0 || a.CacheReadPricePerMillion < 0 {
+		if a.InputPricePerMillion < 0 || a.OutputPricePerMillion < 0 || a.CacheReadPricePerMillion < 0 || a.CacheWritePricePerMillion < 0 {
 			return fmt.Errorf("alias %q prices cannot be negative", a.Alias)
 		}
 		if a.PerCallUSD < 0 {
@@ -664,6 +679,21 @@ func ResolveStatePath(path string) (string, error) {
 		return "", err
 	}
 	return abs, nil
+}
+
+// ResolvePricingPath mirrors ResolveStatePath. An empty requested path places
+// the default filename next to the resolved state file so a custom state_file
+// directory also holds the price catalog unless pricing_file is set explicitly.
+func ResolvePricingPath(path, statePath string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		dir := filepath.Dir(strings.TrimSpace(statePath))
+		if dir == "" || dir == "." {
+			return ResolveStatePath(defaultPricingFileName)
+		}
+		return filepath.Join(dir, defaultPricingFileName), nil
+	}
+	return ResolveStatePath(path)
 }
 
 // migrateLegacyDefaultStateFile preserves state for installations that relied

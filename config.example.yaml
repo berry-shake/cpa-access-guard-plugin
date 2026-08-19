@@ -25,6 +25,15 @@ plugins:
       # Relative paths resolve against the CPA process working directory, not
       # the plugin directory. Prefer an absolute, backed-up path in production.
       state_file: "cpa-access-guard-state.json"
+      # Standalone model price catalog (USD per 1M tokens). Billing falls back
+      # here when an alias has no prices. Relative paths resolve like state_file.
+      # Omit to place cpa-access-guard-model-pricing.json next to state_file.
+      pricing_file: "cpa-access-guard-model-pricing.json"
+      # models.dev catalog refresh. Always on at startup, then every
+      # interval_hours (default 24). Optional url overrides the public catalog.
+      # pricing_sync:
+      #   interval_hours: 24
+      #   url: "https://models.dev/api.json"
 
       # Prefer creating keys/native bindings/aliases/classify rules via the Web
       # UI or Management API.

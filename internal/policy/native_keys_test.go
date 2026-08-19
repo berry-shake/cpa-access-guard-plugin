@@ -295,6 +295,9 @@ func TestNativeKeyBindingPersistenceFailureDoesNotPublish(t *testing.T) {
 	if err := os.Remove(statePath); err != nil {
 		t.Fatal(err)
 	}
+	if pricingPath := store.PricingPath(); pricingPath != "" {
+		_ = os.Remove(pricingPath)
+	}
 	stateDir := filepath.Dir(statePath)
 	if err := os.Remove(stateDir); err != nil {
 		t.Fatal(err)

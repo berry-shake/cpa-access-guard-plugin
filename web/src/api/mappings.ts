@@ -225,3 +225,63 @@ export async function deleteNativeKeyBinding(id: string): Promise<void> {
   const c = apiClient();
   await c.delete(pluginPath("/native-key-bindings"), { data: { id } });
 }
+
+// --- models.dev pricing sync ---
+
+export interface PricingSyncResult {
+  at: string;
+  updated: number;
+  unmatched: number;
+  skipped: number;
+  catalog?: number;
+  pricing_file?: string;
+  error?: string;
+}
+
+export interface PricingSyncStatus {
+  enabled: boolean;
+  interval_hours?: number;
+  url?: string;
+  pricing_file?: string;
+  catalog_size?: number;
+  last_result?: PricingSyncResult | null;
+  next_run_at?: string;
+}
+
+export async function fetchPricingSyncStatus(): Promise<PricingSyncStatus> {
+  const c = apiClient();
+  const { data } = await c.get<PricingSyncStatus>(pluginPath("/pricing-sync"));
+  return data;
+}
+
+export async function runPricingSync(): Promise<PricingSyncResult> {
+  const c = apiClient();
+  const { data } = await c.post<PricingSyncResult>(pluginPath("/pricing-sync/run"));
+  return data;
+}
+
+export interface ModelPricing {
+  modelId: string;
+  displayName: string;
+  inputCostPerMillion: string;
+  outputCostPerMillion: string;
+  cacheReadCostPerMillion: string;
+  cacheCreationCostPerMillion: string;
+}
+
+export async function fetchModelPricing(): Promise<ModelPricing[]> {
+  const c = apiClient();
+  const { data } = await c.get<{ models?: ModelPricing[] }>(pluginPath("/pricing"));
+  return data.models ?? [];
+}
+
+export async function upsertModelPricing(row: ModelPricing): Promise<ModelPricing> {
+  const c = apiClient();
+  const { data } = await c.post<{ model: ModelPricing }>(pluginPath("/pricing"), row);
+  return data.model;
+}
+
+export async function deleteModelPricing(modelId: string): Promise<void> {
+  const c = apiClient();
+  await c.delete(pluginPath("/pricing"), { data: { modelId } });
+}

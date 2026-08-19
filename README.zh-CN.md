@@ -240,12 +240,15 @@ plugins:
       enabled: true
       priority: 100 # 必须高于其它 Scheduler，才能执行凭证隔离
       state_file: "cpa-access-guard-state.json"
+      pricing_file: "cpa-access-guard-model-pricing.json"
 ```
 
 说明：
 
 - 若已有 `state_file`，则以其中的 keys / 原生 Key 绑定 / 别名 / 归类 / 用量为准。
-- 相对 `state_file` 会按 **CPA 进程当前工作目录**解析为绝对路径，不是相对插件 `.so`。生产环境建议写绝对路径，并确保 CPA 运行用户可写；可通过 `GET /v0/management/plugins/cpa-access-guard/status` 的 `state_file` 查看最终解析位置。
+- `pricing_file` 是独立的模型价格表（美元 / 百万 token）。计费优先用别名价格，未配价时回退到此表。省略则把 `cpa-access-guard-model-pricing.json` 放在 `state_file` 同目录。
+- 插件会在启动时以及之后按间隔从 [models.dev](https://models.dev) 刷新价格表，并回写匹配的别名价格。可用 `pricing_sync.interval_hours` / `pricing_sync.url` 覆盖默认 24 小时和公共目录地址。
+- 相对 `state_file` / `pricing_file` 会按 **CPA 进程当前工作目录**解析为绝对路径，不是相对插件 `.so`。生产环境建议写绝对路径，并确保 CPA 运行用户可写；可通过 `GET /v0/management/plugins/cpa-access-guard/status` 的 `state_file`、`pricing_file` 查看最终解析位置。
 - 从 `cpa-key-policy` 升级且一直使用旧版默认相对文件名时，CPA Access Guard 会一次性把同目录中校验有效的 `cpa-key-policy-state.json` 复制为 `cpa-access-guard-state.json`；旧文件会保留作恢复备份。显式配置的 `state_file` 不会自动迁移，请先停掉 CPA，再人工、精确地复制。
 - state 目录由插件按 `0700` 创建，文件按 `0600` 原子写入。请纳入备份，不要手工写入顶层 API Key 明文。
 - 日常请用**网页**或管理 API 建 key、原生绑定和别名；YAML 种子数据主要用于首次启动。

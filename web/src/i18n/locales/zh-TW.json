@@ -201,6 +201,7 @@
     "aliasTab": "別名映射",
     "classifyTab": "憑證歸類",
     "nativeTab": "原生 Key 綁定",
+    "pricingTab": "模型價格",
     "newAlias": "新建別名",
     "newRule": "新建規則",
     "edit": "編輯",
@@ -324,8 +325,30 @@
       "weeklyUsd": "週額度 (USD)",
       "unlimited": "不限",
       "limitsInvalid": "額度必須是 0 或正數。",
-      "limitsHint": "留空或 0 = 不限。美元用量按全域別名表計價；未配置價格的模型只計次數、按 $0 計費。",
+      "limitsHint": "留空或 0 = 不限。美元用量按模型價格表計費。",
       "calls": "呼叫次數（日/週）"
+    },
+    "pricingSync": {
+      "last": "上次同步：價格表 {{catalog}} 條",
+      "runNow": "立即同步價格",
+      "running": "同步中…"
+    },
+    "pricing": {
+      "search": "搜尋模型 ID 或名稱",
+      "add": "新增定價",
+      "empty": "還沒有價格資料，可同步 models.dev 或手動新增。",
+      "count": "顯示 {{shown}} / {{total}} 條 · ",
+      "perMillion": "單位 USD / 百萬 tokens",
+      "perMillionHint": "價格單位為 USD / 百萬 tokens。快取寫入對應 cacheCreation。",
+      "modelId": "模型 ID",
+      "displayName": "顯示名稱",
+      "input": "輸入",
+      "output": "輸出",
+      "cacheRead": "快取讀取",
+      "cacheWrite": "快取寫入",
+      "editTitle": "編輯定價 · {{id}}",
+      "modelIdRequired": "模型 ID 不能為空",
+      "deleteConfirm": "確認刪除 {{id}} 的定價？"
     }
   }
 }

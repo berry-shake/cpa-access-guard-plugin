@@ -143,6 +143,8 @@ export interface CatalogModel {
 export interface StatusResponse {
   enabled: boolean;
   state_file: string;
+  pricing_file?: string;
+  pricing_catalog_size?: number;
   key_count: number;
   rpm_usage?: Record<string, unknown>;
 }

@@ -13,8 +13,8 @@ import (
 // Billing input: the host's usage.handle record carries the plaintext native
 // key in APIKey (the config-api-key provider sets Principal = key plaintext,
 // and server_middleware copies Principal into "userApiKey"). Pricing comes
-// from the global alias table; requests for unpriced models are recorded
-// with 0 USD but still count calls.
+// from the standalone pricing JSON (not alias mappings); requests for
+// unpriced models are recorded with 0 USD but still count calls.
 //
 // Enforcement: pickScheduler consults CheckNativeKeyQuota before any group
 // filtering. RPM is decremented at that gate (concurrency-safe), mirroring
@@ -61,17 +61,19 @@ func (s *Store) findNativeBindingByScope(callerScope string) *NativeKeyBinding {
 }
 
 // recordNativeUsage bills one finalized usage record against a native
-// binding's ledger account. Pricing resolves through the global alias table
-// (prefer the client-requested alias, fall back to the upstream model id);
-// unpriced requests are recorded at 0 USD but still increment CallCount.
-// Returns the billed amount (0 when unpriced or failed).
+// binding's ledger account. Pricing comes only from the standalone pricing
+// JSON (upstream model id, then the client-requested name). Alias mapping
+// prices are ignored. Unpriced requests record 0 USD but still increment
+// CallCount. Returns the billed amount (0 when unpriced or failed).
 func (s *Store) recordNativeUsage(binding NativeKeyBinding, alias, model string, failed bool, detail UsageDetail) float64 {
 	if failed {
 		return 0
 	}
-	resolved := strings.TrimSpace(alias)
+	requested := strings.TrimSpace(alias)
+	upstream := strings.TrimSpace(model)
+	resolved := upstream
 	if resolved == "" {
-		resolved = strings.TrimSpace(model)
+		resolved = requested
 	}
 	if resolved == "" {
 		return 0
@@ -81,43 +83,25 @@ func (s *Store) recordNativeUsage(binding NativeKeyBinding, alias, model string,
 		return 0
 	}
 
-	// Price from the global alias table. A native key has no per-key model
-	// rules, so the alias's own price sheet is the single source of truth.
 	var (
 		inputPerMillion, outputPerMillion, cacheReadPerMillion, cacheWritePerMillion float64
-		priced, perCall                                                               bool
-		perCallUSD                                             float64
-		provider                                               string
+		priced                                                                       bool
+		provider                                                                     string
 	)
-	s.mu.RLock()
-	for _, mapping := range s.aliasesSnapshotLocked() {
-		if mapping.Alias != resolved {
-			continue
+	if catalog, ok := s.LookupCatalogSheet(upstream, "", requested); ok {
+		inputPerMillion = catalog.Input
+		outputPerMillion = catalog.Output
+		cacheReadPerMillion = catalog.CacheRead
+		cacheWritePerMillion = catalog.CacheWrite
+		priced = true
+		if price, found := s.lookupCatalogPrice(upstream, ""); found {
+			provider = price.Provider
+		} else if price, found := s.lookupCatalogPrice(requested, ""); found {
+			provider = price.Provider
 		}
-		provider = mapping.Targets[0].Provider
-		if strings.EqualFold(mapping.BillingMode, "per_call") {
-			perCall = true
-			perCallUSD = mapping.PerCallUSD
-		} else {
-			inputPerMillion = mapping.InputPricePerMillion
-			outputPerMillion = mapping.OutputPricePerMillion
-			cacheReadPerMillion = mapping.CacheReadPricePerMillion
-			cacheWritePerMillion = mapping.CacheWritePricePerMillion
-			priced = true
-		}
-		break
 	}
-	s.mu.RUnlock()
 
 	account := nativeUsageLedgerID(binding.CallerScope)
-	if perCall {
-		cost := perCallUSD
-		if cost < 0 {
-			cost = 0
-		}
-		usageLedger.RecordCost(account, resolved, cost, 0, 0, 0, 0, 0, 0, 1)
-		return cost
-	}
 
 	usage := TokenUsage{
 		PromptTokens:     int(detail.InputTokens),
@@ -145,8 +129,8 @@ func (s *Store) recordNativeUsage(binding NativeKeyBinding, alias, model string,
 		}
 	}
 	// Record even when unpriced (priced=false → cost 0) so CallCount and
-	// token volume stay visible in the UI; USD stays 0 until the operator
-	// prices the alias.
+	// token volume stay visible in the UI; USD stays 0 until the model is
+	// in the pricing JSON.
 	usageLedger.RecordCost(account, resolved, cost, cacheCost, cacheReadTokens, cacheWriteCost, cacheWriteTokens, nonCacheInput, int64(detail.OutputTokens), 1)
 	return cost
 }

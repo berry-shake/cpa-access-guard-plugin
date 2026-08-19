@@ -28,6 +28,12 @@ type Store struct {
 	usage                    *usageLedger
 	// flusher for periodically persisting the usage ledger to the state file.
 	flusher *usageFlusher
+	// pricingPath / prices is the standalone model-price catalog (USD / 1M
+	// tokens). Billing falls back here when an alias has no token prices.
+	pricingPath    string
+	prices         map[string]ModelPrice
+	pricingSync    ModelsDevSyncFile
+	pricingDeleted []string
 	// aliases is the global alias mapping table from config.yaml. Used to
 	// resolve KeyAliasRef → ModelRule for routing and billing.
 	aliases map[string]*AliasMapping
@@ -115,6 +121,10 @@ func (s *Store) Configure(cfg Config) error {
 	if err != nil {
 		return err
 	}
+	pricingPath, err := ResolvePricingPath(cfg.PricingFile, statePath)
+	if err != nil {
+		return err
+	}
 
 	// Bug 2 fix: flush any in-memory changes to the *old* state path BEFORE
 	// loading the (possibly different) new state file. Without this, keys/usage
@@ -194,6 +204,11 @@ func (s *Store) Configure(cfg Config) error {
 		}
 		next[item.ID] = &item
 	}
+	priceMap, syncFile, deletedIDs, errPrice := loadPricingState(pricingPath, cfg.Aliases)
+	if errPrice != nil {
+		return fmt.Errorf("load pricing file: %w", errPrice)
+	}
+
 	nextNative := make(map[string]*NativeKeyBinding, len(nativeBindings))
 	nextNativeByScope := make(map[string]*NativeKeyBinding, len(nativeBindings))
 	for i := range nativeBindings {
@@ -221,6 +236,10 @@ func (s *Store) Configure(cfg Config) error {
 	// deleted key cannot be resurrected from an older in-memory snapshot.
 	s.enabled = cfg.Enabled
 	s.statePath = statePath
+	s.pricingPath = pricingPath
+	s.prices = priceMap
+	s.pricingSync = syncFile
+	s.pricingDeleted = deletedIDs
 	// Store the global alias table and classify rules for routing/billing.
 	s.aliases = make(map[string]*AliasMapping, len(cfg.Aliases))
 	for i := range cfg.Aliases {
@@ -660,6 +679,14 @@ func (s *Store) RecordUsage(apiKeyOrID, alias, model string, failed bool, detail
 		provider = rule.Provider
 	}
 	inputPerMillion, outputPerMillion, cacheReadPerMillion, cacheWritePerMillion, priced := key.PriceForAlias(resolved)
+	if priced && !hasTokenPrices(inputPerMillion, outputPerMillion, cacheReadPerMillion, cacheWritePerMillion) {
+		if catalog, ok := s.LookupCatalogSheet(resolved, provider, model, rule.TargetModel); ok {
+			inputPerMillion = catalog.Input
+			outputPerMillion = catalog.Output
+			cacheReadPerMillion = catalog.CacheRead
+			cacheWritePerMillion = catalog.CacheWrite
+		}
+	}
 	sheet := PriceSheet{Input: inputPerMillion, Output: outputPerMillion, CacheRead: cacheReadPerMillion, CacheWrite: cacheWritePerMillion, Priced: priced}
 	cost, cacheCost, cacheReadTokens, cacheWriteCost, cacheWriteTokens := ComputeCacheCostBreakdown(provider, sheet, detail)
 	// Non-cache input tokens billed at the input price — the denominator partner
@@ -1133,7 +1160,10 @@ func (s *Store) UpsertAlias(alias AliasMapping) error {
 	usage := s.usageSnapshotLocked()
 	path := s.statePath
 	s.mu.Unlock()
-	return s.saveState(path, keys, usage, s.AliasesSnapshot(), s.ClassifyRulesSnapshot())
+	if err := s.saveState(path, keys, usage, s.AliasesSnapshot(), s.ClassifyRulesSnapshot()); err != nil {
+		return err
+	}
+	return s.upsertAliasIntoPricing(alias)
 }
 
 // DeleteAlias removes an alias from the global table. Returns an error if any
@@ -1435,6 +1465,8 @@ func (s *Store) Status() map[string]any {
 	s.mu.RLock()
 	enabled := s.enabled
 	statePath := s.statePath
+	pricingPath := s.pricingPath
+	pricingSize := len(s.prices)
 	keys := s.keysSnapshotLocked()
 	nativeBindingCount := len(s.nativeKeyBindings)
 	nativeBindingEnabledCount := 0
@@ -1453,6 +1485,8 @@ func (s *Store) Status() map[string]any {
 	out := map[string]any{
 		"enabled":                          enabled,
 		"state_file":                       statePath,
+		"pricing_file":                     pricingPath,
+		"pricing_catalog_size":             pricingSize,
 		"key_count":                        len(keys),
 		"native_key_binding_count":         nativeBindingCount,
 		"native_key_binding_enabled_count": nativeBindingEnabledCount,

@@ -4,8 +4,9 @@ import { useT } from "../i18n";
 import type { AliasMapping, AliasTarget, ClassifyRule, ClassifyPreviewResponse, CredentialDescriptor } from "../types";
 import { fetchAliases, upsertAlias, deleteAlias, fetchClassifyRules, upsertClassifyRule, deleteClassifyRule, reorderClassifyRules, classifyPreview, fetchCredentialDescriptors, canPreviewClassifyField } from "../api/mappings";
 import NativeKeyBindingsTab from "../components/NativeKeyBindings";
+import PricingTable from "../components/PricingTable";
 
-type MappingTab = "alias" | "classify" | "native";
+type MappingTab = "alias" | "classify" | "native" | "pricing";
 
 export default function Mapping() {
   const t = useT();
@@ -15,7 +16,7 @@ export default function Mapping() {
   // Pick up returned state (new targets from ModelPick, etc.)
   useEffect(() => {
     const requested = loc.state?.mappingTab;
-    if (requested === "alias" || requested === "classify" || requested === "native") setTab(requested);
+    if (requested === "alias" || requested === "classify" || requested === "native" || requested === "pricing") setTab(requested);
   }, [loc.state]);
 
   return (
@@ -33,10 +34,14 @@ export default function Mapping() {
         <button className={"map-tab" + (tab === "native" ? " active" : "")} onClick={() => setTab("native")}>
           {t("mapping.nativeTab")}
         </button>
+        <button className={"map-tab" + (tab === "pricing" ? " active" : "")} onClick={() => setTab("pricing")}>
+          {t("mapping.pricingTab")}
+        </button>
       </div>
       {tab === "alias" && <AliasListTab />}
       {tab === "classify" && <ClassifyTab />}
       {tab === "native" && <NativeKeyBindingsTab />}
+      {tab === "pricing" && <PricingTable />}
     </div>
   );
 }
@@ -53,8 +58,7 @@ function AliasListTab() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const list = await fetchAliases();
-      setAliases(list);
+      setAliases(await fetchAliases());
     } catch (e: unknown) {
       setError(String(e));
     } finally {

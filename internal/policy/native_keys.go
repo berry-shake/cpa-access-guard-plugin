@@ -22,18 +22,18 @@ var (
 // to one auth-file group. It is an authorization constraint, not an
 // authentication credential: the original API key is intentionally absent.
 type NativeKeyBinding struct {
-	ID          string    `yaml:"id" json:"id"`
-	Name        string    `yaml:"name" json:"name"`
-	Enabled     bool      `yaml:"enabled" json:"enabled"`
-	CallerScope string    `yaml:"caller_scope" json:"caller_scope"`
-	KeyPreview  string    `yaml:"key_preview,omitempty" json:"key_preview,omitempty"`
-	Group       string    `yaml:"group" json:"group"`
+	ID          string `yaml:"id" json:"id"`
+	Name        string `yaml:"name" json:"name"`
+	Enabled     bool   `yaml:"enabled" json:"enabled"`
+	CallerScope string `yaml:"caller_scope" json:"caller_scope"`
+	KeyPreview  string `yaml:"key_preview,omitempty" json:"key_preview,omitempty"`
+	Group       string `yaml:"group" json:"group"`
 	// Optional usage limits, same semantics as the downstream KeyConfig
-	// equivalents: 0 = unlimited. Pricing for the USD limits comes from the
-	// global alias table (bindings do not carry their own price sheet).
-	RPM       int     `yaml:"rpm,omitempty" json:"rpm,omitempty"`
-	DailyUSD  float64 `yaml:"daily_usd,omitempty" json:"daily_usd,omitempty"`
-	WeeklyUSD float64 `yaml:"weekly_usd,omitempty" json:"weekly_usd,omitempty"`
+	// equivalents: 0 = unlimited. USD usage is priced from the standalone
+	// model-pricing JSON, not alias mappings.
+	RPM       int       `yaml:"rpm,omitempty" json:"rpm,omitempty"`
+	DailyUSD  float64   `yaml:"daily_usd,omitempty" json:"daily_usd,omitempty"`
+	WeeklyUSD float64   `yaml:"weekly_usd,omitempty" json:"weekly_usd,omitempty"`
 	CreatedAt time.Time `yaml:"created_at,omitempty" json:"created_at,omitempty"`
 	UpdatedAt time.Time `yaml:"updated_at,omitempty" json:"updated_at,omitempty"`
 }

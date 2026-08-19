@@ -14,9 +14,12 @@ import (
 )
 
 type App struct {
-	store         *policy.Store
-	classifyMu    sync.RWMutex
-	classifyCache map[string][]string
+	store             *policy.Store
+	classifyMu        sync.RWMutex
+	classifyCache     map[string][]string
+	pricingSyncMu     sync.Mutex
+	pricingSyncer     *pricingSyncer
+	pricingSyncStatus pricingSyncStatus
 }
 
 const classifyCacheCapacity = 4096
@@ -93,12 +96,24 @@ func (a *App) configure(raw []byte) error {
 	})
 	a.clearClassifyCache()
 	a.store.StartUsageFlusher()
+	a.startPricingSyncer(cfg.PricingSync)
 	return nil
 }
 
-// Shutdown flushes usage. Host calls this on plugin unload.
+// Shutdown flushes usage and stops the pricing sync loop. Host calls this on
+// plugin unload.
 func (a *App) Shutdown() {
 	a.store.StopUsageFlusher()
+	a.pricingSyncMu.Lock()
+	if a.pricingSyncer != nil {
+		a.pricingSyncer.stop()
+		s := a.pricingSyncer
+		a.pricingSyncer = nil
+		a.pricingSyncMu.Unlock()
+		<-s.doneCh
+	} else {
+		a.pricingSyncMu.Unlock()
+	}
 }
 
 func (a *App) registration() Registration {
@@ -113,8 +128,10 @@ func (a *App) registration() Registration {
 			ConfigFields: []ConfigField{
 				{Name: "enabled", Type: "boolean", Description: "Enable or disable this plugin without unloading it."},
 				{Name: "state_file", Type: "string", Description: "JSON state file used for access-policy changes made through the Management API."},
+				{Name: "pricing_file", Type: "string", Description: "Standalone model price catalog (USD per 1M tokens). Default: cpa-access-guard-model-pricing.json next to state_file. Relative paths resolve against the CPA process working directory."},
 				{Name: "keys", Type: "array", Description: "Initial downstream API-key access-policy list. State file wins after it exists."},
 				{Name: "native_key_bindings", Type: "array", Description: "Optional caller-scope bindings that constrain CPA-native downstream API keys to credential groups. Requires a Scheduler path carrying caller_scope, Home disabled, no unsupported special route, and quota-exceeded.antigravity-credits=false."},
+				{Name: "pricing_sync", Type: "object", Description: "models.dev catalog refresh. Always on. Optional {interval_hours: int, url: string}."},
 			},
 		},
 		Capabilities: Capabilities{
@@ -626,6 +643,11 @@ func (a *App) managementRegistration() ManagementRegistrationResponse {
 			{Method: http.MethodPost, Path: base + "/classify-rules/reorder", Description: "Reorder classification rules."},
 			{Method: http.MethodPost, Path: base + "/classify-preview", Description: "Preview credential classification results for given descriptors."},
 			{Method: http.MethodPost, Path: base + "/catalog", Description: "Build auth-file model picker catalog with classify + built-in groups."},
+			{Method: http.MethodGet, Path: base + "/pricing", Description: "List the standalone model price catalog."},
+			{Method: http.MethodPost, Path: base + "/pricing", Description: "Create or update one model price row."},
+			{Method: http.MethodDelete, Path: base + "/pricing", Description: "Delete one model price row by modelId."},
+			{Method: http.MethodGet, Path: base + "/pricing-sync", Description: "Show models.dev pricing sync status."},
+			{Method: http.MethodPost, Path: base + "/pricing-sync/run", Description: "Run one models.dev pricing sync immediately."},
 		},
 		Resources: []ResourceRoute{
 			{Path: web.IndexPath, Menu: "Access Guard", Description: "Web UI for CPA Access Guard (create keys, bind credentials, and pick models)."},
@@ -695,6 +717,17 @@ func (a *App) handleManagement(raw []byte) ([]byte, error) {
 		return OKEnvelope(a.classifyPreview(req.Body))
 	case req.Method == http.MethodPost && path == base+"/catalog":
 		return OKEnvelope(a.buildCatalog(req.Body))
+	case req.Method == http.MethodGet && path == base+"/pricing":
+		return OKEnvelope(a.listModelPricing())
+	case req.Method == http.MethodPost && path == base+"/pricing":
+		return OKEnvelope(a.upsertModelPricing(req.Body))
+	case req.Method == http.MethodDelete && path == base+"/pricing":
+		return OKEnvelope(a.deleteModelPricing(req.Query, req.Body))
+	case req.Method == http.MethodGet && path == base+"/pricing-sync":
+		return OKEnvelope(jsonResponse(http.StatusOK, a.pricingSyncSnapshot()))
+	case req.Method == http.MethodPost && path == base+"/pricing-sync/run":
+		status := a.pricingSyncSnapshot()
+		return OKEnvelope(jsonResponse(http.StatusOK, a.runPricingSync(status.URL)))
 	default:
 		return OKEnvelope(jsonError(http.StatusNotFound, "not_found", "unknown management route"))
 	}

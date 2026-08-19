@@ -24,6 +24,7 @@ const apiMocks = vi.hoisted(() => ({
 
 vi.mock("../api/mappings", () => apiMocks);
 vi.mock("../components/NativeKeyBindings", () => ({ default: () => null }));
+vi.mock("../components/PricingTable", () => ({ default: () => null }));
 
 import Mapping from "./Mapping";
 

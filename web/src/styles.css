@@ -908,6 +908,8 @@ td.strong { font-weight: 600; color: var(--text); }
 .map-tab:hover { color: var(--text); }
 .map-tab.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
 .map-toolbar { display: flex; justify-content: flex-end; margin-bottom: 16px; }
+.pricing-toolbar { justify-content: flex-end; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pricing-toolbar .input { flex: 1 1 220px; }
 
 /* CPA top-level API-key bindings */
 .native-binding-notice {

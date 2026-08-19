@@ -209,6 +209,7 @@
     "aliasTab": "Alias Mapping",
     "classifyTab": "Credential Classification",
     "nativeTab": "Native Key Bindings",
+    "pricingTab": "Model Pricing",
     "newAlias": "New Alias",
     "newRule": "New Rule",
     "edit": "Edit",
@@ -332,8 +333,30 @@
       "weeklyUsd": "Weekly USD",
       "unlimited": "unlimited",
       "limitsInvalid": "Limits must be zero or positive numbers.",
-      "limitsHint": "Empty or 0 = unlimited. USD usage is priced via the global alias table; models without a priced alias count calls but bill $0.",
+      "limitsHint": "Empty or 0 = unlimited. USD usage is billed from the model price catalog.",
       "calls": "Calls (day/week)"
+    },
+    "pricingSync": {
+      "last": "last sync: {{catalog}} prices",
+      "runNow": "Sync prices now",
+      "running": "Syncing…"
+    },
+    "pricing": {
+      "search": "Search model ID or name",
+      "add": "Add pricing",
+      "empty": "No pricing data yet. Sync from models.dev or add a row.",
+      "count": "Showing {{shown}} / {{total}} · ",
+      "perMillion": "USD per million tokens",
+      "perMillionHint": "Prices are USD per million tokens. Cache write maps to cacheCreation.",
+      "modelId": "Model ID",
+      "displayName": "Display name",
+      "input": "Input",
+      "output": "Output",
+      "cacheRead": "Cache read",
+      "cacheWrite": "Cache write",
+      "editTitle": "Edit pricing · {{id}}",
+      "modelIdRequired": "Model ID is required",
+      "deleteConfirm": "Delete pricing for {{id}}?"
     }
   }
 }

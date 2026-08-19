@@ -39,10 +39,10 @@ func createTestBindingWithKey(t *testing.T, store *Store, id, key string, mutate
 func seedFastAlias(t *testing.T, store *Store) {
 	t.Helper()
 	if err := store.UpsertAlias(AliasMapping{
-		Alias:                "fast",
-		InputPricePerMillion: 1,
+		Alias:                 "fast",
+		InputPricePerMillion:  1,
 		OutputPricePerMillion: 2,
-		Targets:              []AliasTarget{{Provider: "codex", TargetModel: "gpt-5"}},
+		Targets:               []AliasTarget{{Provider: "codex", TargetModel: "gpt-5"}},
 	}); err != nil {
 		t.Fatalf("UpsertAlias: %v", err)
 	}
@@ -71,12 +71,16 @@ func TestRecordUsageNativeFallback(t *testing.T) {
 		t.Fatal("scope mismatch")
 	}
 
-	// Native key plaintext billed via the binding, priced from the global
-	// alias table: 1M in @1 + 1M out @2 = $3.
-	seedFastAlias(t, store)
+	// Native key plaintext billed via the binding, priced from the JSON catalog.
+	if err := store.UpsertModelPrice(ModelPrice{
+		ID: "gpt-5", DisplayName: "GPT-5",
+		InputPricePerMillion: 1, OutputPricePerMillion: 2,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	cost := store.RecordUsage(nativeTestKey, "fast", "gpt-5", false, UsageDetail{InputTokens: 1_000_000, OutputTokens: 1_000_000})
 	if cost != 3 {
-		t.Fatalf("expected $3, got %v", cost)
+		t.Fatalf("expected $3 from pricing JSON, got %v", cost)
 	}
 	usage := store.NativeBindingUsage(binding)
 	if usage.DailyUSDUsed != 3 || usage.DailyCalls != 1 {
@@ -95,6 +99,43 @@ func TestRecordUsageNativeFallback(t *testing.T) {
 	store.RecordUsage(nativeTestKey, "fast", "gpt-5", true, UsageDetail{InputTokens: 100, OutputTokens: 100})
 	if usage = store.NativeBindingUsage(binding); usage.DailyCalls != 2 || usage.DailyUSDUsed != 3 {
 		t.Fatalf("failed request must not bill: %+v", usage)
+	}
+}
+
+func TestRecordUsageNativeIgnoresAliasPrices(t *testing.T) {
+	store := newNativeQuotaStore(t, t.TempDir()+"/state.json")
+	createTestBinding(t, store, "native-catalog", nil)
+	if err := store.UpsertAlias(AliasMapping{
+		Alias:                 "fast",
+		InputPricePerMillion:  999,
+		OutputPricePerMillion: 999,
+		Targets:               []AliasTarget{{Provider: "xai", TargetModel: "grok-4.6"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertModelPrice(ModelPrice{
+		ID: "grok-4.6", DisplayName: "Grok 4.6", Provider: "xai",
+		InputPricePerMillion: 1, OutputPricePerMillion: 2,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cost := store.RecordUsage(nativeTestKey, "fast", "grok-4.6", false, UsageDetail{InputTokens: 1_000_000, OutputTokens: 1_000_000})
+	if cost != 3 {
+		t.Fatalf("native key must use pricing JSON not alias, got %v", cost)
+	}
+}
+
+func TestRecordUsageNativeCatalogWithoutAlias(t *testing.T) {
+	store := newNativeQuotaStore(t, t.TempDir()+"/state.json")
+	createTestBinding(t, store, "native-catalog-only", nil)
+	if _, err := store.MergeCatalogPricing([]ModelsDevEntry{
+		{ProviderID: "openai", ModelID: "gpt-5.6-sol", Input: 1, Output: 2},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cost := store.RecordUsage(nativeTestKey, "gpt-5.6-sol", "gpt-5.6-sol", false, UsageDetail{InputTokens: 1_000_000, OutputTokens: 1_000_000})
+	if cost != 3 {
+		t.Fatalf("empty alias table should still bill from catalog, got %v", cost)
 	}
 }
 
