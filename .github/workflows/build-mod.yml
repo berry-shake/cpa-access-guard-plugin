@@ -3,7 +3,7 @@ name: Build (mod)
 on:
   push:
     tags:
-      - 'v*fork'
+      - 'v*fork*'
   workflow_dispatch:
 
 permissions:
