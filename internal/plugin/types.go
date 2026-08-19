@@ -55,7 +55,7 @@ const (
 const (
 	PluginID   = "cpa-access-guard"
 	PluginName = "CPA Access Guard"
-	Version    = "0.5.0"
+	Version    = "0.4.4-fork"
 )
 
 type Envelope struct {
