@@ -213,6 +213,27 @@ func nativeQuotaError(decision policy.NativeQuotaDecision, model string) (code, 
 	return "quota_exceeded", string(body)
 }
 
+// noCandidateMessage renders the group-isolation rejection in the same shape
+// the host uses for its own "no auth available" errors:
+// "<base> (providers=..., model=...)" plus the requested group, so the caller
+// can see exactly which boundary rejected the request.
+func noCandidateMessage(req SchedulerPickRequest, group string) string {
+	providers := req.Providers
+	if len(providers) == 0 && req.Provider != "" {
+		providers = []string{req.Provider}
+	}
+	providerText := strings.Join(providers, ",")
+	if providerText == "" {
+		providerText = "unknown"
+	}
+	model := strings.TrimSpace(req.Model)
+	if model == "" {
+		model = "unknown"
+	}
+	return fmt.Sprintf("no eligible auth candidate for requested group (providers=%s, model=%s, group=%s)",
+		providerText, model, group)
+}
+
 func resolveProviderKey(provider string, availableProviders []string) string {
 	p := strings.ToLower(strings.TrimSpace(provider))
 	if p == "" {
@@ -338,7 +359,7 @@ func (a *App) pickScheduler(raw []byte) ([]byte, error) {
 		if nativeBinding {
 			// A resolved native binding is an isolation boundary. Deferring on an
 			// empty candidate list would let a host fallback escape that boundary.
-			return ErrorEnvelope("auth_not_found", "no eligible auth candidate for requested group", http.StatusServiceUnavailable), nil
+			return ErrorEnvelope("auth_not_found", noCandidateMessage(req, group), http.StatusServiceUnavailable), nil
 		}
 		return OKEnvelope(SchedulerPickResponse{Handled: false})
 	}
@@ -358,7 +379,7 @@ func (a *App) pickScheduler(raw []byte) ([]byte, error) {
 		// Handled=false would let the host pick ANY auth including other tiers.
 		// Instead we report an explicit "auth_not_found" so the caller sees the
 		// intent honored (no available tier-matching auth) rather than a leak.
-		return ErrorEnvelope("auth_not_found", "no eligible auth candidate for requested group", http.StatusServiceUnavailable), nil
+		return ErrorEnvelope("auth_not_found", noCandidateMessage(req, group), http.StatusServiceUnavailable), nil
 	}
 
 	best := matched[0]
