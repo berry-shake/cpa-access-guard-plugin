@@ -102,7 +102,7 @@ jobs:
           mkdir -p dist
           CGO_ENABLED=1 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
             go build -trimpath -buildvcs=false -tags cshared -buildmode=c-shared \
-              -ldflags "-s -w" \
+              -ldflags "-s -w -X cpa-access-guard/internal/plugin.Version=${VERSION}" \
               -o "dist/${LIB_NAME}" ./cmd/cpa-access-guard
           rm -f "dist/${PLUGIN_ID}.h"
 
@@ -160,7 +160,7 @@ jobs:
           targets: windows-arm64
           out-dir: dist/windows-arm64
           output: ${{ env.PLUGIN_ID }}.dll
-          flags: -ldflags=-s -w
+          flags: -ldflags=-s -w -X cpa-access-guard/internal/plugin.Version=${{ env.VERSION }}
 
       - name: Package plugin
         run: bash scripts/package-plugin.sh dist/windows-arm64 "${PLUGIN_ID}.dll" "${ARCHIVE_NAME}"

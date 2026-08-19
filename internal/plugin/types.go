@@ -55,8 +55,11 @@ const (
 const (
 	PluginID   = "cpa-access-guard"
 	PluginName = "CPA Access Guard"
-	Version    = "0.4.4-fork"
 )
+
+// Version is stamped at build time via -ldflags "-X cpa-access-guard/internal/plugin.Version=<ver>".
+// The default marks locally built binaries that skipped the release pipeline.
+var Version = "0.0.0-dev"
 
 type Envelope struct {
 	OK     bool            `json:"ok"`
