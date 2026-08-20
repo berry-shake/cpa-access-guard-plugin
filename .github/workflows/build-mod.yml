@@ -11,6 +11,7 @@ permissions:
 
 env:
   PLUGIN_ID: cpa-access-guard
+  RELEASE_NAME: access-guard
 
 jobs:
   test:
@@ -104,7 +105,7 @@ jobs:
             go build -trimpath -buildvcs=false -tags cshared -buildmode=c-shared \
               -ldflags "-s -w -X cpa-access-guard/internal/plugin.Version=${VERSION}" \
               -o "dist/${LIB_NAME}" ./cmd/cpa-access-guard
-          rm -f "dist/${PLUGIN_ID}.h"
+          rm -f "dist/${RELEASE_NAME}.h"
 
       - name: Package plugin
         run: bash scripts/package-plugin.sh dist "${LIB_NAME}" "${ARCHIVE_NAME}"
@@ -159,11 +160,11 @@ jobs:
           packages: .
           targets: windows-arm64
           out-dir: dist/windows-arm64
-          output: ${{ env.PLUGIN_ID }}.dll
+          output: ${{ env.RELEASE_NAME }}.dll
           flags: -ldflags=-s -w -X cpa-access-guard/internal/plugin.Version=${{ env.VERSION }}
 
       - name: Package plugin
-        run: bash scripts/package-plugin.sh dist/windows-arm64 "${PLUGIN_ID}.dll" "${ARCHIVE_NAME}"
+        run: bash scripts/package-plugin.sh dist/windows-arm64 "${RELEASE_NAME}.dll" "${ARCHIVE_NAME}"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4

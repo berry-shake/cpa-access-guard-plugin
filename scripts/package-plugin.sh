@@ -6,7 +6,8 @@ lib_name="${2:?library name is required}"
 archive_name="${3:?archive name is required}"
 repo_root="${GITHUB_WORKSPACE:-$(pwd)}"
 
-rm -f "${lib_dir}/${PLUGIN_ID}.h"
+lib_stem="${lib_name%.*}"
+rm -f "${lib_dir}/${lib_stem}.h"
 
 if [[ "${RUNNER_OS:-}" == "Windows" ]]; then
 	powershell -Command "Compress-Archive -Path '${lib_dir}/${lib_name}' -DestinationPath '${archive_name}'"
