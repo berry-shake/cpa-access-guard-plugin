@@ -323,6 +323,48 @@ func TestNativeKeyBindingManagementValidationAndRegistration(t *testing.T) {
 	if !catalogRegistered {
 		t.Fatal("management registration missing POST native-key-bindings/catalog")
 	}
+	resetRegistered := false
+	for _, route := range app.managementRegistration().Routes {
+		if route.Path == "/plugins/cpa-access-guard/native-key-bindings/reset-quota" && route.Method == http.MethodPost {
+			resetRegistered = true
+			break
+		}
+	}
+	if !resetRegistered {
+		t.Fatal("management registration missing POST native-key-bindings/reset-quota")
+	}
+}
+
+func TestResetNativeKeyBindingQuotaManagement(t *testing.T) {
+	app, _ := configureNativeBindingManagementApp(t)
+	const (
+		basePath = "/v0/management/plugins/cpa-access-guard/native-key-bindings"
+		secret   = "sk-native-reset-secret-0123456789"
+	)
+	created := nativeBindingManagementCall(t, app, http.MethodPost, basePath, nil, map[string]any{
+		"id": "reset-me", "key": secret, "group": "team", "rpm": 10, "daily_usd": 5, "weekly_usd": 20,
+	})
+	if created.StatusCode != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", created.StatusCode, created.Body)
+	}
+	binding := app.store.NativeKeyBindingsSnapshot()[0]
+	if _, limited := app.store.CheckNativeKeyQuota(binding.CallerScope); limited {
+		t.Fatal("first RPM request unexpectedly limited")
+	}
+	app.store.RecordUsage(secret, "", "unpriced-model", false, policy.UsageDetail{InputTokens: 10})
+	before := app.store.NativeBindingUsage(binding)
+	if before.RPMUsed == 0 || before.DailyCalls == 0 || before.WeeklyCalls == 0 {
+		t.Fatalf("usage before reset=%+v", before)
+	}
+
+	reset := nativeBindingManagementCall(t, app, http.MethodPost, basePath+"/reset-quota", nil, map[string]any{"id": "reset-me"})
+	if reset.StatusCode != http.StatusOK {
+		t.Fatalf("reset status=%d body=%s", reset.StatusCode, reset.Body)
+	}
+	after := app.store.NativeBindingUsage(binding)
+	if after.RPMUsed != 0 || after.DailyUSDUsed != 0 || after.WeeklyUSDUsed != 0 || after.DailyCalls != 0 || after.WeeklyCalls != 0 {
+		t.Fatalf("usage after reset=%+v", after)
+	}
 }
 
 func TestNativeKeyBindingPersistenceErrorIsInternalAndRedacted(t *testing.T) {

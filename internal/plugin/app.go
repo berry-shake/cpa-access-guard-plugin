@@ -634,6 +634,7 @@ func (a *App) managementRegistration() ManagementRegistrationResponse {
 			{Method: http.MethodPatch, Path: base + "/native-key-bindings", Description: "Update, rotate, enable, or disable one CPA-native key binding."},
 			{Method: http.MethodDelete, Path: base + "/native-key-bindings", Description: "Delete one CPA-native key binding by id."},
 			{Method: http.MethodPost, Path: base + "/native-key-bindings/catalog", Description: "Match CPA-native downstream API keys to current bindings without returning secrets."},
+			{Method: http.MethodPost, Path: base + "/native-key-bindings/reset-quota", Description: "Reset RPM and usage quota counters for one CPA-native key binding."},
 			{Method: http.MethodGet, Path: base + "/aliases", Description: "List the global alias mapping table."},
 			{Method: http.MethodPost, Path: base + "/aliases", Description: "Create or update a global alias mapping."},
 			{Method: http.MethodDelete, Path: base + "/aliases", Description: "Delete a global alias mapping by name."},
@@ -699,6 +700,8 @@ func (a *App) handleManagement(raw []byte) ([]byte, error) {
 		return OKEnvelope(a.deleteNativeKeyBinding(idFromRequest(req.Query, req.Body)))
 	case req.Method == http.MethodPost && path == base+"/native-key-bindings/catalog":
 		return OKEnvelope(a.catalogNativeKeyBindings(req.Body))
+	case req.Method == http.MethodPost && path == base+"/native-key-bindings/reset-quota":
+		return OKEnvelope(a.resetNativeKeyQuota(idFromRequest(req.Query, req.Body)))
 	case req.Method == http.MethodGet && path == base+"/aliases":
 		return OKEnvelope(jsonResponse(http.StatusOK, map[string]any{"aliases": a.store.AliasesSnapshot()}))
 	case req.Method == http.MethodPost && path == base+"/aliases":

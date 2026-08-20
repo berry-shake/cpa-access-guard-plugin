@@ -29,17 +29,17 @@ type nativeKeyBindingWriteRequest struct {
 // irreversible, it is a stable authorization identity and management clients
 // do not need it. The API exposes only a short key preview for identification.
 type publicNativeKeyBinding struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Enabled    bool   `json:"enabled"`
-	KeyPreview string `json:"key_preview"`
-	Group      string `json:"group"`
-	RPM        int    `json:"rpm,omitempty"`
-	DailyUSD   float64 `json:"daily_usd,omitempty"`
-	WeeklyUSD  float64 `json:"weekly_usd,omitempty"`
+	ID         string                            `json:"id"`
+	Name       string                            `json:"name"`
+	Enabled    bool                              `json:"enabled"`
+	KeyPreview string                            `json:"key_preview"`
+	Group      string                            `json:"group"`
+	RPM        int                               `json:"rpm,omitempty"`
+	DailyUSD   float64                           `json:"daily_usd,omitempty"`
+	WeeklyUSD  float64                           `json:"weekly_usd,omitempty"`
 	Usage      *policy.NativeBindingUsageSummary `json:"usage,omitempty"`
-	CreatedAt  string `json:"created_at,omitempty"`
-	UpdatedAt  string `json:"updated_at,omitempty"`
+	CreatedAt  string                            `json:"created_at,omitempty"`
+	UpdatedAt  string                            `json:"updated_at,omitempty"`
 }
 
 // nativeKeyBindingCatalogRequest carries the current CPA top-level API keys.
@@ -197,6 +197,17 @@ func (a *App) deleteNativeKeyBinding(id string) ManagementResponse {
 		return nativeKeyBindingStoreError(err)
 	}
 	return jsonResponse(http.StatusOK, map[string]any{"deleted": true, "id": id})
+}
+
+func (a *App) resetNativeKeyQuota(id string) ManagementResponse {
+	id = strings.ToLower(strings.TrimSpace(id))
+	if id == "" {
+		return jsonError(http.StatusBadRequest, "missing_id", "id is required")
+	}
+	if err := a.store.ResetNativeKeyQuota(id); err != nil {
+		return nativeKeyBindingStoreError(err)
+	}
+	return jsonResponse(http.StatusOK, map[string]any{"reset": true, "id": id})
 }
 
 func nativeKeyBindingStoreError(err error) ManagementResponse {

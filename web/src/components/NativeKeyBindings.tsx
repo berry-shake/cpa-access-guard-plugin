@@ -7,6 +7,7 @@ import {
   fetchClassifyRules,
   fetchNativeKeyBindingCatalog,
   fetchTopLevelAPIKeys,
+  resetNativeKeyBindingQuota,
   updateNativeKeyBinding,
 } from "../api/mappings";
 import type { ClassifyRule, NativeKeyBinding, NativeKeyBindingCatalog } from "../types";
@@ -169,6 +170,20 @@ export default function NativeKeyBindingsTab() {
     }
   };
 
+  const resetQuota = async (binding: NativeKeyBinding) => {
+    if (!window.confirm(t("mapping.native.resetQuotaConfirm", { id: binding.id }))) return;
+    setPendingID(binding.id);
+    setError("");
+    try {
+      await resetNativeKeyBindingQuota(binding.id);
+      await load();
+    } catch (e: unknown) {
+      setError(messageFromError(e));
+    } finally {
+      setPendingID("");
+    }
+  };
+
   const bindTopLevelKey = (row: NativeKeyRow) => {
     if (!row.present || !row.apiKey || row.topLevelIndex === undefined || row.binding) return;
     const ordinal = row.topLevelIndex + 1;
@@ -318,6 +333,14 @@ export default function NativeKeyBindingsTab() {
                         />
                         <span className="track"><span className="thumb" /></span>
                       </label>
+                      <button
+                        className="btn sm"
+                        type="button"
+                        disabled={pending}
+                        onClick={() => { void resetQuota(binding); }}
+                      >
+                        {t("mapping.native.resetQuota")}
+                      </button>
                       <button
                         className="btn sm"
                         type="button"

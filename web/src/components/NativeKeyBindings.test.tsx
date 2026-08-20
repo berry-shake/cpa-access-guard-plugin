@@ -13,6 +13,7 @@ const apiMocks = vi.hoisted(() => ({
   createNativeKeyBinding: vi.fn(),
   updateNativeKeyBinding: vi.fn(),
   deleteNativeKeyBinding: vi.fn(),
+  resetNativeKeyBindingQuota: vi.fn(),
 }));
 
 vi.mock("../api/mappings", () => apiMocks);
@@ -66,6 +67,7 @@ beforeEach(() => {
   apiMocks.createNativeKeyBinding.mockResolvedValue(existing);
   apiMocks.updateNativeKeyBinding.mockResolvedValue(existing);
   apiMocks.deleteNativeKeyBinding.mockResolvedValue(undefined);
+  apiMocks.resetNativeKeyBindingQuota.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -88,6 +90,26 @@ describe("buildNativeBindingGroupOptions", () => {
 });
 
 describe("NativeKeyBindingsTab", () => {
+  it("confirms and resets all quota counters for a native binding", async () => {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<NativeKeyBindingsTab />);
+      await tick();
+    });
+
+    const resetButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("重置额度"));
+    expect(resetButton).toBeTruthy();
+    await act(async () => {
+      resetButton!.click();
+      await tick();
+    });
+
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("全部用量记录"));
+    expect(apiMocks.resetNativeKeyBindingQuota).toHaveBeenCalledWith("client-a");
+    expect(apiMocks.fetchNativeKeyBindingCatalog).toHaveBeenCalledTimes(2);
+  });
+
   it("warns before disabling because the top-level key remains valid", async () => {
     await act(async () => {
       root = createRoot(container);

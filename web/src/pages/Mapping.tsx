@@ -11,7 +11,7 @@ type MappingTab = "alias" | "classify" | "native" | "pricing";
 export default function Mapping() {
   const t = useT();
   const loc = useLocation();
-  const [tab, setTab] = useState<MappingTab>("alias");
+  const [tab, setTab] = useState<MappingTab>("native");
 
   // Pick up returned state (new targets from ModelPick, etc.)
   useEffect(() => {
@@ -21,21 +21,18 @@ export default function Mapping() {
 
   return (
     <div className="map-page">
-      <div className="map-page-head">
-        <h1>{t("mapping.title")}</h1>
-      </div>
       <div className="map-tabs">
-        <button className={"map-tab" + (tab === "alias" ? " active" : "")} onClick={() => setTab("alias")}>
-          {t("mapping.aliasTab")}
-        </button>
-        <button className={"map-tab" + (tab === "classify" ? " active" : "")} onClick={() => setTab("classify")}>
-          {t("mapping.classifyTab")}
-        </button>
         <button className={"map-tab" + (tab === "native" ? " active" : "")} onClick={() => setTab("native")}>
           {t("mapping.nativeTab")}
         </button>
         <button className={"map-tab" + (tab === "pricing" ? " active" : "")} onClick={() => setTab("pricing")}>
           {t("mapping.pricingTab")}
+        </button>
+        <button className={"map-tab" + (tab === "classify" ? " active" : "")} onClick={() => setTab("classify")}>
+          {t("mapping.classifyTab")}
+        </button>
+        <button className={"map-tab" + (tab === "alias" ? " active" : "")} onClick={() => setTab("alias")}>
+          {t("mapping.aliasTab")}
         </button>
       </div>
       {tab === "alias" && <AliasListTab />}

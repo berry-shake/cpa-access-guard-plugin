@@ -27,9 +27,6 @@ export default function KeyNew() {
 
   return (
     <div className="form-page">
-      <div className="fp-head mobile-hidden">
-        <h1>{title}</h1>
-      </div>
       <MobileFormHeader title={title} backTo="/keys" />
       <KeyForm
         initial={initial}

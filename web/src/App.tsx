@@ -1,6 +1,6 @@
-import { Routes, Route, Navigate, useNavigate, Link, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, Link, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { isAuthed, subscribe, clearSession, getSession, bootstrapFromPanel } from "./store/session";
+import { isAuthed, subscribe, getSession, bootstrapFromPanel } from "./store/session";
 import { useT } from "./i18n";
 import Login from "./pages/Login";
 import KeyList from "./pages/KeyList";
@@ -17,12 +17,11 @@ function useAuthTick() {
 }
 
 // Desktop top horizontal nav, styled after the Model Limiter page header:
-// left = logo mark + product name + one-line tagline, right = nav links +
-// logout as a plain text link. Mobile keeps the legacy .header (hidden on
-// desktop via CSS) and bottom tab bar instead.
+// left = logo mark + product name + one-line tagline, right = nav links.
+// Mobile keeps the legacy .header (hidden on desktop via CSS) and bottom tab
+// bar instead.
 function TopNav() {
   const t = useT();
-  const nav = useNavigate();
   const loc = useLocation();
   const s = getSession();
   if (!s) return null;
@@ -50,15 +49,9 @@ function TopNav() {
           </span>
         </div>
         <div className="topnav-actions">
+          <Link to="/mapping" className={"tn-link" + (onMapping ? " active" : "")}>{t("header.mapping")}</Link>
           <Link to="/keys" className={"tn-link" + (onKeys && !onNew ? " active" : "")}>{t("header.keyList")}</Link>
           <Link to="/keys/new" className={"tn-link" + (onNew ? " active" : "")}>{t("header.newKey")}</Link>
-          <Link to="/mapping" className={"tn-link" + (onMapping ? " active" : "")}>{t("header.mapping")}</Link>
-          <button
-            className="tn-link tn-logout"
-            onClick={() => { clearSession(); nav("/login"); }}
-          >
-            {t("header.logout")}
-          </button>
         </div>
       </div>
     </div>
@@ -110,7 +103,7 @@ function Shell() {
         <Route path="/mapping" element={<Mapping />} />
         <Route path="/mapping/alias/:aliasName" element={<AliasEditForm />} />
         <Route path="/mapping/rule/:ruleName" element={<RuleEditForm />} />
-        <Route path="*" element={<Navigate to="/keys" replace />} />
+        <Route path="*" element={<Navigate to="/mapping" replace />} />
       </Routes>
     </div>
   );

@@ -334,7 +334,9 @@
       "unlimited": "unlimited",
       "limitsInvalid": "Limits must be zero or positive numbers.",
       "limitsHint": "Empty or 0 = unlimited. USD usage is billed from the model price catalog.",
-      "calls": "Calls (day/week)"
+      "calls": "Calls (day/week)",
+      "resetQuota": "Reset quota",
+      "resetQuotaConfirm": "Reset RPM, daily/weekly usage, and all usage records for native key binding {{id}}? This cannot be undone."
     },
     "pricingSync": {
       "last": "last sync: {{catalog}} prices",

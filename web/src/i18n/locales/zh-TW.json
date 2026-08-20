@@ -326,7 +326,9 @@
       "unlimited": "不限",
       "limitsInvalid": "額度必須是 0 或正數。",
       "limitsHint": "留空或 0 = 不限。美元用量按模型價格表計費。",
-      "calls": "呼叫次數（日/週）"
+      "calls": "呼叫次數（日/週）",
+      "resetQuota": "重設額度",
+      "resetQuotaConfirm": "確認重設原生 Key 綁定 {{id}} 的 RPM、日/週額度及全部用量記錄？此操作無法復原。"
     },
     "pricingSync": {
       "last": "上次同步：價格表 {{catalog}} 條",

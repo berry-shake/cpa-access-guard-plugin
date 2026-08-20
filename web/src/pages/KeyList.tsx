@@ -71,12 +71,9 @@ export default function KeyList() {
 
   return (
     <div>
-      {/* Desktop: page toolbar (h1 + refresh). Nav/new-key live in the topnav. */}
-      <div className="fp-head mobile-hidden" style={{ margin: "0 0 16px" }}>
-        <h1>{t("header.keyList")}</h1>
-        <div className="fp-actions">
-          <button className="btn sm" onClick={load}>{t("keys.refresh")}</button>
-        </div>
+      {/* The active top-level tab already names this page. */}
+      <div className="map-toolbar mobile-hidden">
+        <button className="btn sm" onClick={load}>{t("keys.refresh")}</button>
       </div>
       {error && <div className="error">{error}</div>}
       {loading ? (

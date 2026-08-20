@@ -226,6 +226,11 @@ export async function deleteNativeKeyBinding(id: string): Promise<void> {
   await c.delete(pluginPath("/native-key-bindings"), { data: { id } });
 }
 
+export async function resetNativeKeyBindingQuota(id: string): Promise<void> {
+  const c = apiClient();
+  await c.post(pluginPath("/native-key-bindings/reset-quota"), { id });
+}
+
 // --- models.dev pricing sync ---
 
 export interface PricingSyncResult {

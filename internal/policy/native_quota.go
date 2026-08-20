@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"fmt"
 	"strings"
 	"time"
 )
@@ -217,4 +218,43 @@ func (s *Store) NativeBindingUsage(binding NativeKeyBinding) NativeBindingUsageS
 		summary.RPMUsed = limiter.SnapshotID(nativeUsageLedgerID(binding.CallerScope))
 	}
 	return summary
+}
+
+// ResetNativeKeyQuota clears every runtime quota counter for one native-key
+// binding: RPM, daily/weekly spend, calls, tokens, and per-model breakdowns.
+// The binding and its configured limits are left unchanged.
+func (s *Store) ResetNativeKeyQuota(id string) error {
+	s.updateMu.Lock()
+	defer s.updateMu.Unlock()
+	id = strings.ToLower(strings.TrimSpace(id))
+	if id == "" {
+		return ErrUnknownNativeKeyBinding
+	}
+	s.mu.RLock()
+	var binding *NativeKeyBinding
+	for _, candidate := range s.nativeKeyBindings {
+		if candidate != nil && strings.EqualFold(candidate.ID, id) {
+			cp := *candidate
+			binding = &cp
+			break
+		}
+	}
+	s.mu.RUnlock()
+	if binding == nil {
+		return ErrUnknownNativeKeyBinding
+	}
+	account := nativeUsageLedgerID(binding.CallerScope)
+	limiter, usage := s.runtimeComponents()
+	if limiter != nil {
+		limiter.Reset(account)
+	}
+	if usage != nil {
+		usage.resetUsage(account)
+	}
+	// Persist immediately so a process restart cannot resurrect the quota that
+	// the operator just cleared from the management UI.
+	if err := s.FlushUsage(); err != nil {
+		return fmt.Errorf("%w: %v", ErrNativeKeyBindingPersistence, err)
+	}
+	return nil
 }

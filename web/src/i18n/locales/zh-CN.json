@@ -334,7 +334,9 @@
       "unlimited": "不限",
       "limitsInvalid": "额度必须是 0 或正数。",
       "limitsHint": "留空或 0 = 不限。美元用量按模型价格表计费。",
-      "calls": "调用次数（日/周）"
+      "calls": "调用次数（日/周）",
+      "resetQuota": "重置额度",
+      "resetQuotaConfirm": "确认重置原生 Key 绑定 {{id}} 的 RPM、日/周额度及全部用量记录？此操作不可撤销。"
     },
     "pricingSync": {
       "last": "上次同步：价格表 {{catalog}} 条",
