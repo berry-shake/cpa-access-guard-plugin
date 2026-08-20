@@ -932,7 +932,8 @@ td.strong { font-weight: 600; color: var(--text); }
   border-radius: var(--r-md); font-size: 13px;
 }
 .native-binding-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  align-items: start; gap: 16px;
 }
 .native-binding-card {
   background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-md);
