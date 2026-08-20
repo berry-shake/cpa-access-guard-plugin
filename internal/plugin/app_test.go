@@ -340,7 +340,7 @@ func TestHandleManagementServesResourceUI(t *testing.T) {
 	app := NewApp()
 	req, _ := json.Marshal(ManagementRequest{
 		Method: http.MethodGet,
-		Path:   "/v0/resource/plugins/cpa-access-guard/index.html",
+		Path:   "/v0/resource/plugins/access-guard/index.html",
 	})
 	raw, err := app.HandleMethod(MethodManagementHandle, req)
 	if err != nil {
@@ -362,7 +362,7 @@ func TestHandleManagementResourceUnknownPath404(t *testing.T) {
 	app := NewApp()
 	req, _ := json.Marshal(ManagementRequest{
 		Method: http.MethodGet,
-		Path:   "/v0/resource/plugins/cpa-access-guard/assets/app.js",
+		Path:   "/v0/resource/plugins/access-guard/assets/app.js",
 	})
 	raw, err := app.HandleMethod(MethodManagementHandle, req)
 	if err != nil {
