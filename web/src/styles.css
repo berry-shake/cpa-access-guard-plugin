@@ -904,8 +904,10 @@ td.strong { font-weight: 600; color: var(--text); }
 .map-tab:hover { color: var(--text); }
 .map-tab.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
 .map-toolbar { display: flex; justify-content: flex-end; margin-bottom: 16px; }
+.key-list-toolbar { gap: 8px; }
 .pricing-toolbar { justify-content: flex-end; align-items: center; gap: 10px; flex-wrap: wrap; }
 .pricing-toolbar .input { flex: 1 1 220px; }
+.pricing-table td { vertical-align: middle; }
 
 /* CPA top-level API-key bindings */
 .native-binding-notice {
@@ -918,8 +920,7 @@ td.strong { font-weight: 600; color: var(--text); }
 .native-binding-notice strong { display: block; margin-bottom: 3px; }
 .native-binding-notice p { margin: 0; color: var(--muted); }
 .native-binding-notice p + p { margin-top: 4px; }
-.native-binding-notice .native-binding-unbind-warning,
-.native-binding-notice .native-binding-path-warning {
+.native-binding-notice .native-binding-unbind-warning {
   margin-top: 9px; padding-top: 9px; color: var(--danger); font-weight: 600;
   border-top: 1px solid var(--danger-border);
 }
@@ -1113,17 +1114,6 @@ td.strong { font-weight: 600; color: var(--text); }
 }
 .rule-builtin-row .info-icon { font-size: 12px; color: var(--accent); }
 .rule-builtin-desc { font-size: 12px; color: var(--muted); margin-top: 8px; }
-.rule-preview-notice {
-  margin: 0 0 14px;
-  padding: 9px 11px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--secondary-bg);
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
 .rule-card {
   background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px;
   transition: border-color .15s;

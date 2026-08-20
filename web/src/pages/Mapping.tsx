@@ -7,34 +7,24 @@ import NativeKeyBindingsTab from "../components/NativeKeyBindings";
 import PricingTable from "../components/PricingTable";
 
 type MappingTab = "alias" | "classify" | "native" | "pricing";
+type MappingSection = "native" | "pricing" | "classify" | "alias";
 
-export default function Mapping() {
-  const t = useT();
+export default function Mapping({ section = "alias" }: { section?: MappingSection }) {
   const loc = useLocation();
-  const [tab, setTab] = useState<MappingTab>("native");
+  const defaultTab: MappingTab = section;
+  const [tab, setTab] = useState<MappingTab>(defaultTab);
+
+  useEffect(() => { setTab(defaultTab); }, [defaultTab]);
 
   // Pick up returned state (new targets from ModelPick, etc.)
   useEffect(() => {
     const requested = loc.state?.mappingTab;
-    if (requested === "alias" || requested === "classify" || requested === "native" || requested === "pricing") setTab(requested);
-  }, [loc.state]);
+    const allowed = requested === section;
+    if (allowed) setTab(requested as MappingTab);
+  }, [loc.state, section]);
 
   return (
     <div className="map-page">
-      <div className="map-tabs">
-        <button className={"map-tab" + (tab === "native" ? " active" : "")} onClick={() => setTab("native")}>
-          {t("mapping.nativeTab")}
-        </button>
-        <button className={"map-tab" + (tab === "pricing" ? " active" : "")} onClick={() => setTab("pricing")}>
-          {t("mapping.pricingTab")}
-        </button>
-        <button className={"map-tab" + (tab === "classify" ? " active" : "")} onClick={() => setTab("classify")}>
-          {t("mapping.classifyTab")}
-        </button>
-        <button className={"map-tab" + (tab === "alias" ? " active" : "")} onClick={() => setTab("alias")}>
-          {t("mapping.aliasTab")}
-        </button>
-      </div>
       {tab === "alias" && <AliasListTab />}
       {tab === "classify" && <ClassifyTab />}
       {tab === "native" && <NativeKeyBindingsTab />}
@@ -224,12 +214,18 @@ function ClassifyTab() {
 
   return (
     <>
+      <div className="native-binding-notice" role="note">
+        <div className="native-binding-notice-icon" aria-hidden="true">ⓘ</div>
+        <div>
+          <strong>{t("mapping.rule.previewNoticeTitle")}</strong>
+          <p>{t("mapping.rule.previewNotice")}</p>
+        </div>
+      </div>
       <div className="map-toolbar">
-        <button className="btn primary" onClick={() => nav("/mapping/rule/new")}>
+        <button className="btn primary" onClick={() => nav("/classify/rule/new")}>
           + {t("mapping.newRule")}
         </button>
       </div>
-      <div className="rule-preview-notice">{t("mapping.rule.previewNotice")}</div>
       {error && <div className="error">{error}</div>}
       {previewError && (
         <div className="error">
@@ -267,7 +263,7 @@ function ClassifyTab() {
                 total={rules.length}
                 onMoveUp={() => moveRule(idx, -1)}
                 onMoveDown={() => moveRule(idx, 1)}
-                onEdit={() => nav(`/mapping/rule/${encodeURIComponent(rule.name)}`)}
+                onEdit={() => nav(`/classify/rule/${encodeURIComponent(rule.name)}`)}
                 onDelete={() => handleDelete(rule.name)}
                 previewData={previewData}
               />
@@ -681,7 +677,7 @@ export function RuleEditForm() {
       // only validation would reject valid rules and approve invalid ones.
       await classifyPreview([], [draft]);
       await upsertClassifyRule(draft);
-      nav("/mapping", { state: { mappingTab: "classify" } });
+      nav("/classify", { state: { mappingTab: "classify" } });
     } catch (e: unknown) {
       setError(String(e));
     } finally {
@@ -693,7 +689,7 @@ export function RuleEditForm() {
     <div className="map-form-page">
       <div className="map-form-card">
         <div className="map-form-head">
-          <a className="back-link" onClick={() => nav("/mapping", { state: { mappingTab: "classify" } })}>
+          <a className="back-link" onClick={() => nav("/classify", { state: { mappingTab: "classify" } })}>
             ← {t("mapping.back")}
           </a>
           <h1>{isNew ? t("mapping.rule.newTitle") : t("mapping.rule.editTitle")}</h1>
@@ -767,7 +763,7 @@ export function RuleEditForm() {
           <button className="btn primary" onClick={handleSave} disabled={saving}>
             {saving ? "..." : t("mapping.save")}
           </button>
-          <button className="btn" onClick={() => nav("/mapping", { state: { mappingTab: "classify" } })}>
+          <button className="btn" onClick={() => nav("/classify", { state: { mappingTab: "classify" } })}>
             {t("mapping.cancel")}
           </button>
         </div>

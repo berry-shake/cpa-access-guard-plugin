@@ -70,9 +70,21 @@ export default function KeyList() {
   };
 
   return (
-    <div>
+    <div className="map-page">
+      <div className="native-binding-notice key-list-notice" role="note">
+        <div className="native-binding-notice-icon" aria-hidden="true">ⓘ</div>
+        <div>
+          <strong>{t("keys.noticeTitle")}</strong>
+          <p>{t("keys.noticeBody")}</p>
+          <p>{t("keys.noticeSecret")}</p>
+          <p className="native-binding-unbind-warning">
+            <span aria-hidden="true">⚠ </span>{t("keys.noticeDestructive")}
+          </p>
+        </div>
+      </div>
       {/* The active top-level tab already names this page. */}
-      <div className="map-toolbar mobile-hidden">
+      <div className="map-toolbar key-list-toolbar mobile-hidden">
+        <Link to="/keys/new" className="btn sm primary">+ {t("keys.create")}</Link>
         <button className="btn sm" onClick={load}>{t("keys.refresh")}</button>
       </div>
       {error && <div className="error">{error}</div>}

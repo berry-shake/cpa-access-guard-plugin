@@ -37,18 +37,13 @@ async function openClassifyTab() {
     root = createRoot(container);
     root.render(
       <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <Mapping />
+        <Mapping section="classify" />
       </MemoryRouter>,
     );
     await tick();
   });
 
-  const classifyButton = Array.from(container.querySelectorAll("button"))
-    .find((button) => button.textContent?.includes("凭证归类"));
-  expect(classifyButton).toBeTruthy();
   await act(async () => {
-    classifyButton!.click();
-    await tick();
     await tick();
   });
 }
@@ -106,5 +101,53 @@ describe("classification preview failures", () => {
 
     expect(container.textContent).toContain("无法预览");
     expect(container.textContent).not.toContain("匹配 0 个凭证");
+  });
+});
+
+describe("mapping section navigation", () => {
+  it("renders native bindings without a redundant single-item tab bar", async () => {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(
+        <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+          <Mapping section="native" />
+        </MemoryRouter>,
+      );
+      await tick();
+    });
+
+    expect(container.querySelector(".map-tabs")).toBeNull();
+    expect(container.textContent).not.toContain("模型价格");
+    expect(container.textContent).not.toContain("凭证归类");
+    expect(container.textContent).not.toContain("别名映射");
+  });
+
+  it("renders model pricing as its own top-level section", async () => {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(
+        <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+          <Mapping section="pricing" />
+        </MemoryRouter>,
+      );
+      await tick();
+    });
+
+    expect(container.querySelector(".map-tabs")).toBeNull();
+  });
+
+  it("renders classify and alias pages without second-level tabs", async () => {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(
+        <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+          <Mapping section="classify" />
+        </MemoryRouter>,
+      );
+      await tick();
+    });
+
+    expect(container.querySelector(".map-tabs")).toBeNull();
+    expect(container.textContent).not.toContain("模型价格");
   });
 });

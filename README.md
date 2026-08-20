@@ -164,7 +164,6 @@ Requirements and behavior:
 - Requires CLIProxyAPI **v7.2.101 or newer**, where Scheduler metadata includes `caller_scope`.
 - The Web UI loads the current top-level list from CPA's Management-key-protected `GET /v0/management/api-keys` endpoint and shows every key as a redacted row, including keys with no binding. A binding whose key was removed from the host remains visible as an orphan record.
 - Selecting an unbound row avoids manual copy/paste. The plaintext stays in page memory, is sent only in Management-authenticated JSON request bodies for exact scope matching and binding creation, and is never rendered, placed in a URL, stored in browser storage, persisted, or returned by plugin APIs.
-- Manual creation remains available: paste the existing native key once. The plaintext is used only to derive the scope/preview; it is not stored or returned.
 - The key must remain in CPA's top-level `api-keys`; a binding is authorization metadata, not authentication.
 - A bound, enabled key with no usable candidate in its group fails closed with `auth_not_found` (503). It never falls back outside the group.
 - When a caller scope matches an enabled native binding, that binding takes precedence over generic Scheduler `group` metadata.

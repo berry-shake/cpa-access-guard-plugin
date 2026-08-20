@@ -235,6 +235,14 @@ describe("NativeKeyBindingsTab", () => {
   });
 
   it("renders an explicit group selector and creates a binding from a suggested group", async () => {
+    apiMocks.fetchTopLevelAPIKeys.mockResolvedValue([existingSecret, "sk-client-b-secret"]);
+    apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValue({
+      entries: [
+        { key_index: 0, key_preview: existing.key_preview, binding: existing },
+        { key_index: 1, key_preview: "sk-clie...ecret" },
+      ],
+      orphan_bindings: [],
+    });
     await act(async () => {
       root = createRoot(container);
       root.render(<NativeKeyBindingsTab />);
@@ -247,19 +255,10 @@ describe("NativeKeyBindingsTab", () => {
     expect(container.textContent).toContain("停用或删除绑定不会停用或删除 CPA 顶层 API Key");
     expect(container.textContent).toContain("该 Key 仍然有效");
     expect(container.textContent).toContain("恢复默认/自由调度");
-    expect(container.textContent).toContain("仅支持经过正常 AuthManager/Scheduler");
-    expect(container.textContent).toContain("CPA Home");
-    expect(container.textContent).toContain("Alpha Search");
-    expect(container.textContent).toContain("Codex Live/Realtime");
-    expect(container.textContent).toContain("plugin-executor");
-    expect(container.textContent).toContain("caller_scope");
-    expect(container.textContent).toContain("quota-exceeded.antigravity-credits: false");
-    expect(container.textContent).toContain("可能选择组外凭证");
-
-    const newButton = Array.from(container.querySelectorAll("button"))
-      .find((button) => button.textContent?.includes("新建绑定"));
-    expect(newButton).toBeTruthy();
-    await act(async () => { newButton!.click(); });
+    const bindButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("配置绑定"));
+    expect(bindButton).toBeTruthy();
+    await act(async () => { bindButton!.click(); });
 
     const groupSelect = container.querySelector("#native-binding-group") as HTMLSelectElement;
     expect(groupSelect.tagName).toBe("SELECT");
@@ -293,7 +292,6 @@ describe("NativeKeyBindingsTab", () => {
     await act(async () => {
       change(container.querySelector("#native-binding-id") as HTMLInputElement, "client-b");
       change(container.querySelector("#native-binding-name") as HTMLInputElement, "Client B");
-      change(container.querySelector("#native-binding-key") as HTMLInputElement, "sk-client-b-secret");
       changeSelect(groupSelect, "classify:tenant-a");
     });
 
@@ -313,15 +311,23 @@ describe("NativeKeyBindingsTab", () => {
   });
 
   it("shows a separate input for a manually entered group", async () => {
+    apiMocks.fetchTopLevelAPIKeys.mockResolvedValue([existingSecret, "sk-client-manual-secret"]);
+    apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValue({
+      entries: [
+        { key_index: 0, key_preview: existing.key_preview, binding: existing },
+        { key_index: 1, key_preview: "sk-clie...ecret" },
+      ],
+      orphan_bindings: [],
+    });
     await act(async () => {
       root = createRoot(container);
       root.render(<NativeKeyBindingsTab />);
       await tick();
     });
 
-    const newButton = Array.from(container.querySelectorAll("button"))
-      .find((button) => button.textContent?.includes("新建绑定"));
-    await act(async () => { newButton!.click(); });
+    const bindButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("配置绑定"));
+    await act(async () => { bindButton!.click(); });
 
     const groupSelect = container.querySelector("#native-binding-group") as HTMLSelectElement;
     const manualOption = Array.from(groupSelect.options)
@@ -330,7 +336,6 @@ describe("NativeKeyBindingsTab", () => {
 
     await act(async () => {
       change(container.querySelector("#native-binding-id") as HTMLInputElement, "client-manual");
-      change(container.querySelector("#native-binding-key") as HTMLInputElement, "sk-client-manual-secret");
       changeSelect(groupSelect, manualOption!.value);
     });
 
@@ -349,10 +354,13 @@ describe("NativeKeyBindingsTab", () => {
 
     expect(apiMocks.createNativeKeyBinding).toHaveBeenCalledWith({
       id: "client-manual",
-      name: undefined,
+      name: "顶层 API Key 2",
       enabled: true,
       key: "sk-client-manual-secret",
       group: "classify:manual",
+      rpm: undefined,
+      daily_usd: undefined,
+      weekly_usd: undefined,
     });
   });
 

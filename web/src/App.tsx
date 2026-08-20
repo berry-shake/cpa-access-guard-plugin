@@ -26,8 +26,10 @@ function TopNav() {
   const s = getSession();
   if (!s) return null;
   // Active state: highlight the nav item matching the current path prefix.
+  const onNativeKeys = loc.pathname === "/native-keys" || loc.pathname.startsWith("/native-keys/");
+  const onPricing = loc.pathname === "/pricing" || loc.pathname.startsWith("/pricing/");
   const onKeys = loc.pathname === "/keys" || loc.pathname.startsWith("/keys/");
-  const onNew = loc.pathname === "/keys/new" || loc.pathname.startsWith("/keys/new/");
+  const onClassify = loc.pathname === "/classify" || loc.pathname.startsWith("/classify/");
   const onMapping = loc.pathname === "/mapping" || loc.pathname.startsWith("/mapping/");
   return (
     <div className="topnav">
@@ -49,9 +51,11 @@ function TopNav() {
           </span>
         </div>
         <div className="topnav-actions">
-          <Link to="/mapping" className={"tn-link" + (onMapping ? " active" : "")}>{t("header.mapping")}</Link>
-          <Link to="/keys" className={"tn-link" + (onKeys && !onNew ? " active" : "")}>{t("header.keyList")}</Link>
-          <Link to="/keys/new" className={"tn-link" + (onNew ? " active" : "")}>{t("header.newKey")}</Link>
+          <Link to="/native-keys" className={"tn-link" + (onNativeKeys ? " active" : "")}>{t("header.nativeKeys")}</Link>
+          <Link to="/keys" className={"tn-link" + (onKeys ? " active" : "")}>{t("header.downstreamKeys")}</Link>
+          <Link to="/classify" className={"tn-link" + (onClassify ? " active" : "")}>{t("header.classify")}</Link>
+          <Link to="/mapping" className={"tn-link" + (onMapping ? " active" : "")}>{t("header.aliasMapping")}</Link>
+          <Link to="/pricing" className={"tn-link" + (onPricing ? " active" : "")}>{t("header.modelPricing")}</Link>
         </div>
       </div>
     </div>
@@ -100,10 +104,14 @@ function Shell() {
         <Route path="/keys/:id/edit/models" element={<ModelPick />} />
         <Route path="/mapping/pick-target" element={<ModelPick />} />
         <Route path="/keys/:id/usage" element={<KeyUsage />} />
-        <Route path="/mapping" element={<Mapping />} />
+        <Route path="/native-keys" element={<Mapping section="native" />} />
+        <Route path="/pricing" element={<Mapping section="pricing" />} />
+        <Route path="/classify" element={<Mapping section="classify" />} />
+        <Route path="/mapping" element={<Mapping section="alias" />} />
         <Route path="/mapping/alias/:aliasName" element={<AliasEditForm />} />
-        <Route path="/mapping/rule/:ruleName" element={<RuleEditForm />} />
-        <Route path="*" element={<Navigate to="/mapping" replace />} />
+        <Route path="/classify/rule/:ruleName" element={<RuleEditForm />} />
+        <Route path="/mapping/rule/:ruleName" element={<Navigate to="/classify" replace />} />
+        <Route path="*" element={<Navigate to="/native-keys" replace />} />
       </Routes>
     </div>
   );

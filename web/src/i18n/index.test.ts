@@ -44,22 +44,6 @@ describe("translate", () => {
   });
 
   it.each(["zh-CN", "zh-TW", "en", "ru"] as const)(
-    "keeps the unsupported scheduler-path warning explicit in %s",
-    (locale) => {
-      _resetLocale(locale);
-      const warning = translate("mapping.native.pathNotice");
-      expect(warning).toContain("AuthManager/Scheduler");
-      expect(warning).toContain("Home");
-      expect(warning).toContain("Alpha Search");
-      expect(warning).toContain("Codex Live/Realtime");
-      expect(warning).toContain("plugin-executor");
-      expect(warning).toContain("Scheduler");
-      expect(warning).toContain("caller_scope");
-      expect(warning).toContain("quota-exceeded.antigravity-credits: false");
-    },
-  );
-
-  it.each(["zh-CN", "zh-TW", "en", "ru"] as const)(
     "fully translates the top-level key catalog UI in %s",
     (locale) => {
       _resetLocale(locale);

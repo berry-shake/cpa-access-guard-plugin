@@ -122,7 +122,7 @@ export default function PricingTable() {
             {t("mapping.pricing.perMillion")}
           </div>
           <div className="card table-wrap">
-            <table>
+            <table className="pricing-table">
               <thead>
                 <tr>
                   <th>{t("mapping.pricing.modelId")}</th>

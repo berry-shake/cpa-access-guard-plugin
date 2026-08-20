@@ -207,9 +207,6 @@ export default function NativeKeyBindingsTab() {
           <p className="native-binding-unbind-warning">
             <span aria-hidden="true">⚠ </span>{t("mapping.native.unbindNotice")}
           </p>
-          <p className="native-binding-path-warning">
-            <span aria-hidden="true">⚠ </span>{t("mapping.native.pathNotice")}
-          </p>
         </div>
       </div>
 
@@ -219,9 +216,6 @@ export default function NativeKeyBindingsTab() {
         </span>
         <button className="btn" type="button" disabled={loading} onClick={() => { void load(); }}>
           {t("mapping.native.refresh")}
-        </button>
-        <button className="btn primary" type="button" onClick={() => setEditor({ mode: "create" })}>
-          + {t("mapping.native.newBinding")}
         </button>
       </div>
 
