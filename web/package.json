@@ -1,5 +1,5 @@
 {
-  "name": "cpa-access-guard-web",
+  "name": "access-guard-web",
   "private": true,
   "version": "0.5.0",
   "type": "module",

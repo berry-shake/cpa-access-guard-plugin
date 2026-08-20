@@ -31,9 +31,8 @@ export function apiClient(): AxiosInstance {
   return instance;
 }
 
-const PLUGIN_BASE = "/v0/management/plugins/cpa-access-guard";
+const PLUGIN_BASE = "/v0/management/plugins/access-guard";
 
 export function pluginPath(suffix: string): string {
   return PLUGIN_BASE + suffix;
 }
-

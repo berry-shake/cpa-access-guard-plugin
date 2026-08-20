@@ -11,7 +11,7 @@ plugins:
   enabled: true
   dir: "plugins"
   configs:
-    cpa-access-guard:
+    access-guard:
       enabled: true
       # CPA activates only the highest-priority Scheduler plugin. Keep this
       # above any other Scheduler when auth-file isolation is required.

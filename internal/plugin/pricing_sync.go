@@ -107,7 +107,7 @@ func (a *App) runPricingSync(url string) policy.PricingSyncResult {
 		result.Error = err.Error()
 		_ = a.store.RecordPricingSyncResult(nil, err.Error())
 		a.recordPricingSync(result)
-		log.Printf("cpa-access-guard: pricing sync failed: %v", err)
+		log.Printf("access-guard: pricing sync failed: %v", err)
 		return result
 	}
 	selected := policy.SelectCommonModelsDev(entries)
@@ -117,7 +117,7 @@ func (a *App) runPricingSync(url string) policy.PricingSyncResult {
 		result.Error = err.Error()
 		_ = a.store.RecordPricingSyncResult(nil, err.Error())
 		a.recordPricingSync(result)
-		log.Printf("cpa-access-guard: pricing file write failed: %v", err)
+		log.Printf("access-guard: pricing file write failed: %v", err)
 		return result
 	}
 	now := time.Now().UnixMilli()
@@ -125,7 +125,7 @@ func (a *App) runPricingSync(url string) policy.PricingSyncResult {
 	result.Catalog = catalog
 	result.PricingFile = a.store.PricingPath()
 	a.recordPricingSync(result)
-	log.Printf("cpa-access-guard: pricing sync ok: %d aliases updated, %d unmatched, %d skipped, %d catalog rows (fetched %d)",
+	log.Printf("access-guard: pricing sync ok: %d aliases updated, %d unmatched, %d skipped, %d catalog rows (fetched %d)",
 		result.Updated, result.Unmatched, result.Skipped, result.Catalog, len(entries))
 	return result
 }

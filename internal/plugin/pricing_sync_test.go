@@ -49,7 +49,7 @@ keys: []
 
 	runReq, _ := json.Marshal(ManagementRequest{
 		Method: http.MethodPost,
-		Path:   "/v0/management/plugins/cpa-access-guard/pricing-sync/run",
+		Path:   "/v0/management/plugins/access-guard/pricing-sync/run",
 	})
 	raw, err := app.HandleMethod(MethodManagementHandle, runReq)
 	if err != nil {
@@ -69,7 +69,7 @@ keys: []
 
 	statusReq, _ := json.Marshal(ManagementRequest{
 		Method: http.MethodGet,
-		Path:   "/v0/management/plugins/cpa-access-guard/status",
+		Path:   "/v0/management/plugins/access-guard/status",
 	})
 	raw, err = app.HandleMethod(MethodManagementHandle, statusReq)
 	if err != nil {
@@ -116,7 +116,7 @@ keys: []
 
 	createReq, _ := json.Marshal(ManagementRequest{
 		Method: http.MethodPost,
-		Path:   "/v0/management/plugins/cpa-access-guard/pricing",
+		Path:   "/v0/management/plugins/access-guard/pricing",
 		Body:   []byte(`{"modelId":"gpt-5.5","displayName":"GPT-5.5","inputCostPerMillion":"5","outputCostPerMillion":"30","cacheReadCostPerMillion":"0.5","cacheCreationCostPerMillion":"0"}`),
 	})
 	raw, err := app.HandleMethod(MethodManagementHandle, createReq)
@@ -130,7 +130,7 @@ keys: []
 
 	listReq, _ := json.Marshal(ManagementRequest{
 		Method: http.MethodGet,
-		Path:   "/v0/management/plugins/cpa-access-guard/pricing",
+		Path:   "/v0/management/plugins/access-guard/pricing",
 	})
 	raw, err = app.HandleMethod(MethodManagementHandle, listReq)
 	if err != nil {
@@ -149,7 +149,7 @@ keys: []
 
 	delReq, _ := json.Marshal(ManagementRequest{
 		Method: http.MethodDelete,
-		Path:   "/v0/management/plugins/cpa-access-guard/pricing",
+		Path:   "/v0/management/plugins/access-guard/pricing",
 		Body:   []byte(`{"modelId":"gpt-5.5"}`),
 	})
 	raw, err = app.HandleMethod(MethodManagementHandle, delReq)

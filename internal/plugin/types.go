@@ -53,11 +53,7 @@ const (
 )
 
 const (
-	PluginID   = "cpa-access-guard"
-	// DistributionID is the filename/store identity used by fork releases.
-	// PluginID remains stable for management API and authentication metadata
-	// compatibility with existing clients and persisted state.
-	DistributionID = "access-guard"
+	PluginID   = "access-guard"
 	PluginName = "Access Guard"
 )
 

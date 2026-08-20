@@ -1,4 +1,4 @@
-PLUGIN := cpa-access-guard
+PLUGIN := access-guard
 PKG := ./cmd/cpa-access-guard
 DIST := dist
 WEB := web

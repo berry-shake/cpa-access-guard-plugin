@@ -26,7 +26,7 @@ const LITELLM_URL =
 
 // sessionStorage key + stamped cache envelope. Persists only for the tab's
 // lifetime; window close clears it. Stale after TTL_MS.
-const CACHE_KEY = "cpa-access-guard:litellm-prices";
+const CACHE_KEY = "access-guard:litellm-prices";
 const TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface PriceRow {

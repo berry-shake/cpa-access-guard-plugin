@@ -48,7 +48,7 @@ func nativeBindingManagementCall(t *testing.T, app *App, method, path string, qu
 func TestNativeKeyBindingManagementCRUDDoesNotExposeSecretOrScope(t *testing.T) {
 	app, statePath := configureNativeBindingManagementApp(t)
 	const (
-		basePath  = "/v0/management/plugins/cpa-access-guard/native-key-bindings"
+		basePath  = "/v0/management/plugins/access-guard/native-key-bindings"
 		secret    = "sk-native-management-secret-0123456789"
 		newSecret = "sk-native-management-rotated-9876543210"
 	)
@@ -136,7 +136,7 @@ func TestNativeKeyBindingManagementCRUDDoesNotExposeSecretOrScope(t *testing.T) 
 		t.Fatalf("persisted binding=%+v", state.NativeKeyBindings)
 	}
 
-	status := nativeBindingManagementCall(t, app, http.MethodGet, "/v0/management/plugins/cpa-access-guard/status", nil, nil)
+	status := nativeBindingManagementCall(t, app, http.MethodGet, "/v0/management/plugins/access-guard/status", nil, nil)
 	var statusPayload map[string]any
 	if err := json.Unmarshal(status.Body, &statusPayload); err != nil {
 		t.Fatal(err)
@@ -161,7 +161,7 @@ func TestNativeKeyBindingManagementCRUDDoesNotExposeSecretOrScope(t *testing.T) 
 func TestNativeKeyBindingCatalogMatchesScopesAndRedactsSecrets(t *testing.T) {
 	app, statePath := configureNativeBindingManagementApp(t)
 	const (
-		basePath      = "/v0/management/plugins/cpa-access-guard/native-key-bindings"
+		basePath      = "/v0/management/plugins/access-guard/native-key-bindings"
 		catalogPath   = basePath + "/catalog"
 		matchedSecret = "sk-native-catalog-matched-0123456789"
 		orphanSecret  = "sk-native-catalog-orphan-9876543210"
@@ -253,7 +253,7 @@ func TestNativeKeyBindingCatalogMatchesScopesAndRedactsSecrets(t *testing.T) {
 
 func TestNativeKeyBindingManagementValidationAndRegistration(t *testing.T) {
 	app, _ := configureNativeBindingManagementApp(t)
-	const path = "/v0/management/plugins/cpa-access-guard/native-key-bindings"
+	const path = "/v0/management/plugins/access-guard/native-key-bindings"
 
 	for _, tc := range []struct {
 		name string
@@ -303,7 +303,7 @@ func TestNativeKeyBindingManagementValidationAndRegistration(t *testing.T) {
 
 	methods := map[string]bool{}
 	for _, route := range app.managementRegistration().Routes {
-		if route.Path == "/plugins/cpa-access-guard/native-key-bindings" {
+		if route.Path == "/plugins/access-guard/native-key-bindings" {
 			methods[route.Method] = true
 		}
 	}
@@ -315,7 +315,7 @@ func TestNativeKeyBindingManagementValidationAndRegistration(t *testing.T) {
 
 	catalogRegistered := false
 	for _, route := range app.managementRegistration().Routes {
-		if route.Path == "/plugins/cpa-access-guard/native-key-bindings/catalog" && route.Method == http.MethodPost {
+		if route.Path == "/plugins/access-guard/native-key-bindings/catalog" && route.Method == http.MethodPost {
 			catalogRegistered = true
 			break
 		}
@@ -325,7 +325,7 @@ func TestNativeKeyBindingManagementValidationAndRegistration(t *testing.T) {
 	}
 	resetRegistered := false
 	for _, route := range app.managementRegistration().Routes {
-		if route.Path == "/plugins/cpa-access-guard/native-key-bindings/reset-quota" && route.Method == http.MethodPost {
+		if route.Path == "/plugins/access-guard/native-key-bindings/reset-quota" && route.Method == http.MethodPost {
 			resetRegistered = true
 			break
 		}
@@ -338,7 +338,7 @@ func TestNativeKeyBindingManagementValidationAndRegistration(t *testing.T) {
 func TestResetNativeKeyBindingQuotaManagement(t *testing.T) {
 	app, _ := configureNativeBindingManagementApp(t)
 	const (
-		basePath = "/v0/management/plugins/cpa-access-guard/native-key-bindings"
+		basePath = "/v0/management/plugins/access-guard/native-key-bindings"
 		secret   = "sk-native-reset-secret-0123456789"
 	)
 	created := nativeBindingManagementCall(t, app, http.MethodPost, basePath, nil, map[string]any{

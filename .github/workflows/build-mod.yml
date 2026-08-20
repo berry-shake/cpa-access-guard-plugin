@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 env:
-  PLUGIN_ID: cpa-access-guard
+  PLUGIN_ID: access-guard
   RELEASE_NAME: access-guard
 
 jobs:

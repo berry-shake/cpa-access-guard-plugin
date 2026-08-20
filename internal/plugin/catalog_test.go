@@ -48,7 +48,7 @@ keys: []
 	})
 	mgmtReq, _ := json.Marshal(ManagementRequest{
 		Method: http.MethodPost,
-		Path:   "/v0/management/plugins/cpa-access-guard/catalog",
+		Path:   "/v0/management/plugins/access-guard/catalog",
 		Body:   body,
 	})
 	raw, err := app.HandleMethod(MethodManagementHandle, mgmtReq)
@@ -89,7 +89,7 @@ func TestBuildCatalogRegisteredInManagement(t *testing.T) {
 	reg := app.managementRegistration()
 	found := false
 	for _, r := range reg.Routes {
-		if r.Path == "/plugins/cpa-access-guard/catalog" && r.Method == http.MethodPost {
+		if r.Path == "/plugins/access-guard/catalog" && r.Method == http.MethodPost {
 			found = true
 			break
 		}

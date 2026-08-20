@@ -382,7 +382,7 @@ function RuleCard({
 // Survives ModelPick remounts (and React Strict Mode) better than router
 // state alone — without this, filling the alias name then picking targets
 // wipes the name when AliasEditForm remounts empty.
-const ALIAS_FORM_DRAFT_KEY = "cpa-access-guard:alias-form-draft";
+const ALIAS_FORM_DRAFT_KEY = "access-guard:alias-form-draft";
 
 function readAliasFormDraft(): AliasMapping | null {
   try {

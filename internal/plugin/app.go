@@ -124,7 +124,7 @@ func (a *App) registration() Registration {
 			Version:          Version,
 			Author:           "origin652 / berry-shake",
 			GitHubRepository: "https://github.com/berry-shake/cpa-access-guard-plugin",
-			Logo:             "/v0/resource/plugins/" + DistributionID + web.LogoPath,
+			Logo:             "/v0/resource/plugins/" + PluginID + web.LogoPath,
 			ConfigFields: []ConfigField{
 				{Name: "enabled", Type: "boolean", Description: "Enable or disable this plugin without unloading it."},
 				{Name: "state_file", Type: "string", Description: "JSON state file used for access-policy changes made through the Management API."},
@@ -192,7 +192,7 @@ func (a *App) routeModel(raw []byte) ([]byte, error) {
 		TargetKind:  "provider",
 		Target:      resolveProviderKey(rule.Provider, req.AvailableProviders),
 		TargetModel: rule.TargetModel,
-		Reason:      "cpa-access-guard:" + keyID,
+		Reason:      "access-guard:" + keyID,
 	})
 }
 
@@ -666,7 +666,7 @@ func (a *App) handleManagement(raw []byte) ([]byte, error) {
 
 	// Plugin resource GETs (unauthenticated browser UI) are dispatched through
 	// the same management.handle method by CPA's ServeResourceHTTP.
-	resourcePrefix := "/v0/resource/plugins/" + DistributionID
+	resourcePrefix := "/v0/resource/plugins/" + PluginID
 	if req.Method == http.MethodGet && strings.HasPrefix(path, resourcePrefix) {
 		status, headers, body := web.Serve(strings.TrimPrefix(path, resourcePrefix))
 		return OKEnvelope(ManagementResponse{StatusCode: status, Headers: headers, Body: body})
