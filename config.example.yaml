@@ -1,4 +1,4 @@
-# Example CLIProxyAPI snippet for CPA Access Guard.
+# Example CLIProxyAPI snippet for Access Guard.
 # Replace placeholders. Do not commit real secrets or production hosts.
 
 # Required for native-key auth-file isolation. When enabled, CPA's

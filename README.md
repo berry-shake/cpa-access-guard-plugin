@@ -1,4 +1,4 @@
-# CPA Access Guard
+# Access Guard
 
 Downstream **API key policy** plugin for [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI).
 
@@ -8,7 +8,7 @@ In plain words: you issue your own `cpa_…` keys to clients. Each key only sees
 |---|---|
 | **Repo** | [berry-shake/cpa-access-guard-plugin](https://github.com/berry-shake/cpa-access-guard-plugin) |
 | **License** | MIT |
-| **Install** | Build from source until the first CPA Access Guard GitHub release is published |
+| **Install** | Build from source until the first Access Guard GitHub release is published |
 | **Lineage** | Derived from [origin652/cpa-plugin-key-policy](https://github.com/origin652/cpa-plugin-key-policy) under the MIT license |
 | **中文说明** | [README.zh-CN.md](./README.zh-CN.md) |
 
@@ -252,7 +252,7 @@ Notes:
 - `pricing_file` is the standalone model price catalog (USD per 1M tokens). Billing uses alias prices first and falls back to this catalog. Omit it to place `cpa-access-guard-model-pricing.json` next to `state_file`.
 - The plugin refreshes the catalog (and matching alias prices) from [models.dev](https://models.dev) at startup and on a timer. Optional `pricing_sync.interval_hours` / `pricing_sync.url` override the default 24h public catalog.
 - A relative `state_file` / `pricing_file` is resolved against the **CPA process working directory**, not the plugin `.so` directory. Use an absolute path in production and ensure the CPA user can write it. `GET /v0/management/plugins/cpa-access-guard/status` reports the resolved `state_file` and `pricing_file`.
-- When upgrading from `cpa-key-policy` while relying on its default relative state filename, CPA Access Guard copies a valid sibling `cpa-key-policy-state.json` to `cpa-access-guard-state.json` once. The legacy file is retained as a recovery backup. Explicit `state_file` paths are never auto-migrated; copy those files deliberately while CPA is stopped.
+- When upgrading from `cpa-key-policy` while relying on its default relative state filename, Access Guard copies a valid sibling `cpa-key-policy-state.json` to `cpa-access-guard-state.json` once. The legacy file is retained as a recovery backup. Explicit `state_file` paths are never auto-migrated; copy those files deliberately while CPA is stopped.
 - The plugin creates the state directory with mode `0700` and atomically writes the file with mode `0600`. Back it up, and never place a plaintext top-level API key in it manually.
 - Prefer creating keys, native bindings, and aliases in the **Web UI** or Management API; seed YAML is mainly for first boot.
 - Never commit real key hashes, management secrets, or live host URLs into public docs.

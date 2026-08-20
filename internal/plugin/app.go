@@ -628,7 +628,7 @@ func (a *App) managementRegistration() ManagementRegistrationResponse {
 			{Method: http.MethodPost, Path: base + "/keys/rotate", Description: "Rotate one downstream CPA key by id."},
 			{Method: http.MethodPost, Path: base + "/keys/reset-rpm", Description: "Reset one downstream CPA key RPM counter by id."},
 			{Method: http.MethodGet, Path: base + "/keys/usage", Description: "Per-alias usage breakdown for one downstream CPA key by id."},
-			{Method: http.MethodGet, Path: base + "/status", Description: "Show CPA Access Guard runtime status."},
+			{Method: http.MethodGet, Path: base + "/status", Description: "Show Access Guard runtime status."},
 			{Method: http.MethodGet, Path: base + "/native-key-bindings", Description: "List CPA-native downstream API-key auth-file bindings."},
 			{Method: http.MethodPost, Path: base + "/native-key-bindings", Description: "Bind one CPA-native downstream API key to an auth-file group."},
 			{Method: http.MethodPatch, Path: base + "/native-key-bindings", Description: "Update, rotate, enable, or disable one CPA-native key binding."},
@@ -651,7 +651,7 @@ func (a *App) managementRegistration() ManagementRegistrationResponse {
 			{Method: http.MethodPost, Path: base + "/pricing-sync/run", Description: "Run one models.dev pricing sync immediately."},
 		},
 		Resources: []ResourceRoute{
-			{Path: web.IndexPath, Menu: "Access Guard", Description: "Web UI for CPA Access Guard (create keys, bind credentials, and pick models)."},
+			{Path: web.IndexPath, Menu: "Access Guard", Description: "Web UI for Access Guard (create keys, bind credentials, and pick models)."},
 			{Path: web.LogoPath, Description: "Plugin logo shown in the panel plugin list."},
 		},
 	}

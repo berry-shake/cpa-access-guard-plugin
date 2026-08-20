@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.5.0",
   "type": "module",
-  "description": "Management UI for the CPA Access Guard CLIProxyAPI plugin.",
+  "description": "Management UI for the Access Guard CLIProxyAPI plugin.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

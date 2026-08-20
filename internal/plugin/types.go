@@ -58,7 +58,7 @@ const (
 	// PluginID remains stable for management API and authentication metadata
 	// compatibility with existing clients and persisted state.
 	DistributionID = "access-guard"
-	PluginName = "CPA Access Guard"
+	PluginName = "Access Guard"
 )
 
 // Version is stamped at build time via -ldflags "-X cpa-access-guard/internal/plugin.Version=<ver>".

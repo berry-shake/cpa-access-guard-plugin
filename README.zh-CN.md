@@ -1,4 +1,4 @@
-# CPA Access Guard（中文说明）
+# Access Guard（中文说明）
 
 面向 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 的**下游 API Key 策略插件**。
 
@@ -8,7 +8,7 @@
 |---|---|
 | **仓库** | [berry-shake/cpa-access-guard-plugin](https://github.com/berry-shake/cpa-access-guard-plugin) |
 | **协议** | MIT |
-| **安装** | 首个 CPA Access Guard GitHub Release 发布前请从源码编译 |
+| **安装** | 首个 Access Guard GitHub Release 发布前请从源码编译 |
 | **沿袭** | 基于 MIT 协议的 [origin652/cpa-plugin-key-policy](https://github.com/origin652/cpa-plugin-key-policy) 演进而来 |
 | **English** | [README.md](./README.md) |
 
@@ -249,7 +249,7 @@ plugins:
 - `pricing_file` 是独立的模型价格表（美元 / 百万 token）。计费优先用别名价格，未配价时回退到此表。省略则把 `cpa-access-guard-model-pricing.json` 放在 `state_file` 同目录。
 - 插件会在启动时以及之后按间隔从 [models.dev](https://models.dev) 刷新价格表，并回写匹配的别名价格。可用 `pricing_sync.interval_hours` / `pricing_sync.url` 覆盖默认 24 小时和公共目录地址。
 - 相对 `state_file` / `pricing_file` 会按 **CPA 进程当前工作目录**解析为绝对路径，不是相对插件 `.so`。生产环境建议写绝对路径，并确保 CPA 运行用户可写；可通过 `GET /v0/management/plugins/cpa-access-guard/status` 的 `state_file`、`pricing_file` 查看最终解析位置。
-- 从 `cpa-key-policy` 升级且一直使用旧版默认相对文件名时，CPA Access Guard 会一次性把同目录中校验有效的 `cpa-key-policy-state.json` 复制为 `cpa-access-guard-state.json`；旧文件会保留作恢复备份。显式配置的 `state_file` 不会自动迁移，请先停掉 CPA，再人工、精确地复制。
+- 从 `cpa-key-policy` 升级且一直使用旧版默认相对文件名时，Access Guard 会一次性把同目录中校验有效的 `cpa-key-policy-state.json` 复制为 `cpa-access-guard-state.json`；旧文件会保留作恢复备份。显式配置的 `state_file` 不会自动迁移，请先停掉 CPA，再人工、精确地复制。
 - state 目录由插件按 `0700` 创建，文件按 `0600` 原子写入。请纳入备份，不要手工写入顶层 API Key 明文。
 - 日常请用**网页**或管理 API 建 key、原生绑定和别名；YAML 种子数据主要用于首次启动。
 - 公开文档里不要写真实管理密钥、主机名或凭证内容。
