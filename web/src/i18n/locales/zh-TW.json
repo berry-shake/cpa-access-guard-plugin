@@ -302,6 +302,7 @@
       "group": "憑證群組",
       "restriction": "憑證限制",
       "directSummary": "指定 {{count}} 個憑證",
+      "directReselectionSummary": "直接憑證記錄已遺失，請重新選擇",
       "groupField": "憑證群組 *",
       "defaultScheduling": "預設 / 自由調度",
       "unboundHint": "目前可自由使用宿主憑證",

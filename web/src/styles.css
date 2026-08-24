@@ -968,6 +968,9 @@ td.strong { font-weight: 600; color: var(--text); }
   border: 1px solid var(--border); border-radius: var(--r-sm); font-size: 12px;
 }
 .native-binding-group.unrestricted { color: var(--muted); border-style: dashed; }
+.native-binding-group.needs-reselection {
+  color: var(--danger); background: var(--danger-soft); border-color: var(--danger-border);
+}
 .native-binding-orphan-note {
   margin: -6px 0 12px; color: var(--danger); font-size: 12px; line-height: 1.45;
 }

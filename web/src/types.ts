@@ -227,6 +227,7 @@ export interface NativeKeyBinding {
   key_preview: string;
   group?: string;
   auth_ids?: string[];
+  needs_reselection?: boolean;
   // Usage limits; 0/omitted = unlimited. Pricing comes from the global
   // alias table.
   rpm?: number;

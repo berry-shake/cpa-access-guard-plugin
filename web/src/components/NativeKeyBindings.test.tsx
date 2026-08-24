@@ -533,6 +533,53 @@ describe("NativeKeyBindingsTab", () => {
     expect(payload).not.toHaveProperty("group");
   });
 
+  it("shows a degraded direct binding as requiring credential reselection", async () => {
+    const degraded: NativeKeyBinding = {
+      ...existing,
+      group: undefined,
+      auth_ids: undefined,
+      needs_reselection: true,
+    };
+    apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValue({
+      entries: [{ key_index: 0, key_preview: degraded.key_preview, binding: degraded }],
+      orphan_bindings: [],
+    });
+
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<NativeKeyBindingsTab />);
+      await tick();
+    });
+    expect(container.textContent).toContain("直接凭证记录已丢失，请重新选择");
+    expect(container.textContent).not.toContain("@access-guard/direct-auth-ids");
+
+    const editButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("编辑 / 轮换"));
+    await act(async () => {
+      editButton!.click();
+      await tick();
+    });
+    const directMode = container.querySelector('input[name="native-restriction-mode"][value="auth_ids"]') as HTMLInputElement;
+    expect(directMode.checked).toBe(true);
+    expect(container.textContent).toContain("已选择 0 个凭证");
+    const submit = container.querySelector('.map-form-foot button[type="submit"]') as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+
+    const credential = container.querySelector(".native-credential-option input[type=checkbox]") as HTMLInputElement;
+    await act(async () => { credential.click(); });
+    expect(submit.disabled).toBe(false);
+    const form = container.querySelector(".native-binding-editor form") as HTMLFormElement;
+    await act(async () => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await tick();
+    });
+    expect(apiMocks.updateNativeKeyBinding).toHaveBeenCalledWith(expect.objectContaining({
+      id: "client-a",
+      auth_ids: ["tenant/codex-a.json"],
+    }));
+    expect(apiMocks.updateNativeKeyBinding.mock.calls[0][0]).not.toHaveProperty("group");
+  });
+
   it("preserves an existing group that is not in the suggestion list", async () => {
     const legacy = { ...existing, group: "classify:legacy-customer" };
     apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValue({

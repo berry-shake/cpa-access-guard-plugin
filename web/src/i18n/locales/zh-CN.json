@@ -310,6 +310,7 @@
       "group": "凭证组",
       "restriction": "凭证限制",
       "directSummary": "指定 {{count}} 个凭证",
+      "directReselectionSummary": "直接凭证记录已丢失，请重新选择",
       "groupField": "凭证组 *",
       "defaultScheduling": "默认 / 自由调度",
       "unboundHint": "当前可自由使用宿主凭证",

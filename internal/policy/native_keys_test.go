@@ -62,7 +62,7 @@ native_key_bindings:
 		t.Fatalf("second binding not normalized: %+v", b)
 	}
 	c := cfg.NativeKeyBindings[2]
-	if c.Group != nativeAuthIDsFailClosedGroup || len(c.AuthIDs) != 2 ||
+	if c.Group != encodeNativeAuthIDsGroup(c.AuthIDs) || len(c.AuthIDs) != 2 ||
 		c.AuthIDs[0] != "tenant/codex-A.json" || c.AuthIDs[1] != "tenant/codex-B.json" {
 		t.Fatalf("direct binding not normalized: %+v", c)
 	}
@@ -283,7 +283,7 @@ func TestNativeKeyBindingDirectAuthIDsPersistenceAndModeSwitch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.Group != nativeAuthIDsFailClosedGroup || len(created.AuthIDs) != 2 ||
+	if created.Group != encodeNativeAuthIDsGroup(created.AuthIDs) || len(created.AuthIDs) != 2 ||
 		created.AuthIDs[0] != "tenant/codex-A.json" || created.AuthIDs[1] != "tenant/codex-B.json" {
 		t.Fatalf("created direct binding = %+v", created)
 	}
@@ -335,7 +335,7 @@ func TestNativeKeyBindingDirectAuthIDsPersistenceAndModeSwitch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if directMode.Group != nativeAuthIDsFailClosedGroup || len(directMode.AuthIDs) != 2 || directMode.AuthIDs[0] != "codex-Y.json" {
+	if directMode.Group != encodeNativeAuthIDsGroup(directMode.AuthIDs) || len(directMode.AuthIDs) != 2 || directMode.AuthIDs[0] != "codex-Y.json" {
 		t.Fatalf("direct mode = %+v", directMode)
 	}
 
@@ -351,6 +351,80 @@ func TestNativeKeyBindingDirectAuthIDsPersistenceAndModeSwitch(t *testing.T) {
 	}
 	if got, okFinal := reloaded.ResolveNativeKeyConstraint(created.CallerScope, "", ""); !okFinal || len(got.AuthIDs) != 2 {
 		t.Fatalf("failed updates changed live constraint: %+v, %v", got, okFinal)
+	}
+}
+
+func TestDirectNativeBindingRecoversAuthIDsFromRedundantGroup(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	scope := strings.Repeat("d", 64)
+	wantAuthIDs := []string{"Tenant/Codex-A.JSON", "tenant/codex-b.json"}
+	encodedGroup := encodeNativeAuthIDsGroup(wantAuthIDs)
+	if encodedGroup != strings.ToLower(encodedGroup) {
+		t.Fatalf("redundant group is not lowercase-safe: %q", encodedGroup)
+	}
+	if err := SaveState(path, nil, map[string]*UsageState{}, nil, nil, []NativeKeyBinding{{
+		ID: "recover-direct", Enabled: true, CallerScope: scope, Group: encodedGroup,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	store := NewStore()
+	if err := store.Configure(Config{Enabled: true, StateFile: path}); err != nil {
+		t.Fatalf("Configure() did not recover redundant auth IDs: %v", err)
+	}
+	bindings := store.NativeKeyBindingsSnapshot()
+	if len(bindings) != 1 || len(bindings[0].AuthIDs) != 2 ||
+		bindings[0].AuthIDs[0] != wantAuthIDs[0] || bindings[0].AuthIDs[1] != wantAuthIDs[1] {
+		t.Fatalf("recovered bindings = %+v", bindings)
+	}
+	if NativeKeyBindingNeedsReselection(bindings[0]) {
+		t.Fatalf("recovered binding still requires reselection: %+v", bindings[0])
+	}
+	constraint, ok := store.ResolveNativeKeyConstraint(scope, "codex", "gpt")
+	if !ok || len(constraint.AuthIDs) != 2 || constraint.AuthIDs[0] != wantAuthIDs[0] {
+		t.Fatalf("recovered constraint = %+v, %v", constraint, ok)
+	}
+
+	persisted, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(persisted.NativeKeyBindings) != 1 || len(persisted.NativeKeyBindings[0].AuthIDs) != 2 {
+		t.Fatalf("recovered auth IDs were not repaired on disk: %+v", persisted.NativeKeyBindings)
+	}
+}
+
+func TestDegradedDirectNativeBindingLoadsFailClosedAndCanBeRepaired(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	scope := strings.Repeat("e", 64)
+	if err := SaveState(path, nil, map[string]*UsageState{}, nil, nil, []NativeKeyBinding{{
+		ID: "degraded-direct", Enabled: true, CallerScope: scope, Group: nativeAuthIDsFailClosedGroup,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	store := NewStore()
+	if err := store.Configure(Config{Enabled: true, StateFile: path}); err != nil {
+		t.Fatalf("Configure() rejected a degraded direct binding: %v", err)
+	}
+	bindings := store.NativeKeyBindingsSnapshot()
+	if len(bindings) != 1 || !NativeKeyBindingNeedsReselection(bindings[0]) {
+		t.Fatalf("degraded binding was not identified: %+v", bindings)
+	}
+	constraint, ok := store.ResolveNativeKeyConstraint(scope, "codex", "gpt")
+	if !ok || constraint.Group != nativeAuthIDsFailClosedGroup || len(constraint.AuthIDs) != 0 {
+		t.Fatalf("degraded constraint = %+v, %v; want fail-closed marker", constraint, ok)
+	}
+
+	repaired, err := store.UpdateNativeKeyBinding("degraded-direct", UpdateNativeKeyBindingInput{
+		AuthIDs: nativeStringsPtr("restart-selected.json"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if NativeKeyBindingNeedsReselection(repaired) || len(repaired.AuthIDs) != 1 ||
+		repaired.Group != encodeNativeAuthIDsGroup(repaired.AuthIDs) {
+		t.Fatalf("repaired binding = %+v", repaired)
 	}
 }
 

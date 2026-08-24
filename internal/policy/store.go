@@ -141,6 +141,7 @@ func (s *Store) Configure(cfg Config) error {
 	var loadedUsage map[string]*UsageState
 	firstBoot := false
 	legacyNativeBindings := false
+	recoveredNativeBindings := false
 	if state, errLoad := LoadState(statePath); errLoad == nil {
 		keys = state.Keys
 		loadedUsage = state.Usage
@@ -164,9 +165,19 @@ func (s *Store) Configure(cfg Config) error {
 		}
 		// Validate state keys against the global alias table. normalizeConfig
 		// also auto-migrates any state keys still using per-key Models.
+		recoverableNativeBindings := make([]bool, len(nativeBindings))
+		for i := range nativeBindings {
+			_, recoverableNativeBindings[i] = decodeNativeAuthIDsGroup(nativeBindings[i].Group)
+			recoverableNativeBindings[i] = recoverableNativeBindings[i] && len(nativeBindings[i].AuthIDs) == 0
+		}
 		merged := Config{Enabled: cfg.Enabled, StateFile: cfg.StateFile, Keys: keys, NativeKeyBindings: nativeBindings, Aliases: stateAliases, ClassifyRules: stateRules}
 		if errNorm := normalizeConfig(&merged); errNorm != nil {
 			return fmt.Errorf("load state: %w", errNorm)
+		}
+		for i := range merged.NativeKeyBindings {
+			if i < len(recoverableNativeBindings) && recoverableNativeBindings[i] && len(merged.NativeKeyBindings[i].AuthIDs) > 0 {
+				recoveredNativeBindings = true
+			}
 		}
 		keys = merged.Keys
 		nativeBindings = merged.NativeKeyBindings
@@ -271,14 +282,14 @@ func (s *Store) Configure(cfg Config) error {
 	var baseUsage map[string]*UsageState
 	var baseAliases []AliasMapping
 	var baseRules []ClassifyRule
-	if firstBoot || legacyNativeBindings {
+	if firstBoot || legacyNativeBindings || recoveredNativeBindings {
 		baseKeys = s.keysSnapshotLocked()
 		baseUsage = s.usageSnapshotLocked()
 		baseAliases = s.aliasesSnapshotLocked()
 		baseRules = s.classifyRulesSnapshotLocked()
 	}
 	s.mu.Unlock()
-	if firstBoot || legacyNativeBindings {
+	if firstBoot || legacyNativeBindings || recoveredNativeBindings {
 		if errSave := s.saveState(statePath, baseKeys, baseUsage, baseAliases, baseRules); errSave != nil {
 			return fmt.Errorf("seed state: %w", errSave)
 		}

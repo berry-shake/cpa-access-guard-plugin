@@ -18,6 +18,13 @@ const nativeCallerScopeDomain = "cli-proxy-api:caller-scope:v1\x00"
 // this reserved value, so the legacy group-only scheduler cannot match it.
 const nativeAuthIDsFailClosedGroup = "@access-guard/direct-auth-ids"
 
+// nativeAuthIDsPersistedGroupPrefix redundantly stores exact auth IDs in a
+// lowercase-safe encoding. Older releases lowercase Group and discard the
+// additive auth_ids JSON field when rewriting state, so the encoded marker
+// must survive both operations and remain impossible to match as a real
+// scheduler group.
+const nativeAuthIDsPersistedGroupPrefix = nativeAuthIDsFailClosedGroup + "/v1/"
+
 var (
 	ErrUnknownNativeKeyBinding     = errors.New("unknown native key binding")
 	ErrNativeKeyBindingExists      = errors.New("native key binding already exists")
@@ -111,6 +118,11 @@ func normalizeNativeKeyBindings(bindings []NativeKeyBinding) error {
 		binding.KeyPreview = strings.TrimSpace(binding.KeyPreview)
 		binding.Group = strings.ToLower(strings.TrimSpace(binding.Group))
 		binding.AuthIDs = normalizeNativeAuthIDs(binding.AuthIDs)
+		if len(binding.AuthIDs) == 0 {
+			if recovered, ok := decodeNativeAuthIDsGroup(binding.Group); ok {
+				binding.AuthIDs = recovered
+			}
+		}
 
 		if binding.ID == "" {
 			return fmt.Errorf("native key binding %d: id is required", i)
@@ -130,11 +142,11 @@ func normalizeNativeKeyBindings(bindings []NativeKeyBinding) error {
 		}
 		scopes[binding.CallerScope] = binding.ID
 		if len(binding.AuthIDs) > 0 {
-			if binding.Group != "" && binding.Group != nativeAuthIDsFailClosedGroup {
+			if binding.Group != "" && !isNativeAuthIDsGroup(binding.Group) {
 				return fmt.Errorf("native key binding %q: group and auth_ids are mutually exclusive", binding.ID)
 			}
-			binding.Group = nativeAuthIDsFailClosedGroup
-		} else if binding.Group == "" || binding.Group == nativeAuthIDsFailClosedGroup {
+			binding.Group = encodeNativeAuthIDsGroup(binding.AuthIDs)
+		} else if binding.Group == "" {
 			return fmt.Errorf("native key binding %q: group is required when auth_ids is empty", binding.ID)
 		}
 		if len(binding.AuthIDs) == 0 && strings.HasPrefix(binding.Group, ClassifyGroupPrefix) {
@@ -155,6 +167,54 @@ func normalizeNativeKeyBindings(bindings []NativeKeyBinding) error {
 		}
 	}
 	return nil
+}
+
+func isNativeAuthIDsGroup(group string) bool {
+	group = strings.ToLower(strings.TrimSpace(group))
+	return group == nativeAuthIDsFailClosedGroup || strings.HasPrefix(group, nativeAuthIDsPersistedGroupPrefix)
+}
+
+func encodeNativeAuthIDsGroup(authIDs []string) string {
+	parts := make([]string, 0, len(authIDs))
+	for _, authID := range normalizeNativeAuthIDs(authIDs) {
+		parts = append(parts, hex.EncodeToString([]byte(authID)))
+	}
+	if len(parts) == 0 {
+		return nativeAuthIDsFailClosedGroup
+	}
+	return nativeAuthIDsPersistedGroupPrefix + strings.Join(parts, ".")
+}
+
+func decodeNativeAuthIDsGroup(group string) ([]string, bool) {
+	group = strings.ToLower(strings.TrimSpace(group))
+	if !strings.HasPrefix(group, nativeAuthIDsPersistedGroupPrefix) {
+		return nil, false
+	}
+	payload := strings.TrimPrefix(group, nativeAuthIDsPersistedGroupPrefix)
+	if payload == "" {
+		return nil, false
+	}
+	authIDs := make([]string, 0, strings.Count(payload, ".")+1)
+	for _, part := range strings.Split(payload, ".") {
+		if part == "" {
+			return nil, false
+		}
+		raw, err := hex.DecodeString(part)
+		if err != nil || len(raw) == 0 {
+			return nil, false
+		}
+		authIDs = append(authIDs, string(raw))
+	}
+	authIDs = normalizeNativeAuthIDs(authIDs)
+	return authIDs, len(authIDs) > 0
+}
+
+// NativeKeyBindingNeedsReselection reports an older direct-auth marker whose
+// exact auth IDs are no longer recoverable. It remains fail-closed, but the
+// management API should ask the operator to reselect credentials instead of
+// exposing the internal marker as a normal group.
+func NativeKeyBindingNeedsReselection(binding NativeKeyBinding) bool {
+	return len(binding.AuthIDs) == 0 && isNativeAuthIDsGroup(binding.Group)
 }
 
 func normalizeNativeAuthIDs(authIDs []string) []string {
@@ -271,6 +331,10 @@ func (s *Store) UpdateNativeKeyBinding(id string, input UpdateNativeKeyBindingIn
 	if input.Group != nil && input.AuthIDs != nil &&
 		strings.TrimSpace(*input.Group) != "" && len(normalizeNativeAuthIDs(*input.AuthIDs)) > 0 {
 		return NativeKeyBinding{}, errors.New("group and auth_ids are mutually exclusive")
+	}
+	if input.AuthIDs != nil && len(normalizeNativeAuthIDs(*input.AuthIDs)) == 0 &&
+		(input.Group == nil || strings.TrimSpace(*input.Group) == "") {
+		return NativeKeyBinding{}, errors.New("group is required when auth_ids is empty")
 	}
 
 	id = strings.ToLower(strings.TrimSpace(id))

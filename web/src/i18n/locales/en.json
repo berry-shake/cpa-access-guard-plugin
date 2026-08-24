@@ -310,6 +310,7 @@
       "group": "Credential group",
       "restriction": "Credential restriction",
       "directSummary": "{{count}} explicit credentials",
+      "directReselectionSummary": "Exact credential selection is missing — reselect credentials",
       "groupField": "Credential group *",
       "defaultScheduling": "Default / free scheduling",
       "unboundHint": "Currently free to use host credentials",

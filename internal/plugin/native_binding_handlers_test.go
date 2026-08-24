@@ -237,6 +237,50 @@ func TestNativeKeyBindingManagementDirectAuthIDsAndModeSwitch(t *testing.T) {
 	}
 }
 
+func TestNativeKeyBindingManagementPromptsToRepairDegradedDirectBinding(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	if err := policy.SaveState(statePath, nil, nil, nil, nil, []policy.NativeKeyBinding{{
+		ID:          "degraded-direct",
+		Name:        "Degraded Direct",
+		Enabled:     true,
+		CallerScope: strings.Repeat("d", 64),
+		Group:       "@access-guard/direct-auth-ids",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp()
+	config := []byte("enabled: true\nstate_file: \"" + filepath.ToSlash(statePath) + "\"\nkeys: []\n")
+	reconfigure, _ := json.Marshal(LifecycleRequest{ConfigYAML: config})
+	if _, err := app.HandleMethod(MethodPluginReconfigure, reconfigure); err != nil {
+		t.Fatalf("configure: %v", err)
+	}
+	t.Cleanup(app.Shutdown)
+
+	const basePath = "/v0/management/plugins/access-guard/native-key-bindings"
+	listed := nativeBindingManagementCall(t, app, http.MethodGet, basePath, nil, nil)
+	var listPayload struct {
+		Bindings []publicNativeKeyBinding `json:"bindings"`
+	}
+	if err := json.Unmarshal(listed.Body, &listPayload); err != nil {
+		t.Fatal(err)
+	}
+	if len(listPayload.Bindings) != 1 || !listPayload.Bindings[0].NeedsReselection ||
+		listPayload.Bindings[0].Group != "" || len(listPayload.Bindings[0].AuthIDs) != 0 {
+		t.Fatalf("degraded public binding = %+v", listPayload.Bindings)
+	}
+	if bytes.Contains(listed.Body, []byte("@access-guard/direct-auth-ids")) {
+		t.Fatalf("management response exposed internal marker: %s", listed.Body)
+	}
+
+	repaired := nativeBindingManagementCall(t, app, http.MethodPatch, basePath, nil, map[string]any{
+		"id": "degraded-direct", "auth_ids": []string{"restart-selected.json"},
+	})
+	if repaired.StatusCode != http.StatusOK || bytes.Contains(repaired.Body, []byte("needs_reselection")) ||
+		!bytes.Contains(repaired.Body, []byte("restart-selected.json")) {
+		t.Fatalf("repaired response status=%d body=%s", repaired.StatusCode, repaired.Body)
+	}
+}
+
 func TestNativeKeyBindingCatalogMatchesScopesAndRedactsSecrets(t *testing.T) {
 	app, statePath := configureNativeBindingManagementApp(t)
 	const (

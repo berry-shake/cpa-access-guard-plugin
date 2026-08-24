@@ -30,18 +30,19 @@ type nativeKeyBindingWriteRequest struct {
 // irreversible, it is a stable authorization identity and management clients
 // do not need it. The API exposes only a short key preview for identification.
 type publicNativeKeyBinding struct {
-	ID         string                            `json:"id"`
-	Name       string                            `json:"name"`
-	Enabled    bool                              `json:"enabled"`
-	KeyPreview string                            `json:"key_preview"`
-	Group      string                            `json:"group,omitempty"`
-	AuthIDs    []string                          `json:"auth_ids,omitempty"`
-	RPM        int                               `json:"rpm,omitempty"`
-	DailyUSD   float64                           `json:"daily_usd,omitempty"`
-	WeeklyUSD  float64                           `json:"weekly_usd,omitempty"`
-	Usage      *policy.NativeBindingUsageSummary `json:"usage,omitempty"`
-	CreatedAt  string                            `json:"created_at,omitempty"`
-	UpdatedAt  string                            `json:"updated_at,omitempty"`
+	ID               string                            `json:"id"`
+	Name             string                            `json:"name"`
+	Enabled          bool                              `json:"enabled"`
+	KeyPreview       string                            `json:"key_preview"`
+	Group            string                            `json:"group,omitempty"`
+	AuthIDs          []string                          `json:"auth_ids,omitempty"`
+	NeedsReselection bool                              `json:"needs_reselection,omitempty"`
+	RPM              int                               `json:"rpm,omitempty"`
+	DailyUSD         float64                           `json:"daily_usd,omitempty"`
+	WeeklyUSD        float64                           `json:"weekly_usd,omitempty"`
+	Usage            *policy.NativeBindingUsageSummary `json:"usage,omitempty"`
+	CreatedAt        string                            `json:"created_at,omitempty"`
+	UpdatedAt        string                            `json:"updated_at,omitempty"`
 }
 
 // nativeKeyBindingCatalogRequest carries the current CPA top-level API keys.
@@ -279,6 +280,8 @@ func publicNativeKeyBindingFromPolicyWithUsage(binding policy.NativeKeyBinding, 
 	}
 	if len(binding.AuthIDs) > 0 {
 		out.AuthIDs = append([]string(nil), binding.AuthIDs...)
+	} else if policy.NativeKeyBindingNeedsReselection(binding) {
+		out.NeedsReselection = true
 	} else {
 		out.Group = binding.Group
 	}

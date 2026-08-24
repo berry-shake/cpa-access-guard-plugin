@@ -276,8 +276,10 @@ export default function NativeKeyBindingsTab() {
                   <div>
                     <dt>{t("mapping.native.restriction")}</dt>
                     <dd>
-                      <span className={`native-binding-group mono${binding ? "" : " unrestricted"}`}>
-                        {binding?.auth_ids?.length
+                      <span className={`native-binding-group mono${binding ? "" : " unrestricted"}${binding?.needs_reselection ? " needs-reselection" : ""}`}>
+                        {binding?.needs_reselection
+                          ? t("mapping.native.directReselectionSummary")
+                          : binding?.auth_ids?.length
                           ? t("mapping.native.directSummary", { count: binding.auth_ids.length })
                           : binding?.group || t("mapping.native.defaultScheduling")}
                       </span>
@@ -429,7 +431,7 @@ function NativeKeyBindingEditor({
   const initialGroup = binding?.group ?? "";
   const initialAuthIDs = binding?.auth_ids ?? [];
   const [restrictionMode, setRestrictionMode] = useState<CredentialRestrictionMode>(
-    initialAuthIDs.length > 0 ? "auth_ids" : "group",
+    initialAuthIDs.length > 0 || binding?.needs_reselection ? "auth_ids" : "group",
   );
   const initialGroupIsManual = initialGroup !== "" && !groupOptions.includes(initialGroup);
   const [selectedGroup, setSelectedGroup] = useState(
