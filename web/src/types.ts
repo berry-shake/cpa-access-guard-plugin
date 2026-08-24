@@ -164,6 +164,7 @@ export interface AliasMapping {
   targets: AliasTarget[];
   dispatch: "round-robin" | "priority";
   billing_mode: "tokens" | "per_call";
+  pricing_mode?: "auto" | "manual";
   input_price_per_million?: number;
   output_price_per_million?: number;
   cache_read_price_per_million?: number;

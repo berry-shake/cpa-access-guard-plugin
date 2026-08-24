@@ -42,15 +42,19 @@ type Config struct {
 	// BEFORE the built-in plan_type/tier detection and can override it. Built-in
 	// rules (always present, read-only) handle unrecognized credentials.
 	ClassifyRules []ClassifyRule `yaml:"classify_rules,omitempty" json:"classify_rules,omitempty"`
-	// PricingSync controls the models.dev catalog refresh. Auto-sync always
-	// runs (startup + IntervalHours, default 24). URL overrides the public
-	// catalog endpoint.
+	// PricingSync controls the dual-source price catalog refresh. LiteLLM is
+	// authoritative and models.dev only fills model IDs absent from LiteLLM.
+	// Auto-sync always runs at startup and then every IntervalHours (default 24).
 	PricingSync PricingSyncConfig `yaml:"pricing_sync,omitempty" json:"pricing_sync,omitempty"`
 }
 
 type PricingSyncConfig struct {
 	IntervalHours int    `yaml:"interval_hours,omitempty" json:"interval_hours,omitempty"`
-	URL           string `yaml:"url,omitempty" json:"url,omitempty"`
+	LiteLLMURL    string `yaml:"litellm_url,omitempty" json:"litellm_url,omitempty"`
+	ModelsDevURL  string `yaml:"models_dev_url,omitempty" json:"models_dev_url,omitempty"`
+	// URL is the legacy fork.7 models.dev override. Keep accepting it so an
+	// in-place upgrade never changes a custom fallback endpoint silently.
+	URL string `yaml:"url,omitempty" json:"url,omitempty"`
 }
 
 type KeyConfig struct {
@@ -133,6 +137,9 @@ type AliasMapping struct {
 	Targets     []AliasTarget `yaml:"targets" json:"targets"`
 	Dispatch    string        `yaml:"dispatch,omitempty" json:"dispatch,omitempty"` // "round-robin" (default) | "priority"
 	BillingMode string        `yaml:"billing_mode,omitempty" json:"billing_mode,omitempty"`
+	// PricingMode controls whether catalog synchronization may replace token
+	// prices. Empty keeps legacy behavior and normalizes to "auto".
+	PricingMode string `yaml:"pricing_mode,omitempty" json:"pricing_mode,omitempty"`
 	// Pricing fields (same semantics as ModelRule). When BillingMode == "tokens",
 	// InputPricePerMillion / OutputPricePerMillion / CacheReadPricePerMillion
 	// are used. When BillingMode == "per_call", PerCallUSD is used.
@@ -565,6 +572,14 @@ func normalizeConfig(cfg *Config) error {
 			a.BillingMode = "per_call"
 		default:
 			return fmt.Errorf("alias %q billing_mode %q must be \"tokens\" or \"per_call\"", a.Alias, a.BillingMode)
+		}
+		switch strings.ToLower(strings.TrimSpace(a.PricingMode)) {
+		case "", "auto":
+			a.PricingMode = "auto"
+		case "manual":
+			a.PricingMode = "manual"
+		default:
+			return fmt.Errorf("alias %q pricing_mode %q must be \"auto\" or \"manual\"", a.Alias, a.PricingMode)
 		}
 		if a.InputPricePerMillion < 0 || a.OutputPricePerMillion < 0 || a.CacheReadPricePerMillion < 0 || a.CacheWritePricePerMillion < 0 {
 			return fmt.Errorf("alias %q prices cannot be negative", a.Alias)

@@ -243,6 +243,10 @@
       "billing": "计费模式",
       "tokens": "按 Token",
       "perCall": "按次",
+      "pricingMode": "价格维护方式",
+      "pricingAuto": "自动同步",
+      "pricingManual": "手工固定",
+      "pricingModeHint": "自动同步会用模型价格目录更新本别名；手工固定会保留这里填写的价格。",
       "input": "输入",
       "output": "输出",
       "cache": "缓存",
@@ -373,24 +377,36 @@
     "pricingSync": {
       "last": "上次同步：价格表 {{catalog}} 条",
       "runNow": "立即同步价格",
-      "running": "同步中…"
+      "running": "同步中…",
+      "sourceFailed": "上次获取失败，继续保留最后一次有效价格",
+      "sourceAccepted": "已接受 {{count}} 个模型"
     },
     "pricing": {
       "search": "搜索模型 ID 或名称",
       "add": "新增定价",
-      "empty": "还没有价格数据，可同步 models.dev 或手动新增。",
+      "empty": "还没有价格数据，可同步 LiteLLM（models.dev 回退）或手动新增。",
       "count": "显示 {{shown}} / {{total}} 条 · ",
       "perMillion": "单位 USD / 百万 tokens",
       "perMillionHint": "价格单位为 USD / 百万 tokens。缓存写入对应 cacheCreation。",
       "modelId": "模型 ID",
       "displayName": "显示名称",
+      "source": "来源",
+      "sourceManual": "手工",
+      "sourceAlias": "手工别名",
+      "sourceLegacy": "旧版保护",
+      "sourceUnknown": "未知",
+      "statusStale": "最后有效价格",
+      "statusUnpriced": "已知模型 · 无公开价格",
+      "imageRates": "图像 tokens：输入 ${{input}} / 输出 ${{output}}",
       "input": "输入",
       "output": "输出",
       "cacheRead": "缓存读取",
       "cacheWrite": "缓存写入",
       "editTitle": "编辑定价 · {{id}}",
       "modelIdRequired": "模型 ID 不能为空",
-      "deleteConfirm": "确认删除 {{id}} 的定价？"
+      "deleteConfirm": "确认隐藏 {{id}} 的自动定价？以后同步不会重新加入。",
+      "restoreAuto": "恢复自动",
+      "hiddenModels": "已隐藏的自动价格"
     }
   }
 }

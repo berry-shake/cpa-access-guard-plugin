@@ -10,7 +10,10 @@ import (
 )
 
 func (a *App) listModelPricing() ManagementResponse {
-	return jsonResponse(http.StatusOK, map[string]any{"models": a.store.PricingSnapshot()})
+	return jsonResponse(http.StatusOK, map[string]any{
+		"models":            a.store.PricingSnapshot(),
+		"deleted_model_ids": a.store.PricingDeletedSnapshot(),
+	})
 }
 
 func (a *App) upsertModelPricing(raw []byte) ManagementResponse {
@@ -51,4 +54,21 @@ func (a *App) deleteModelPricing(query url.Values, raw []byte) ManagementRespons
 		return jsonError(http.StatusBadRequest, "delete_failed", err.Error())
 	}
 	return jsonResponse(http.StatusOK, map[string]any{"deleted": true, "modelId": policy.NormalizeModelIDForPricing(id)})
+}
+
+func (a *App) restoreAutomaticModelPricing(raw []byte) ManagementResponse {
+	var body struct {
+		ModelID string `json:"modelId"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return jsonError(http.StatusBadRequest, "invalid_json", err.Error())
+	}
+	id := policy.NormalizeModelIDForPricing(body.ModelID)
+	if id == "" {
+		return jsonError(http.StatusBadRequest, "validation_error", "modelId is required")
+	}
+	if err := a.store.RestoreModelPriceAutomatic(id); err != nil {
+		return jsonError(http.StatusBadRequest, "restore_failed", err.Error())
+	}
+	return jsonResponse(http.StatusOK, map[string]any{"restored": true, "modelId": id})
 }

@@ -4,6 +4,7 @@ import {
   deleteModelPricing,
   fetchModelPricing,
   fetchPricingSyncStatus,
+  restoreAutomaticModelPricing,
   runPricingSync,
   upsertModelPricing,
   type ModelPricing,
@@ -24,6 +25,7 @@ const emptyRow = (): ModelPricing => ({
 export default function PricingTable() {
   const t = useT();
   const [rows, setRows] = useState<ModelPricing[]>([]);
+  const [deletedModelIds, setDeletedModelIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
@@ -36,11 +38,12 @@ export default function PricingTable() {
     setLoading(true);
     setError("");
     try {
-      const [list, status] = await Promise.all([
+      const [catalog, status] = await Promise.all([
         fetchModelPricing(),
         fetchPricingSyncStatus().catch(() => null),
       ]);
-      setRows(list);
+      setRows(catalog.models);
+      setDeletedModelIds(catalog.deletedModelIds);
       setSyncStatus(status);
     } catch (e: unknown) {
       setError(String(e));
@@ -56,7 +59,9 @@ export default function PricingTable() {
     if (!q) return rows;
     return rows.filter((row) =>
       row.modelId.toLowerCase().includes(q) ||
-      (row.displayName || "").toLowerCase().includes(q),
+      (row.displayName || "").toLowerCase().includes(q) ||
+      (row.provider || "").toLowerCase().includes(q) ||
+      (row.source || "").toLowerCase().includes(q),
     );
   }, [rows, query]);
 
@@ -86,6 +91,32 @@ export default function PricingTable() {
     }
   };
 
+  const handleRestoreAuto = async (modelId: string) => {
+    try {
+      setSyncing(true);
+      setError("");
+      await restoreAutomaticModelPricing(modelId);
+      const result = await runPricingSync();
+      if (result.error) setError(result.error);
+      await load();
+    } catch (e: unknown) {
+      setError(String(e));
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const sourceLabel = (source?: string) => {
+    switch (source) {
+      case "litellm": return "LiteLLM";
+      case "models.dev": return "models.dev";
+      case "manual": return t("mapping.pricing.sourceManual");
+      case "alias": return t("mapping.pricing.sourceAlias");
+      case "legacy": return t("mapping.pricing.sourceLegacy");
+      default: return source || t("mapping.pricing.sourceUnknown");
+    }
+  };
+
   return (
     <>
       <div className="map-toolbar pricing-toolbar">
@@ -110,6 +141,23 @@ export default function PricingTable() {
           + {t("mapping.pricing.add")}
         </button>
       </div>
+      {syncStatus?.sources && (
+        <div className="pricing-source-grid">
+          {([
+            ["LiteLLM", syncStatus.litellm_url, syncStatus.sources.litellm],
+            ["models.dev", syncStatus.models_dev_url, syncStatus.sources.modelsDev],
+          ] as const).map(([name, sourceUrl, source]) => (
+            <div className={"pricing-source-card" + (source?.lastSyncError ? " error-state" : "")} key={name}>
+              <strong>{name}</strong>
+              <span>{source?.lastSyncError
+                ? t("mapping.pricingSync.sourceFailed")
+                : t("mapping.pricingSync.sourceAccepted", { count: source?.accepted ?? 0 })}</span>
+              {sourceUrl && <small title={sourceUrl}>{sourceUrl}</small>}
+              {source?.lastSyncError && <small title={source.lastSyncError}>{source.lastSyncError}</small>}
+            </div>
+          ))}
+        </div>
+      )}
       {error && <div className="error">{error}</div>}
       {loading ? (
         <div className="muted" style={{ padding: 20 }}>{t("keys.loading")}</div>
@@ -127,6 +175,7 @@ export default function PricingTable() {
                 <tr>
                   <th>{t("mapping.pricing.modelId")}</th>
                   <th>{t("mapping.pricing.displayName")}</th>
+                  <th>{t("mapping.pricing.source")}</th>
                   <th className="num">{t("mapping.pricing.input")}</th>
                   <th className="num">{t("mapping.pricing.output")}</th>
                   <th className="num">{t("mapping.pricing.cacheRead")}</th>
@@ -139,10 +188,22 @@ export default function PricingTable() {
                   <tr key={row.modelId}>
                     <td className="mono">{row.modelId}</td>
                     <td>{row.displayName}</td>
-                    <td className="num mono">${row.inputCostPerMillion}</td>
-                    <td className="num mono">${row.outputCostPerMillion}</td>
-                    <td className="num mono">${row.cacheReadCostPerMillion}</td>
-                    <td className="num mono">${row.cacheCreationCostPerMillion}</td>
+                    <td>
+                      <span className={"pricing-source-badge source-" + (row.source || "unknown").replace(".", "-")}>{sourceLabel(row.source)}</span>
+                      {row.status === "stale" && <small className="pricing-row-note danger">{t("mapping.pricing.statusStale")}</small>}
+                      {row.status === "known_unpriced" && <small className="pricing-row-note">{t("mapping.pricing.statusUnpriced")}</small>}
+                      {row.provider && <small className="pricing-row-note mono">{row.provider}</small>}
+                      {row.mode === "image_generation" && (row.imageInputCostPerMillion || row.imageOutputCostPerMillion) && (
+                        <small className="pricing-row-note">{t("mapping.pricing.imageRates", {
+                          input: row.imageInputCostPerMillion || "0",
+                          output: row.imageOutputCostPerMillion || "0",
+                        })}</small>
+                      )}
+                    </td>
+                    <td className="num mono">{row.status === "known_unpriced" ? "—" : `$${row.inputCostPerMillion}`}</td>
+                    <td className="num mono">{row.status === "known_unpriced" ? "—" : `$${row.outputCostPerMillion}`}</td>
+                    <td className="num mono">{row.status === "known_unpriced" ? "—" : `$${row.cacheReadCostPerMillion}`}</td>
+                    <td className="num mono">{row.status === "known_unpriced" ? "—" : `$${row.cacheCreationCostPerMillion}`}</td>
                     <td className="num">
                       <div className="actions" style={{ justifyContent: "flex-end" }}>
                         <button className="btn sm" onClick={() => { setIsNew(false); setEditing(row); }}>
@@ -151,6 +212,11 @@ export default function PricingTable() {
                         <button className="btn sm danger-outline" onClick={() => { void handleDelete(row.modelId); }}>
                           {t("mapping.delete")}
                         </button>
+                        {(row.source === "manual" || row.source === "alias" || row.source === "legacy") && (
+                          <button className="btn sm" disabled={syncing} onClick={() => { void handleRestoreAuto(row.modelId); }}>
+                            {t("mapping.pricing.restoreAuto")}
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -159,6 +225,21 @@ export default function PricingTable() {
             </table>
           </div>
         </>
+      )}
+      {deletedModelIds.length > 0 && (
+        <div className="pricing-deleted-card">
+          <strong>{t("mapping.pricing.hiddenModels")}</strong>
+          <div className="pricing-deleted-list">
+            {deletedModelIds.map((id) => (
+              <span key={id}>
+                <code>{id}</code>
+                <button className="btn sm" disabled={syncing} onClick={() => { void handleRestoreAuto(id); }}>
+                  {t("mapping.pricing.restoreAuto")}
+                </button>
+              </span>
+            ))}
+          </div>
+        </div>
       )}
       {editing && (
         <PricingEditModal

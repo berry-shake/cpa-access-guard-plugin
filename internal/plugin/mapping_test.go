@@ -67,6 +67,29 @@ func TestClassifyPreview(t *testing.T) {
 	}
 }
 
+func TestUpsertAliasPreservesManualPricingMode(t *testing.T) {
+	app := NewApp()
+	if err := app.store.Configure(policy.Config{Enabled: true, StateFile: filepath.Join(t.TempDir(), "state.json")}); err != nil {
+		t.Fatal(err)
+	}
+	resp := app.upsertAlias([]byte(`{
+		"alias":"gpt-5.6-sol",
+		"targets":[{"provider":"codex","target_model":"gpt-5.6-sol"}],
+		"dispatch":"round-robin",
+		"billing_mode":"tokens",
+		"pricing_mode":"manual",
+		"input_price_per_million":1,
+		"output_price_per_million":2
+	}`))
+	if resp.StatusCode != 200 {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, resp.Body)
+	}
+	aliases := app.store.AliasesSnapshot()
+	if len(aliases) != 1 || aliases[0].PricingMode != "manual" {
+		t.Fatalf("aliases=%+v", aliases)
+	}
+}
+
 // TestClassifyPreviewCustomRules verifies that custom rules with a custom
 // field name work correctly.
 func TestClassifyPreviewCustomField(t *testing.T) {

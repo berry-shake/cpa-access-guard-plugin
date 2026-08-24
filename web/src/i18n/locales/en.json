@@ -243,6 +243,10 @@
       "billing": "Billing Mode",
       "tokens": "Per Token",
       "perCall": "Per Call",
+      "pricingMode": "Price Maintenance",
+      "pricingAuto": "Automatic Sync",
+      "pricingManual": "Manual Override",
+      "pricingModeHint": "Automatic sync updates this alias from the model catalog; manual override keeps the prices entered here.",
       "input": "Input",
       "output": "Output",
       "cache": "Cache",
@@ -373,24 +377,36 @@
     "pricingSync": {
       "last": "last sync: {{catalog}} prices",
       "runNow": "Sync prices now",
-      "running": "Syncing…"
+      "running": "Syncing…",
+      "sourceFailed": "Last attempt failed; retaining last-known prices",
+      "sourceAccepted": "{{count}} accepted models"
     },
     "pricing": {
       "search": "Search model ID or name",
       "add": "Add pricing",
-      "empty": "No pricing data yet. Sync from models.dev or add a row.",
+      "empty": "No pricing data yet. Sync LiteLLM with models.dev fallback, or add a row.",
       "count": "Showing {{shown}} / {{total}} · ",
       "perMillion": "USD per million tokens",
       "perMillionHint": "Prices are USD per million tokens. Cache write maps to cacheCreation.",
       "modelId": "Model ID",
       "displayName": "Display name",
+      "source": "Source",
+      "sourceManual": "Manual",
+      "sourceAlias": "Manual alias",
+      "sourceLegacy": "Legacy protected",
+      "sourceUnknown": "Unknown",
+      "statusStale": "Last-known price",
+      "statusUnpriced": "Known model · no public price",
+      "imageRates": "Image tokens: ${{input}} in / ${{output}} out",
       "input": "Input",
       "output": "Output",
       "cacheRead": "Cache read",
       "cacheWrite": "Cache write",
       "editTitle": "Edit pricing · {{id}}",
       "modelIdRequired": "Model ID is required",
-      "deleteConfirm": "Delete pricing for {{id}}?"
+      "deleteConfirm": "Hide pricing for {{id}} from automatic sync?",
+      "restoreAuto": "Restore auto",
+      "hiddenModels": "Hidden automatic prices"
     }
   }
 }

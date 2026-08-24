@@ -254,7 +254,10 @@ plugins:
 
 - 若已有 `state_file`，则以其中的 keys / 原生 Key 绑定 / 别名 / 归类 / 用量为准。
 - `pricing_file` 是独立的模型价格表（美元 / 百万 token）。计费优先用别名价格，未配价时回退到此表。省略则把 `cpa-access-guard-model-pricing.json` 放在 `state_file` 同目录。
-- 插件会在启动时以及之后按间隔从 [models.dev](https://models.dev) 刷新价格表，并回写匹配的别名价格。可用 `pricing_sync.interval_hours` / `pricing_sync.url` 覆盖默认 24 小时和公共目录地址。
+- 插件会在启动时以及之后按间隔同步两个价格源：以 [LiteLLM](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json) 为主，只有 LiteLLM 未收录的模型才由 [models.dev](https://models.dev) 回退补齐。LiteLLM 已收录但未公开价格的模型会标为“已知但未定价”，不会套用另一来源的可疑价格。
+- 可用 `pricing_sync.interval_hours`、`pricing_sync.litellm_url`、`pricing_sync.models_dev_url` 覆盖默认 24 小时和两个目录地址；旧 `pricing_sync.url` 继续作为 models.dev 地址使用。任一来源失败时会保留该来源的上次成功价格并标为陈旧，不会清空价格表。
+- 网页“模型价格”中的手工修改优先于两个远程源；删除会写入保护列表，后续同步不会复活。点“恢复自动”会清除手工值或删除保护并立即重同步。别名默认 `pricing_mode: auto`；若要固定别名表单中的价格，选择“手工固定”或配置 `pricing_mode: manual`。
+- 旧版价格文件会原位兼容读取：能与任一新来源精确对应的旧自动价格会迁移为带来源记录，无法确认的旧值继续按手工兼容值保留。图像模型价格会展示来源提供的图像 token 字段，但不会误作文本 token 费率计费。
 - 相对 `state_file` / `pricing_file` 会按 **CPA 进程当前工作目录**解析为绝对路径，不是相对插件 `.so`。生产环境建议写绝对路径，并确保 CPA 运行用户可写；可通过 `GET /v0/management/plugins/access-guard/status` 的 `state_file`、`pricing_file` 查看最终解析位置。
 - 从 `cpa-key-policy` 升级且一直使用旧版默认相对文件名时，Access Guard 会一次性把同目录中校验有效的 `cpa-key-policy-state.json` 复制为 `cpa-access-guard-state.json`；旧文件会保留作恢复备份。显式配置的 `state_file` 不会自动迁移，请先停掉 CPA，再人工、精确地复制。
 - state 目录由插件按 `0700` 创建，文件按 `0600` 原子写入。请纳入备份，不要手工写入顶层 API Key 明文。
@@ -279,6 +282,7 @@ http://<你的-cpa-主机>:<api端口>/v0/resource/plugins/access-guard/index.ht
 | 映射 → 别名 | 全局多目标别名、调度方式、定价 |
 | 映射 → 凭证归类 | 自定义分组规则与命中预览 |
 | 映射 → 原生 Key 绑定 | 列出全部 CPA 顶层 Key；配置内置档或 `classify:` 文件组；保留孤立绑定供检查 |
+| 模型价格 | LiteLLM 主源、models.dev 回退源状态；搜索、手工覆盖、删除保护与恢复自动价格 |
 | 选模型 | 提供商目录；内置档 / **自定义 · …** 子组 |
 
 不重编 `.so` 时开发前端：
@@ -298,6 +302,8 @@ VITE_CPA_BASE=http://127.0.0.1:8317 npm run dev
 **Key：** `GET/POST/PATCH/DELETE …/keys`，以及 `rotate` / `reset-rpm` / `usage` / `status`  
 
 **别名：** `GET/POST/DELETE …/aliases`  
+
+**模型价格：** `GET/POST/DELETE …/pricing`；`POST …/pricing/restore-auto`；`GET …/pricing-sync`；`POST …/pricing-sync/run`
 
 **归类：**  
 

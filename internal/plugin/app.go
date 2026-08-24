@@ -17,6 +17,7 @@ type App struct {
 	store             *policy.Store
 	classifyMu        sync.RWMutex
 	classifyCache     map[string][]string
+	pricingRunMu      sync.Mutex
 	pricingSyncMu     sync.Mutex
 	pricingSyncer     *pricingSyncer
 	pricingSyncStatus pricingSyncStatus
@@ -131,7 +132,7 @@ func (a *App) registration() Registration {
 				{Name: "pricing_file", Type: "string", Description: "Standalone model price catalog (USD per 1M tokens). Default: cpa-access-guard-model-pricing.json next to state_file. Relative paths resolve against the CPA process working directory."},
 				{Name: "keys", Type: "array", Description: "Initial downstream API-key access-policy list. State file wins after it exists."},
 				{Name: "native_key_bindings", Type: "array", Description: "Optional caller-scope bindings that constrain CPA-native downstream API keys to a credential group or exact auth IDs. Requires a Scheduler path carrying caller_scope, Home disabled, no unsupported special route, and quota-exceeded.antigravity-credits=false."},
-				{Name: "pricing_sync", Type: "object", Description: "models.dev catalog refresh. Always on. Optional {interval_hours: int, url: string}."},
+				{Name: "pricing_sync", Type: "object", Description: "Dual-source price refresh with LiteLLM primary and models.dev fallback. Always on. Optional {interval_hours, litellm_url, models_dev_url}; legacy url remains a models.dev override."},
 			},
 		},
 		Capabilities: Capabilities{
@@ -661,8 +662,9 @@ func (a *App) managementRegistration() ManagementRegistrationResponse {
 			{Method: http.MethodGet, Path: base + "/pricing", Description: "List the standalone model price catalog."},
 			{Method: http.MethodPost, Path: base + "/pricing", Description: "Create or update one model price row."},
 			{Method: http.MethodDelete, Path: base + "/pricing", Description: "Delete one model price row by modelId."},
-			{Method: http.MethodGet, Path: base + "/pricing-sync", Description: "Show models.dev pricing sync status."},
-			{Method: http.MethodPost, Path: base + "/pricing-sync/run", Description: "Run one models.dev pricing sync immediately."},
+			{Method: http.MethodPost, Path: base + "/pricing/restore-auto", Description: "Remove a manual override or deletion tombstone so source sync can restore the model."},
+			{Method: http.MethodGet, Path: base + "/pricing-sync", Description: "Show LiteLLM-primary and models.dev-fallback pricing sync status."},
+			{Method: http.MethodPost, Path: base + "/pricing-sync/run", Description: "Run one dual-source pricing sync immediately."},
 		},
 		Resources: []ResourceRoute{
 			{Path: web.IndexPath, Menu: "Access Guard", Description: "Web UI for Access Guard (create keys, bind credentials, and pick models)."},
@@ -740,11 +742,13 @@ func (a *App) handleManagement(raw []byte) ([]byte, error) {
 		return OKEnvelope(a.upsertModelPricing(req.Body))
 	case req.Method == http.MethodDelete && path == base+"/pricing":
 		return OKEnvelope(a.deleteModelPricing(req.Query, req.Body))
+	case req.Method == http.MethodPost && path == base+"/pricing/restore-auto":
+		return OKEnvelope(a.restoreAutomaticModelPricing(req.Body))
 	case req.Method == http.MethodGet && path == base+"/pricing-sync":
 		return OKEnvelope(jsonResponse(http.StatusOK, a.pricingSyncSnapshot()))
 	case req.Method == http.MethodPost && path == base+"/pricing-sync/run":
 		status := a.pricingSyncSnapshot()
-		return OKEnvelope(jsonResponse(http.StatusOK, a.runPricingSync(status.URL)))
+		return OKEnvelope(jsonResponse(http.StatusOK, a.runPricingSync(status.liteLLMRawURL, status.modelsDevRawURL)))
 	default:
 		return OKEnvelope(jsonError(http.StatusNotFound, "not_found", "unknown management route"))
 	}

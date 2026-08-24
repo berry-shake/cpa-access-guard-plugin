@@ -13,15 +13,16 @@ import (
 
 // aliasUpsertRequest is the body for POST /aliases.
 type aliasUpsertRequest struct {
-	Alias                    string               `json:"alias"`
-	Targets                  []policy.AliasTarget `json:"targets"`
-	Dispatch                 string               `json:"dispatch"`
-	BillingMode              string               `json:"billing_mode"`
-	InputPricePerMillion     float64              `json:"input_price_per_million"`
-	OutputPricePerMillion    float64              `json:"output_price_per_million"`
-	CacheReadPricePerMillion  float64             `json:"cache_read_price_per_million"`
-	CacheWritePricePerMillion float64             `json:"cache_write_price_per_million"`
-	PerCallUSD                float64             `json:"per_call_usd"`
+	Alias                     string               `json:"alias"`
+	Targets                   []policy.AliasTarget `json:"targets"`
+	Dispatch                  string               `json:"dispatch"`
+	BillingMode               string               `json:"billing_mode"`
+	PricingMode               string               `json:"pricing_mode"`
+	InputPricePerMillion      float64              `json:"input_price_per_million"`
+	OutputPricePerMillion     float64              `json:"output_price_per_million"`
+	CacheReadPricePerMillion  float64              `json:"cache_read_price_per_million"`
+	CacheWritePricePerMillion float64              `json:"cache_write_price_per_million"`
+	PerCallUSD                float64              `json:"per_call_usd"`
 }
 
 func (a *App) upsertAlias(raw []byte) ManagementResponse {
@@ -31,12 +32,13 @@ func (a *App) upsertAlias(raw []byte) ManagementResponse {
 	}
 	// Build the new alias entry.
 	alias := policy.AliasMapping{
-		Alias:                    req.Alias,
-		Targets:                  req.Targets,
-		Dispatch:                 req.Dispatch,
-		BillingMode:              req.BillingMode,
-		InputPricePerMillion:     req.InputPricePerMillion,
-		OutputPricePerMillion:    req.OutputPricePerMillion,
+		Alias:                     req.Alias,
+		Targets:                   req.Targets,
+		Dispatch:                  req.Dispatch,
+		BillingMode:               req.BillingMode,
+		PricingMode:               req.PricingMode,
+		InputPricePerMillion:      req.InputPricePerMillion,
+		OutputPricePerMillion:     req.OutputPricePerMillion,
 		CacheReadPricePerMillion:  req.CacheReadPricePerMillion,
 		CacheWritePricePerMillion: req.CacheWritePricePerMillion,
 		PerCallUSD:                req.PerCallUSD,

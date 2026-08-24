@@ -6,13 +6,92 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"cpa-access-guard/internal/policy"
 )
 
+func TestResolvedPricingURLsKeepsLegacyModelsDevOverride(t *testing.T) {
+	liteURL, modelsDevURL := resolvedPricingURLs(policy.PricingSyncConfig{URL: "https://legacy.example.test/models.json"})
+	if liteURL != policy.DefaultLiteLLMURL || modelsDevURL != "https://legacy.example.test/models.json" {
+		t.Fatalf("legacy URLs = %q / %q", liteURL, modelsDevURL)
+	}
+
+	liteURL, modelsDevURL = resolvedPricingURLs(policy.PricingSyncConfig{
+		LiteLLMURL:   "https://primary.example.test/catalog.json",
+		ModelsDevURL: "https://fallback.example.test/catalog.json",
+		URL:          "https://ignored.example.test/catalog.json",
+	})
+	if liteURL != "https://primary.example.test/catalog.json" || modelsDevURL != "https://fallback.example.test/catalog.json" {
+		t.Fatalf("explicit URLs = %q / %q", liteURL, modelsDevURL)
+	}
+}
+
+func TestPricingSyncSerializesConcurrentRuns(t *testing.T) {
+	var active atomic.Int32
+	var peak atomic.Int32
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		current := active.Add(1)
+		for {
+			prior := peak.Load()
+			if current <= prior || peak.CompareAndSwap(prior, current) {
+				break
+			}
+		}
+		defer active.Add(-1)
+		time.Sleep(40 * time.Millisecond)
+		if r.URL.Path == "/litellm" {
+			_, _ = w.Write([]byte(`{"gpt-5.6-sol":{"litellm_provider":"openai","mode":"chat","input_cost_per_token":0.000005,"output_cost_per_token":0.00003}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"openai":{"models":{"gpt-5.6-luna":{"name":"GPT-5.6 Luna","cost":{"input":0.2,"output":1.2},"modalities":{"output":["text"]}}}}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	app := NewApp()
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			result := app.runPricingSync(srv.URL+"/litellm", srv.URL+"/models-dev")
+			if result.Error != "" {
+				t.Errorf("sync error = %q", result.Error)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if got := requests.Load(); got != 4 {
+		t.Fatalf("requests = %d, want 4", got)
+	}
+	if got := peak.Load(); got != 2 {
+		t.Fatalf("peak concurrent source requests = %d, want 2", got)
+	}
+}
+
 func TestPricingSyncWritesCatalogFile(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/litellm" {
+			_, _ = w.Write([]byte(`{
+				"gpt-5.6-sol": {
+					"litellm_provider": "openai",
+					"mode": "chat",
+					"input_cost_per_token": 0.000005,
+					"output_cost_per_token": 0.00003,
+					"cache_read_input_token_cost": 0.0000005,
+					"cache_creation_input_token_cost": 0.00000625
+				}
+			}`))
+			return
+		}
 		_, _ = w.Write([]byte(`{
 			"openai": {
 				"name": "OpenAI",
@@ -36,7 +115,8 @@ func TestPricingSyncWritesCatalogFile(t *testing.T) {
 enabled: true
 state_file: "` + filepath.ToSlash(statePath) + `"
 pricing_sync:
-  url: "` + srv.URL + `"
+  litellm_url: "` + srv.URL + `/litellm"
+  models_dev_url: "` + srv.URL + `/models-dev"
 aliases:
   - alias: gpt-5.6-sol
     targets: [{provider: codex, target_model: gpt-5.6-sol}]
@@ -138,12 +218,12 @@ keys: []
 	}
 	listed := managementResponseFromEnvelope(t, raw)
 	var payload struct {
-		Models []map[string]string `json:"models"`
+		Models []policy.ModelPrice `json:"models"`
 	}
 	if err := json.Unmarshal(listed.Body, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if len(payload.Models) != 1 || payload.Models[0]["modelId"] != "gpt-5.5" || payload.Models[0]["inputCostPerMillion"] != "5" {
+	if len(payload.Models) != 1 || payload.Models[0].ID != "gpt-5.5" || payload.Models[0].InputPricePerMillion != 5 || payload.Models[0].Source != policy.PricingSourceManual {
 		t.Fatalf("list=%s", listed.Body)
 	}
 

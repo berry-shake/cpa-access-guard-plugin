@@ -193,22 +193,22 @@ func (l *usageLedger) RecordCost(id, alias string, amount, cacheCost float64, ca
 // the rolling-week's cache spend / hit-rate. CacheHitRate is not serialized
 // here; the UI derives it as cacheRead / (cacheRead + input).
 type UsageSummary struct {
-	DailyUSD              float64   `json:"daily_usd"`
-	WeeklyUSD             float64   `json:"weekly_usd"`
-	DailyLimitUSD         float64   `json:"daily_limit_usd"`
-	WeeklyLimitUSD        float64   `json:"weekly_limit_usd"`
-	DailyResetAt          time.Time `json:"daily_reset_at,omitempty"`
-	WeeklyResetAt         time.Time `json:"weekly_reset_at,omitempty"`
-	DailyCacheCostUSD     float64   `json:"daily_cache_cost_usd,omitempty"`
-	WeeklyCacheCostUSD    float64   `json:"weekly_cache_cost_usd,omitempty"`
-	DailyCacheReadTokens  int64     `json:"daily_cache_read_tokens,omitempty"`
-	WeeklyCacheReadTokens int64     `json:"weekly_cache_read_tokens,omitempty"`
-	DailyCacheWriteTokens  int64    `json:"daily_cache_write_tokens,omitempty"`
-	WeeklyCacheWriteTokens int64    `json:"weekly_cache_write_tokens,omitempty"`
-	DailyCacheWriteCostUSD  float64  `json:"daily_cache_write_cost_usd,omitempty"`
-	WeeklyCacheWriteCostUSD float64  `json:"weekly_cache_write_cost_usd,omitempty"`
-	DailyInputTokens      int64     `json:"daily_input_tokens,omitempty"`
-	WeeklyInputTokens     int64     `json:"weekly_input_tokens,omitempty"`
+	DailyUSD                float64   `json:"daily_usd"`
+	WeeklyUSD               float64   `json:"weekly_usd"`
+	DailyLimitUSD           float64   `json:"daily_limit_usd"`
+	WeeklyLimitUSD          float64   `json:"weekly_limit_usd"`
+	DailyResetAt            time.Time `json:"daily_reset_at,omitempty"`
+	WeeklyResetAt           time.Time `json:"weekly_reset_at,omitempty"`
+	DailyCacheCostUSD       float64   `json:"daily_cache_cost_usd,omitempty"`
+	WeeklyCacheCostUSD      float64   `json:"weekly_cache_cost_usd,omitempty"`
+	DailyCacheReadTokens    int64     `json:"daily_cache_read_tokens,omitempty"`
+	WeeklyCacheReadTokens   int64     `json:"weekly_cache_read_tokens,omitempty"`
+	DailyCacheWriteTokens   int64     `json:"daily_cache_write_tokens,omitempty"`
+	WeeklyCacheWriteTokens  int64     `json:"weekly_cache_write_tokens,omitempty"`
+	DailyCacheWriteCostUSD  float64   `json:"daily_cache_write_cost_usd,omitempty"`
+	WeeklyCacheWriteCostUSD float64   `json:"weekly_cache_write_cost_usd,omitempty"`
+	DailyInputTokens        int64     `json:"daily_input_tokens,omitempty"`
+	WeeklyInputTokens       int64     `json:"weekly_input_tokens,omitempty"`
 	// DailyCallCount / WeeklyCallCount: number of successful requests billed
 	// into the window (token-billed or per-call). Failed requests don't count.
 	// Reported for display only; not used for limit enforcement.

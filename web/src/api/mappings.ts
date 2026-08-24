@@ -280,14 +280,36 @@ export async function resetNativeKeyBindingQuota(id: string): Promise<void> {
   await c.post(pluginPath("/native-key-bindings/reset-quota"), { id });
 }
 
-// --- models.dev pricing sync ---
+// --- dual-source model pricing sync ---
+
+export interface PricingSourceSyncState {
+  lastAttemptAt?: number;
+  lastSyncAt?: number;
+  lastSyncError?: string;
+  fetched?: number;
+  accepted?: number;
+}
+
+export interface PricingSourcesState {
+  litellm?: PricingSourceSyncState;
+  modelsDev?: PricingSourceSyncState;
+}
 
 export interface PricingSyncResult {
   at: string;
   updated: number;
   unmatched: number;
   skipped: number;
+  catalog_updated?: number;
   catalog?: number;
+  litellm?: number;
+  models_dev?: number;
+  manual?: number;
+  legacy?: number;
+  known_unpriced?: number;
+  stale?: number;
+  sources?: PricingSourcesState;
+  partial?: boolean;
   pricing_file?: string;
   error?: string;
 }
@@ -296,8 +318,11 @@ export interface PricingSyncStatus {
   enabled: boolean;
   interval_hours?: number;
   url?: string;
+  litellm_url?: string;
+  models_dev_url?: string;
   pricing_file?: string;
   catalog_size?: number;
+  sources?: PricingSourcesState;
   last_result?: PricingSyncResult | null;
   next_run_at?: string;
 }
@@ -321,12 +346,25 @@ export interface ModelPricing {
   outputCostPerMillion: string;
   cacheReadCostPerMillion: string;
   cacheCreationCostPerMillion: string;
+  imageInputCostPerMillion?: string;
+  imageOutputCostPerMillion?: string;
+  provider?: string;
+  source?: "manual" | "alias" | "legacy" | "litellm" | "models.dev" | string;
+  sourceModelId?: string;
+  status?: "priced" | "known_unpriced" | "stale" | string;
+  mode?: "text" | "image_generation" | string;
+  lastSeenAt?: number;
 }
 
-export async function fetchModelPricing(): Promise<ModelPricing[]> {
+export interface ModelPricingCatalog {
+  models: ModelPricing[];
+  deletedModelIds: string[];
+}
+
+export async function fetchModelPricing(): Promise<ModelPricingCatalog> {
   const c = apiClient();
-  const { data } = await c.get<{ models?: ModelPricing[] }>(pluginPath("/pricing"));
-  return data.models ?? [];
+  const { data } = await c.get<{ models?: ModelPricing[]; deleted_model_ids?: string[] }>(pluginPath("/pricing"));
+  return { models: data.models ?? [], deletedModelIds: data.deleted_model_ids ?? [] };
 }
 
 export async function upsertModelPricing(row: ModelPricing): Promise<ModelPricing> {
@@ -338,4 +376,9 @@ export async function upsertModelPricing(row: ModelPricing): Promise<ModelPricin
 export async function deleteModelPricing(modelId: string): Promise<void> {
   const c = apiClient();
   await c.delete(pluginPath("/pricing"), { data: { modelId } });
+}
+
+export async function restoreAutomaticModelPricing(modelId: string): Promise<void> {
+  const c = apiClient();
+  await c.post(pluginPath("/pricing/restore-auto"), { modelId });
 }

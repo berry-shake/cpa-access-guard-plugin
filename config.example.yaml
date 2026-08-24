@@ -29,11 +29,13 @@ plugins:
       # here when an alias has no prices. Relative paths resolve like state_file.
       # Omit to place cpa-access-guard-model-pricing.json next to state_file.
       pricing_file: "cpa-access-guard-model-pricing.json"
-      # models.dev catalog refresh. Always on at startup, then every
-      # interval_hours (default 24). Optional url overrides the public catalog.
+      # Dual-source catalog refresh: LiteLLM is primary and models.dev fills
+      # only model IDs absent from LiteLLM. Always runs at startup, then every
+      # interval_hours (default 24). Legacy `url` still overrides models.dev.
       # pricing_sync:
       #   interval_hours: 24
-      #   url: "https://models.dev/api.json"
+      #   litellm_url: "https://cdn.jsdelivr.net/gh/BerriAI/litellm@main/model_prices_and_context_window.json"
+      #   models_dev_url: "https://models.dev/api.json"
 
       # Prefer creating keys/native bindings/aliases/classify rules via the Web
       # UI or Management API.
@@ -57,6 +59,18 @@ plugins:
           # …or reference global aliases created in the UI / POST /aliases:
           # aliases:
           #   - alias: "cheap-chat"
+
+      # Optional first-boot global alias seed. Token prices default to
+      # pricing_mode: auto and may be refreshed from the model catalog. Use
+      # pricing_mode: manual to preserve explicitly configured alias prices.
+      # aliases:
+      #   - alias: "cheap-chat"
+      #     pricing_mode: "manual"
+      #     targets:
+      #       - provider: "codex"
+      #         target_model: "gpt-5.4-mini"
+      #     input_price_per_million: 0.75
+      #     output_price_per_million: 4.5
 
       # Optional first-boot seed for keys that remain in CPA's top-level
       # `api-keys`. Do not put the plaintext key here. The caller_scope is:

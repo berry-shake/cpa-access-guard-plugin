@@ -32,7 +32,7 @@ type Store struct {
 	// tokens). Billing falls back here when an alias has no token prices.
 	pricingPath    string
 	prices         map[string]ModelPrice
-	pricingSync    ModelsDevSyncFile
+	pricingSync    PricingSyncState
 	pricingDeleted []string
 	// aliases is the global alias mapping table from config.yaml. Used to
 	// resolve KeyAliasRef → ModelRule for routing and billing.
@@ -1143,6 +1143,14 @@ func (s *Store) ResetRPM(id string) error {
 // alias (non-empty name, at least one target, valid dispatch/billing mode).
 // Persists the full state to disk.
 func (s *Store) UpsertAlias(alias AliasMapping) error {
+	return s.upsertAlias(alias, true)
+}
+
+func (s *Store) upsertAliasFromPricingSync(alias AliasMapping) error {
+	return s.upsertAlias(alias, false)
+}
+
+func (s *Store) upsertAlias(alias AliasMapping, writePricing bool) error {
 	s.updateMu.Lock()
 	defer s.updateMu.Unlock()
 	// Build a temp config to validate the single alias.
@@ -1174,7 +1182,19 @@ func (s *Store) UpsertAlias(alias AliasMapping) error {
 	if err := s.saveState(path, keys, usage, s.AliasesSnapshot(), s.ClassifyRulesSnapshot()); err != nil {
 		return err
 	}
-	return s.upsertAliasIntoPricing(alias)
+	if writePricing {
+		return s.upsertAliasIntoPricing(tmp.Aliases[findAliasIndex(tmp.Aliases, alias.Alias)])
+	}
+	return nil
+}
+
+func findAliasIndex(aliases []AliasMapping, name string) int {
+	for i := range aliases {
+		if strings.EqualFold(aliases[i].Alias, name) {
+			return i
+		}
+	}
+	return 0
 }
 
 // DeleteAlias removes an alias from the global table. Returns an error if any
@@ -1213,7 +1233,13 @@ func (s *Store) DeleteAlias(aliasName string) error {
 	usage := s.usageSnapshotLocked()
 	path := s.statePath
 	s.mu.Unlock()
-	return s.saveState(path, keys, usage, s.AliasesSnapshot(), s.ClassifyRulesSnapshot())
+	if err := s.saveState(path, keys, usage, s.AliasesSnapshot(), s.ClassifyRulesSnapshot()); err != nil {
+		return err
+	}
+	// Reconcile alias-owned catalog rows after the alias is gone. The helper
+	// scans all remaining aliases, so rows still owned by another manual alias
+	// are preserved.
+	return s.upsertAliasIntoPricing(AliasMapping{BillingMode: "per_call"})
 }
 
 // --- Classification rule management ---

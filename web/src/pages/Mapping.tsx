@@ -434,6 +434,7 @@ export function AliasEditForm() {
       targets: [],
       dispatch: "round-robin",
       billing_mode: "tokens",
+      pricing_mode: "auto",
       input_price_per_million: 0,
       output_price_per_million: 0,
       cache_read_price_per_million: 0,
@@ -572,6 +573,17 @@ export function AliasEditForm() {
         </div>
         {alias.billing_mode === "tokens" ? (
           <>
+            <div className="map-form-row">
+              <label>{t("mapping.alias.pricingMode")}</label>
+              <select
+                value={alias.pricing_mode ?? "auto"}
+                onChange={(e) => setAlias({ ...alias, pricing_mode: e.target.value === "manual" ? "manual" : "auto" })}
+              >
+                <option value="auto">{t("mapping.alias.pricingAuto")}</option>
+                <option value="manual">{t("mapping.alias.pricingManual")}</option>
+              </select>
+              <small>{t("mapping.alias.pricingModeHint")}</small>
+            </div>
             <div className="map-form-row">
               <label>{t("mapping.alias.input")} ($/1M)</label>
               <input

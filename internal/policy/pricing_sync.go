@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -14,27 +12,12 @@ import (
 // models.dev pricing auto-sync.
 //
 // The catalog (https://models.dev/api.json) publishes per-provider model
-// costs as USD per 1M tokens, including cache_read and cache_write. Sync
-// follows cc-switch: flatten text models, keep a bounded official-provider
-// set (6 newest per family), then one row per normalized model id. Alias
-// prices are updated the same way; targets/dispatch/billing mode are
-// untouched, and per_call aliases are skipped.
+// costs as USD per 1M tokens, including cache_read and cache_write. In the
+// dual-source pipeline this catalog is fallback-only and contributes every
+// accepted canonical text model that LiteLLM does not know.
 
 // DefaultModelsDevURL is the public pricing catalog endpoint.
 const DefaultModelsDevURL = "https://models.dev/api.json"
-
-// ModelsDevEntry is one text-model pricing row flattened from the catalog.
-type ModelsDevEntry struct {
-	Key         string
-	ProviderID  string
-	ModelID     string
-	Name        string
-	ReleaseDate string
-	Input       float64
-	Output      float64
-	CacheRead   float64
-	CacheWrite  float64
-}
 
 type modelsDevCost struct {
 	Input      *float64 `json:"input"`
@@ -106,36 +89,22 @@ func modelsDevIsTextModel(modelID string, m modelsDevModel) bool {
 	return true
 }
 
-// FetchModelsDevPricing downloads and flattens the catalog into text-model
-// pricing entries. Timeout is enforced by ctx.
-func FetchModelsDevPricing(ctx context.Context, url string) ([]ModelsDevEntry, error) {
-	if strings.TrimSpace(url) == "" {
-		url = DefaultModelsDevURL
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+// FetchModelsDevCatalog downloads and flattens the fallback catalog into the
+// canonical official-family text rows accepted by the plugin.
+func FetchModelsDevCatalog(ctx context.Context, rawURL string) (PricingFetchResult, error) {
+	body, err := fetchPricingPayload(ctx, rawURL, DefaultModelsDevURL, PricingSourceModelsDev)
 	if err != nil {
-		return nil, err
-	}
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("models.dev: HTTP %d", resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
-	if err != nil {
-		return nil, err
+		return PricingFetchResult{}, err
 	}
 	var catalog map[string]modelsDevProvider
 	if err := json.Unmarshal(body, &catalog); err != nil {
-		return nil, fmt.Errorf("models.dev: decode: %w", err)
+		return PricingFetchResult{}, fmt.Errorf("models.dev: decode: %w", err)
 	}
-	var entries []ModelsDevEntry
+	var entries []PricingCatalogEntry
+	fetched := 0
 	for providerID, provider := range catalog {
 		for modelID, model := range provider.Models {
+			fetched++
 			if !modelsDevIsTextModel(modelID, model) {
 				continue
 			}
@@ -157,20 +126,27 @@ func FetchModelsDevPricing(ctx context.Context, url string) ([]ModelsDevEntry, e
 			if name == "" {
 				name = modelID
 			}
-			entry := ModelsDevEntry{
-				Key:         providerID + "/" + modelID,
-				ProviderID:  providerID,
-				ModelID:     modelID,
-				Name:        name,
-				ReleaseDate: strings.TrimSpace(model.ReleaseDate),
-				Input:       input,
-				Output:      output,
+			entry := PricingCatalogEntry{
+				Key:           providerID + "/" + modelID,
+				ProviderID:    providerID,
+				ModelID:       modelID,
+				Name:          name,
+				ReleaseDate:   strings.TrimSpace(model.ReleaseDate),
+				Source:        PricingSourceModelsDev,
+				SourceModelID: providerID + "/" + modelID,
+				Status:        PricingStatusPriced,
+				Mode:          PricingModeText,
+				Input:         input,
+				Output:        output,
 			}
 			if cost.CacheRead != nil {
 				entry.CacheRead = *cost.CacheRead
 			}
 			if cost.CacheWrite != nil {
 				entry.CacheWrite = *cost.CacheWrite
+			}
+			if err := validateCatalogEntry(entry); err != nil {
+				continue
 			}
 			entries = append(entries, entry)
 		}
@@ -181,10 +157,22 @@ func FetchModelsDevPricing(ctx context.Context, url string) ([]ModelsDevEntry, e
 		}
 		return entries[i].Name < entries[j].Name
 	})
-	return entries, nil
+	selected := SelectCommonModelsDev(entries)
+	if len(selected) == 0 {
+		return PricingFetchResult{}, fmt.Errorf("models.dev: catalog contained no accepted canonical models")
+	}
+	return PricingFetchResult{Entries: selected, Fetched: fetched, Accepted: len(selected)}, nil
 }
 
-const commonModelLimitPerFamily = 6
+// FetchModelsDevPricing is retained for callers written before the dual-source
+// result type was introduced.
+func FetchModelsDevPricing(ctx context.Context, rawURL string) ([]ModelsDevEntry, error) {
+	result, err := FetchModelsDevCatalog(ctx, rawURL)
+	if err != nil {
+		return nil, err
+	}
+	return result.Entries, nil
+}
 
 type commonFamilyRule struct {
 	providers map[string]struct{}
@@ -218,7 +206,6 @@ var commonFamilyRules = []commonFamilyRule{
 func commonModelKeys(entries []ModelsDevEntry) map[string]struct{} {
 	wanted := make(map[string]struct{})
 	for _, rule := range commonFamilyRules {
-		n := 0
 		for _, entry := range entries {
 			if _, ok := rule.providers[entry.ProviderID]; !ok {
 				continue
@@ -227,17 +214,14 @@ func commonModelKeys(entries []ModelsDevEntry) map[string]struct{} {
 				continue
 			}
 			wanted[entry.Key] = struct{}{}
-			n++
-			if n >= commonModelLimitPerFamily {
-				break
-			}
 		}
 	}
 	return wanted
 }
 
-// SelectCommonModelsDev keeps the official-family set: the newest
-// commonModelLimitPerFamily chat models per family from the canonical provider.
+// SelectCommonModelsDev keeps every matching official-family text model from
+// the canonical provider. The old six-newest cap caused supported Codex models
+// to disappear from pricing and is intentionally gone.
 func SelectCommonModelsDev(entries []ModelsDevEntry) []ModelsDevEntry {
 	wanted := commonModelKeys(entries)
 	out := make([]ModelsDevEntry, 0, len(wanted))
@@ -290,13 +274,22 @@ var pricingProviderAliases = map[string][]string{
 
 // PricingSyncResult reports one sync run.
 type PricingSyncResult struct {
-	At          time.Time `json:"at"`
-	Updated     int       `json:"updated"`
-	Unmatched   int       `json:"unmatched"`
-	Skipped     int       `json:"skipped"`
-	Catalog     int       `json:"catalog"`
-	PricingFile string    `json:"pricing_file,omitempty"`
-	Error       string    `json:"error,omitempty"`
+	At             time.Time        `json:"at"`
+	Updated        int              `json:"updated"`
+	Unmatched      int              `json:"unmatched"`
+	Skipped        int              `json:"skipped"`
+	CatalogUpdated int              `json:"catalog_updated"`
+	Catalog        int              `json:"catalog"`
+	LiteLLM        int              `json:"litellm"`
+	ModelsDev      int              `json:"models_dev"`
+	Manual         int              `json:"manual"`
+	Legacy         int              `json:"legacy"`
+	KnownUnpriced  int              `json:"known_unpriced"`
+	Stale          int              `json:"stale"`
+	Sources        PricingSyncState `json:"sources"`
+	Partial        bool             `json:"partial,omitempty"`
+	PricingFile    string           `json:"pricing_file,omitempty"`
+	Error          string           `json:"error,omitempty"`
 }
 
 // SyncAliasPrices matches every existing tokens-billed alias against the
@@ -318,7 +311,7 @@ func (s *Store) SyncAliasPrices(entries []ModelsDevEntry) (updated, unmatched, s
 
 	aliases := s.AliasesSnapshot()
 	for _, alias := range aliases {
-		if strings.EqualFold(alias.BillingMode, "per_call") {
+		if strings.EqualFold(alias.BillingMode, "per_call") || strings.EqualFold(alias.PricingMode, "manual") {
 			skipped++
 			continue
 		}
@@ -340,17 +333,54 @@ func (s *Store) SyncAliasPrices(entries []ModelsDevEntry) (updated, unmatched, s
 			continue
 		}
 		entry := pickPricingEntry(candidates, alias.Targets)
-		alias.InputPricePerMillion = entry.Input
-		alias.OutputPricePerMillion = entry.Output
-		alias.CacheReadPricePerMillion = entry.CacheRead
-		alias.CacheWritePricePerMillion = entry.CacheWrite
-		if err := s.UpsertAlias(alias); err != nil {
+		if entry.Status == PricingStatusKnownUnpriced || entry.Mode == PricingModeImageGeneration {
+			// An automatic alias must not retain a formerly published price after
+			// the primary source explicitly reports no public text-token price.
+			alias.InputPricePerMillion = 0
+			alias.OutputPricePerMillion = 0
+			alias.CacheReadPricePerMillion = 0
+			alias.CacheWritePricePerMillion = 0
+		} else {
+			alias.InputPricePerMillion = entry.Input
+			alias.OutputPricePerMillion = entry.Output
+			alias.CacheReadPricePerMillion = entry.CacheRead
+			alias.CacheWritePricePerMillion = entry.CacheWrite
+		}
+		if err := s.upsertAliasFromPricingSync(alias); err != nil {
 			skipped++
 			continue
 		}
 		updated++
 	}
 	return updated, unmatched, skipped
+}
+
+// SyncAliasPricesFromCatalog updates auto-priced token aliases from the
+// already merged, last-known-good catalog. This prevents a transient primary
+// failure from stamping fallback prices over a retained LiteLLM row.
+func (s *Store) SyncAliasPricesFromCatalog() (updated, unmatched, skipped int) {
+	rows := s.PricingSnapshot()
+	entries := make([]PricingCatalogEntry, 0, len(rows))
+	for _, row := range rows {
+		if row.Status != PricingStatusKnownUnpriced && row.Mode != PricingModeImageGeneration && !row.hasTokenPrices() {
+			continue
+		}
+		entries = append(entries, PricingCatalogEntry{
+			Key:           row.Provider + "/" + row.ID,
+			ProviderID:    row.Provider,
+			ModelID:       row.ID,
+			Name:          row.DisplayName,
+			Source:        row.Source,
+			SourceModelID: row.SourceModelID,
+			Status:        row.Status,
+			Mode:          row.Mode,
+			Input:         row.InputPricePerMillion,
+			Output:        row.OutputPricePerMillion,
+			CacheRead:     row.CacheReadPricePerMillion,
+			CacheWrite:    row.CacheWritePricePerMillion,
+		})
+	}
+	return s.SyncAliasPrices(entries)
 }
 
 // pickPricingEntry prefers a catalog entry whose provider matches one of the

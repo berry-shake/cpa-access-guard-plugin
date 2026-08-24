@@ -256,7 +256,10 @@ Notes:
 
 - If `state_file` exists, it is the source of truth for keys / native-key bindings / aliases / classify rules / usage.
 - `pricing_file` is the standalone model price catalog (USD per 1M tokens). Billing uses alias prices first and falls back to this catalog. Omit it to place `cpa-access-guard-model-pricing.json` next to `state_file`.
-- The plugin refreshes the catalog (and matching alias prices) from [models.dev](https://models.dev) at startup and on a timer. Optional `pricing_sync.interval_hours` / `pricing_sync.url` override the default 24h public catalog.
+- The plugin syncs two sources at startup and on a timer: [LiteLLM](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json) is primary, while [models.dev](https://models.dev) fills only model IDs absent from LiteLLM. A model known to LiteLLM but lacking a published price is marked known-unpriced and never receives a questionable fallback price.
+- `pricing_sync.interval_hours`, `pricing_sync.litellm_url`, and `pricing_sync.models_dev_url` override the default 24h interval and source URLs; legacy `pricing_sync.url` remains a models.dev URL override. If either source fails, its last successful values remain available and are marked stale instead of clearing the catalog.
+- Manual edits in Model Pricing beat both remote sources. Deletions create tombstones, so later syncs cannot resurrect the row; Restore Automatic clears the override/tombstone and immediately resyncs. Alias token prices default to `pricing_mode: auto`; select Manual Override or set `pricing_mode: manual` to preserve the prices entered on an alias.
+- Version-1 pricing files remain readable in place. Legacy rows that exactly match an incoming source are migrated to sourced automatic rows; unrecognized values stay protected as legacy manual values. Image-model source rates are displayed, but are never treated as text-token billing rates.
 - A relative `state_file` / `pricing_file` is resolved against the **CPA process working directory**, not the plugin `.so` directory. Use an absolute path in production and ensure the CPA user can write it. `GET /v0/management/plugins/access-guard/status` reports the resolved `state_file` and `pricing_file`.
 - When upgrading from `cpa-key-policy` while relying on its default relative state filename, Access Guard copies a valid sibling `cpa-key-policy-state.json` to `cpa-access-guard-state.json` once. The legacy file is retained as a recovery backup. Explicit `state_file` paths are never auto-migrated; copy those files deliberately while CPA is stopped.
 - The plugin creates the state directory with mode `0700` and atomically writes the file with mode `0600`. Back it up, and never place a plaintext top-level API key in it manually.
@@ -283,6 +286,7 @@ UI areas:
 | Mapping → Aliases | Global multi-target aliases, dispatch, pricing |
 | Mapping → Classification | Custom credential groups + match preview |
 | Mapping → Native key bindings | List every CPA top-level key; configure built-in or `classify:` auth-file groups; retain orphan bindings for review |
+| Model Pricing | LiteLLM primary and models.dev fallback status; search, manual overrides, deletion tombstones, and automatic restore |
 | Model picker | Catalog of providers; tier / **Custom · …** subgroups |
 
 Dev UI without rebuilding the `.so`:
@@ -310,6 +314,13 @@ Exact paths (no path templates). Auth: CPA management bearer token.
 **Aliases**
 
 - `GET/POST/DELETE …/aliases`
+
+**Model pricing**
+
+- `GET/POST/DELETE …/pricing`
+- `POST …/pricing/restore-auto`
+- `GET …/pricing-sync`
+- `POST …/pricing-sync/run`
 
 **Classify**
 

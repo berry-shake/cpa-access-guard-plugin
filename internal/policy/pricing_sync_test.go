@@ -115,6 +115,49 @@ func TestSyncAliasPricesProviderPreferenceAndSkips(t *testing.T) {
 	}
 }
 
+func TestSyncAliasPricesSkipsManualPricingMode(t *testing.T) {
+	s := newSyncStore(t)
+	if err := s.UpsertAlias(AliasMapping{
+		Alias: "gpt-5.6-sol", PricingMode: "manual",
+		InputPricePerMillion: 1, OutputPricePerMillion: 2,
+		Targets: []AliasTarget{{Provider: "codex", TargetModel: "gpt-5.6-sol"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	updated, unmatched, skipped := s.SyncAliasPrices([]ModelsDevEntry{{
+		ProviderID: "openai", ModelID: "gpt-5.6-sol", Input: 4, Output: 20,
+	}})
+	if updated != 0 || unmatched != 0 || skipped != 1 {
+		t.Fatalf("updated=%d unmatched=%d skipped=%d", updated, unmatched, skipped)
+	}
+	got := s.AliasesSnapshot()[0]
+	if got.PricingMode != "manual" || got.InputPricePerMillion != 1 || got.OutputPricePerMillion != 2 {
+		t.Fatalf("manual alias was overwritten: %+v", got)
+	}
+}
+
+func TestSyncAliasPricesClearsAutomaticKnownUnpricedModel(t *testing.T) {
+	s := newSyncStore(t)
+	if err := s.UpsertAlias(AliasMapping{
+		Alias:                "gpt-5.3-codex-spark",
+		InputPricePerMillion: 3, OutputPricePerMillion: 12,
+		Targets: []AliasTarget{{Provider: "codex", TargetModel: "gpt-5.3-codex-spark"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	updated, unmatched, skipped := s.SyncAliasPrices([]ModelsDevEntry{{
+		ProviderID: "openai", ModelID: "gpt-5.3-codex-spark",
+		Source: PricingSourceLiteLLM, Status: PricingStatusKnownUnpriced, Mode: PricingModeText,
+	}})
+	if updated != 1 || unmatched != 0 || skipped != 0 {
+		t.Fatalf("updated=%d unmatched=%d skipped=%d", updated, unmatched, skipped)
+	}
+	got := s.AliasesSnapshot()[0]
+	if got.InputPricePerMillion != 0 || got.OutputPricePerMillion != 0 {
+		t.Fatalf("known-unpriced alias retained stale prices: %+v", got)
+	}
+}
+
 func TestFetchModelsDevPricingFlattensTextModels(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{

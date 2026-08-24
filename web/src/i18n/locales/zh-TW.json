@@ -235,6 +235,10 @@
       "billing": "計費模式",
       "tokens": "按 Token",
       "perCall": "按次",
+      "pricingMode": "價格維護方式",
+      "pricingAuto": "自動同步",
+      "pricingManual": "手動固定",
+      "pricingModeHint": "自動同步會用模型價格目錄更新此別名；手動固定會保留這裡填寫的價格。",
       "input": "輸入",
       "output": "輸出",
       "cache": "快取",
@@ -365,24 +369,36 @@
     "pricingSync": {
       "last": "上次同步：價格表 {{catalog}} 條",
       "runNow": "立即同步價格",
-      "running": "同步中…"
+      "running": "同步中…",
+      "sourceFailed": "上次取得失敗，繼續保留最後一次有效價格",
+      "sourceAccepted": "已接受 {{count}} 個模型"
     },
     "pricing": {
       "search": "搜尋模型 ID 或名稱",
       "add": "新增定價",
-      "empty": "還沒有價格資料，可同步 models.dev 或手動新增。",
+      "empty": "還沒有價格資料，可同步 LiteLLM（models.dev 備援）或手動新增。",
       "count": "顯示 {{shown}} / {{total}} 條 · ",
       "perMillion": "單位 USD / 百萬 tokens",
       "perMillionHint": "價格單位為 USD / 百萬 tokens。快取寫入對應 cacheCreation。",
       "modelId": "模型 ID",
       "displayName": "顯示名稱",
+      "source": "來源",
+      "sourceManual": "手動",
+      "sourceAlias": "手動別名",
+      "sourceLegacy": "舊版保護",
+      "sourceUnknown": "未知",
+      "statusStale": "最後有效價格",
+      "statusUnpriced": "已知模型 · 無公開價格",
+      "imageRates": "圖像 tokens：輸入 ${{input}} / 輸出 ${{output}}",
       "input": "輸入",
       "output": "輸出",
       "cacheRead": "快取讀取",
       "cacheWrite": "快取寫入",
       "editTitle": "編輯定價 · {{id}}",
       "modelIdRequired": "模型 ID 不能為空",
-      "deleteConfirm": "確認刪除 {{id}} 的定價？"
+      "deleteConfirm": "確認隱藏 {{id}} 的自動定價？之後同步不會重新加入。",
+      "restoreAuto": "恢復自動",
+      "hiddenModels": "已隱藏的自動價格"
     }
   }
 }
