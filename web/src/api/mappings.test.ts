@@ -18,6 +18,7 @@ import {
   createNativeKeyBinding,
   deleteNativeKeyBinding,
   fetchCredentialDescriptors,
+  fetchNativeCredentialOptions,
   fetchNativeKeyBindingCatalog,
   fetchNativeKeyBindings,
   fetchTopLevelAPIKeys,
@@ -37,6 +38,59 @@ beforeEach(() => {
 });
 
 describe("native key binding API", () => {
+  it("lists exact runtime Auth IDs for direct binding without guessing from file names", async () => {
+    mocks.get.mockResolvedValueOnce({
+      data: {
+        files: [
+          {
+            id: "tenant/codex-b.json",
+            name: "codex-b.json",
+            provider: "CODEX",
+            label: "Account B",
+            email: "b@example.com",
+            status: "active",
+            id_token: { plan_type: "Team" },
+          },
+          {
+            id: "tenant/ag-a.json",
+            name: "ag-a.json",
+            type: "antigravity",
+            tier: "Pro",
+            disabled: true,
+          },
+          { name: "display-only.json", provider: "codex" },
+          { id: "tenant/codex-b.json", provider: "codex", label: "duplicate" },
+        ],
+      },
+    });
+
+    await expect(fetchNativeCredentialOptions()).resolves.toEqual([
+      {
+        id: "tenant/ag-a.json",
+        provider: "antigravity",
+        name: "ag-a.json",
+        label: undefined,
+        email: undefined,
+        status: undefined,
+        plan: "pro",
+        disabled: true,
+        unavailable: false,
+      },
+      {
+        id: "tenant/codex-b.json",
+        provider: "codex",
+        name: "codex-b.json",
+        label: "Account B",
+        email: "b@example.com",
+        status: "active",
+        plan: "team",
+        disabled: false,
+        unavailable: false,
+      },
+    ]);
+    expect(mocks.get).toHaveBeenCalledWith("/v0/management/auth-files");
+  });
+
   it("lists normalized top-level keys through CPA Management", async () => {
     mocks.get.mockResolvedValueOnce({
       data: { "api-keys": [" sk-alpha ", "sk-beta", "", null, 3, "sk-alpha"] },

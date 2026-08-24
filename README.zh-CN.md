@@ -147,14 +147,14 @@ storage  authorization  auth_header  proxy_url
 | 类型 | 谁负责鉴权 | 本插件负责什么 |
 |------|------------|----------------|
 | 插件 Key（`cpa_…` 或插件托管的自定义 `sk-…`） | `access-guard` | 模型 / Alias、RPM、额度、计费和可选凭证组 |
-| CPA 顶层 `api-keys` | CPA 原生 config API-key provider | **只限制认证文件组**；不自动增加模型、RPM 或额度策略 |
+| CPA 顶层 `api-keys` | CPA 原生 config API-key provider | 限制认证文件组或精确 Auth ID 白名单，并可设置 RPM / 美元额度；不自动增加模型策略 |
 
-CPA 原生鉴权成功后会产生稳定、不可逆的 `caller_scope`。插件只保存这个 scope、脱敏预览与目标组，不保存顶层 Key 明文：
+CPA 原生鉴权成功后会产生稳定、不可逆的 `caller_scope`。插件只保存这个 scope、脱敏预览与凭证限制，不保存顶层 Key 明文：
 
 ```text
 顶层 api-key → CPA 原生鉴权 → caller_scope
-             → native binding → classify group
-             → 只从组内 Auth ID 选择认证文件
+             → native binding → group 或 auth_ids
+             → 只从允许范围内选择认证文件
 ```
 
 要求与行为：
@@ -164,8 +164,8 @@ CPA 原生鉴权成功后会产生稳定、不可逆的 `caller_scope`。插件�
 - 从未绑定行直接创建时无需手动复制粘贴。明文只停留在页面内存，并且只通过受 Management 鉴权的 JSON 请求体用于精确 scope 匹配和创建绑定；不会渲染到页面、放进 URL、写入浏览器存储或插件 state，也不会由插件 API 返回。
 - 仍可手动新建绑定：粘贴原生 Key 一次；明文只用于计算 scope 和预览，不会写入 state，也不会在 API 响应中回显。
 - Key 必须仍然存在于 CPA 顶层 `api-keys`；绑定本身不负责认证。
-- 已绑定且启用的 Key 如果找不到组内可用凭证，会返回 `auth_not_found`（503），不会退回组外文件。
-- `caller_scope` 命中启用的原生绑定时，绑定组优先于通用 Scheduler `group` 元数据。
+- 已绑定且启用的 Key 如果找不到组内或直接白名单内的可用凭证，会返回 `auth_not_found`（503），不会退回限制外文件。
+- `caller_scope` 命中启用的原生绑定时，绑定的 group / `auth_ids` 限制优先于通用 Scheduler `group` 元数据。
 - 未绑定或禁用绑定的原生 Key 保持 CPA 原来的自由调度行为。
 - CPA 顶层配置与插件 state 不能原子更新。严格隔离的安全轮换方式是：先为新 Key 新建第二条临时绑定，再把新 Key 加入 CPA 并验证，随后删除旧顶层 Key，最后删除旧绑定。
 - 顶层 Key 应使用高熵随机值，并且不要与插件托管 Key 或其它认证来源的 principal 重用同一明文。CPA 的 `caller_scope` 标识的是 principal 文本，不包含认证 provider 名称。
@@ -178,7 +178,14 @@ CPA 原生鉴权成功后会产生稳定、不可逆的 `caller_scope`。插件�
 
 日常请通过本插件管理 API 或网页创建绑定。首次启动 YAML 种子必须包含 `caller_scope`，而 CPA 通用的插件配置接口会向持有 Management Key 的调用方返回该 YAML 字段；专用绑定列表 API 和网页不会返回它。
 
-绑定目标使用与 Alias 相同的 group 格式：内置档写 `free` / `team` / `plus` / `supported`，自定义组写 `classify:组名`。严格文件白名单推荐先建一条锚定的 `filename` 归类规则；这里的 `filename` 实际匹配 Scheduler 的 **Auth ID**，可能包含相对目录，不一定等于页面显示的文件名。
+每条绑定必须选择且只能选择一种凭证限制：
+
+- **按凭证组**：使用与 Alias 相同的 group 格式。内置档写 `free` / `team` / `plus` / `supported`，自定义组写 `classify:组名`。适合多个 Key 共享、需要动态维护的凭证池。
+- **直接指定凭证**：保存一个或多个精确、区分大小写的 Scheduler Auth ID；无需创建分类规则。适合凭证较少、每个 Key 单独分配的场景。多选是允许列表，不是轮询顺序；新增凭证不会自动加入。
+
+网页从 CPA 的 `/v0/management/auth-files` 读取实时 `id`，不会用显示文件名猜测。凭证删除、改名或移动后，已保存 ID 会保留并标记为不存在，避免编辑其它字段时静默扩大或改变授权。若全部 ID 都失效，请求会失败关闭。对于 group 模式，严格文件白名单仍可创建锚定的 `filename` 归类规则；这里的 `filename` 同样匹配 Scheduler 的 **Auth ID**，可能包含相对目录，不一定等于页面显示的文件名。
+
+直接模式会在 state 中同时写入一个内部保留 group，供不认识 `auth_ids` 的旧插件失败关闭。专用管理 API 和网页不会显示这个内部值。降级前仍应备份 `state_file`，并优先把直接模式改回普通 group；插件被禁用、卸载或加载失败时的宿主自由调度风险仍按上面的通用警告处理。
 
 ### openai-compatibility 通道
 
@@ -192,7 +199,7 @@ CPA 里配置的兼容通道，映射时 `provider` 填通道 **name**。插件�
 |------|------|
 | 前端鉴权 | 识别插件 key；校验别名、RPM、额度；写入路由与 group 元数据 |
 | 模型路由 | 别名 → provider + 目标模型 |
-| 调度 | 有 group 时按档位 / `classify:` 过滤凭证 |
+| 调度 | 按档位 / `classify:` group 或精确 `auth_ids` 白名单过滤凭证 |
 | 响应拦截 | 非流式 JSON：把顶层 `model` 改回别名 |
 | 用量 | token / 按次计费写入 state |
 | 管理 API + 内嵌网页 | Key、原生 Key 绑定、别名、归类、状态 |
@@ -318,6 +325,24 @@ curl -X POST "$CPA/v0/management/plugins/access-guard/native-key-bindings" \
   }'
 ```
 
+直接指定凭证时，改传 `auth_ids`，不要同时传 `group`：
+
+```bash
+curl -X POST "$CPA/v0/management/plugins/access-guard/native-key-bindings" \
+  -H "Authorization: Bearer $MANAGEMENT_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "client-b-native",
+    "name": "Client B",
+    "key": "sk-替换为已经存在于顶层-api-keys-的真实-Key",
+    "enabled": true,
+    "auth_ids": [
+      "tenant-b/codex-01.json",
+      "tenant-b/codex-02.json"
+    ]
+  }'
+```
+
 轮换 Key 或修改绑定：
 
 ```bash
@@ -332,11 +357,11 @@ curl -X PATCH "$CPA/v0/management/plugins/access-guard/native-key-bindings" \
   }'
 ```
 
-PATCH 省略 `key` 或传空字符串时保留原 scope。直接替换 `key` 会立即改变绑定 scope，无法与 CPA 顶层配置原子更新；严格隔离时请改用以下顺序：
+PATCH 省略 `key` 或传空字符串时保留原 scope。传非空 `auth_ids` 会原子切换到直接模式并清除业务 group；传非空 `group` 会切回组模式并清除 `auth_ids`；两者同时非空会返回 `400`。直接替换 `key` 会立即改变绑定 scope，无法与 CPA 顶层配置原子更新；严格隔离时请改用以下顺序：
 
-1. 为新 Key 和同一 group 创建第二条临时绑定。
+1. 为新 Key 和同一 group / `auth_ids` 限制创建第二条临时绑定。
 2. 将新 Key 加入 CPA 顶层 `api-keys`。
-3. 用新 Key 发真实请求，确认最终选择的 `auth_id` 属于目标组。
+3. 用新 Key 发真实请求，确认最终选择的 `auth_id` 属于目标限制。
 4. 从 CPA 顶层 `api-keys` 删除旧 Key。
 5. 删除旧绑定。
 

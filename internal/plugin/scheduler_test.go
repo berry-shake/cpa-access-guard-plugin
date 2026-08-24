@@ -37,6 +37,33 @@ keys: []
 	return app
 }
 
+func configureDirectNativeBindingSchedulerApp(t *testing.T, authIDs ...string) *App {
+	t.Helper()
+	app := NewApp()
+	var authIDYAML strings.Builder
+	for _, authID := range authIDs {
+		authIDYAML.WriteString(fmt.Sprintf("      - %q\n", authID))
+	}
+	yaml := []byte(fmt.Sprintf(`
+enabled: true
+state_file: %q
+native_key_bindings:
+  - id: native-direct
+    name: Native Direct
+    enabled: true
+    caller_scope: %q
+    key_preview: "sk-nat...rect"
+    auth_ids:
+%skeys: []
+`, filepath.ToSlash(filepath.Join(t.TempDir(), "state.json")), testNativeCallerScope, authIDYAML.String()))
+	req, _ := json.Marshal(LifecycleRequest{ConfigYAML: yaml})
+	if _, err := app.HandleMethod(MethodPluginReconfigure, req); err != nil {
+		t.Fatalf("configure direct native binding app: %v", err)
+	}
+	t.Cleanup(app.Shutdown)
+	return app
+}
+
 func TestSchedulerPickNoGroupDefers(t *testing.T) {
 	app, _ := configureTestApp(t)
 	req, _ := json.Marshal(SchedulerPickRequest{
@@ -92,6 +119,68 @@ func TestSchedulerPickNativeBindingFiltersAndPrioritizes(t *testing.T) {
 	}
 	if !resp.Handled || resp.AuthID != "codex-team-high" {
 		t.Fatalf("expected highest-priority usable candidate in native binding, got %+v", resp)
+	}
+}
+
+func TestSchedulerPickDirectNativeBindingFiltersExactAuthIDs(t *testing.T) {
+	app := configureDirectNativeBindingSchedulerApp(t, "tenant/Codex-A.json", "tenant/codex-b.json")
+	request := func(candidates []SchedulerAuthCandidate) Envelope {
+		t.Helper()
+		req, _ := json.Marshal(SchedulerPickRequest{
+			Provider: "codex",
+			Model:    "gpt-5-codex",
+			Options: SchedulerPickOptions{Metadata: map[string]any{
+				SchedulerGroupMetadataKey:       "free",
+				SchedulerCallerScopeMetadataKey: testNativeCallerScope,
+			}},
+			Candidates: candidates,
+		})
+		raw, err := app.HandleMethod(MethodSchedulerPick, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var envelope Envelope
+		if err := json.Unmarshal(raw, &envelope); err != nil {
+			t.Fatal(err)
+		}
+		return envelope
+	}
+
+	first := request([]SchedulerAuthCandidate{
+		{ID: "tenant/unselected.json", Provider: "codex", Priority: 100, Attributes: map[string]string{"plan_type": "free"}},
+		{ID: "tenant/codex-b.json", Provider: "codex", Priority: 2, Attributes: map[string]string{"plan_type": "team"}},
+		{ID: "tenant/Codex-A.json", Provider: "codex", Priority: 9, Attributes: map[string]string{"plan_type": "free"}},
+		{ID: "tenant/codex-b.json", Provider: "codex", Priority: 200, Status: "disabled"},
+		{ID: "tenant/codex-a.json", Provider: "codex", Priority: 300}, // wrong case
+	})
+	if !first.OK {
+		t.Fatalf("direct selection failed: %+v", first)
+	}
+	var firstResponse SchedulerPickResponse
+	if err := json.Unmarshal(first.Result, &firstResponse); err != nil {
+		t.Fatal(err)
+	}
+	if !firstResponse.Handled || firstResponse.AuthID != "tenant/Codex-A.json" {
+		t.Fatalf("direct selection = %+v", firstResponse)
+	}
+
+	// The host removes already-tried auths before retrying. The remaining allowed
+	// ID must still win, and an unselected candidate must never become a fallback.
+	retry := request([]SchedulerAuthCandidate{
+		{ID: "tenant/unselected.json", Provider: "codex", Priority: 100},
+		{ID: "tenant/codex-b.json", Provider: "codex", Priority: 2},
+	})
+	var retryResponse SchedulerPickResponse
+	if err := json.Unmarshal(retry.Result, &retryResponse); err != nil {
+		t.Fatal(err)
+	}
+	if !retry.OK || !retryResponse.Handled || retryResponse.AuthID != "tenant/codex-b.json" {
+		t.Fatalf("direct retry = envelope %+v response %+v", retry, retryResponse)
+	}
+
+	missing := request([]SchedulerAuthCandidate{{ID: "tenant/unselected.json", Provider: "codex", Priority: 100}})
+	if missing.OK || missing.Error == nil || missing.Error.Code != "auth_not_found" || missing.Error.HTTPStatus != http.StatusServiceUnavailable {
+		t.Fatalf("missing direct credentials must fail closed: %+v", missing)
 	}
 }
 

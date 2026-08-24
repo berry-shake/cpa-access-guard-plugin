@@ -206,8 +206,9 @@ export interface ClassifyPreviewResponse {
 }
 
 // NativeKeyBinding maps a CPA top-level `api-keys` entry to one credential
-// group. The plaintext key and derived caller_scope are deliberately absent
-// from management responses; only a redacted preview is exposed to the UI.
+// group or an exact Auth ID allow-list. The plaintext key and derived
+// caller_scope are deliberately absent from management responses; only a
+// redacted preview is exposed to the UI.
 export interface NativeBindingUsageSummary {
   rpm_limit: number;
   daily_usd_limit: number;
@@ -224,7 +225,8 @@ export interface NativeKeyBinding {
   name: string;
   enabled: boolean;
   key_preview: string;
-  group: string;
+  group?: string;
+  auth_ids?: string[];
   // Usage limits; 0/omitted = unlimited. Pricing comes from the global
   // alias table.
   rpm?: number;
@@ -240,7 +242,8 @@ export interface NativeKeyBindingCreateRequest {
   name?: string;
   enabled?: boolean;
   key: string;
-  group: string;
+  group?: string;
+  auth_ids?: string[];
   rpm?: number;
   daily_usd?: number;
   weekly_usd?: number;
@@ -253,9 +256,24 @@ export interface NativeKeyBindingUpdateRequest {
   // Empty/omitted keeps the currently bound top-level API key.
   key?: string;
   group?: string;
+  auth_ids?: string[];
   rpm?: number;
   daily_usd?: number;
   weekly_usd?: number;
+}
+
+// One exact Scheduler auth candidate exposed by CPA's Management API. Direct
+// native-key bindings persist only `id`; the other fields are display hints.
+export interface NativeCredentialOption {
+  id: string;
+  provider: string;
+  name?: string;
+  label?: string;
+  email?: string;
+  status?: string;
+  plan?: string;
+  disabled?: boolean;
+  unavailable?: boolean;
 }
 
 // NativeKeyCatalogEntry correlates one CPA top-level api-keys item with an

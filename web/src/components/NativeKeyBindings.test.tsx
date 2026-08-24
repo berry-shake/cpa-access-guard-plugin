@@ -9,6 +9,7 @@ import { _resetLocale } from "../i18n";
 const apiMocks = vi.hoisted(() => ({
   fetchTopLevelAPIKeys: vi.fn(),
   fetchNativeKeyBindingCatalog: vi.fn(),
+  fetchNativeCredentialOptions: vi.fn(),
   fetchClassifyRules: vi.fn(),
   createNativeKeyBinding: vi.fn(),
   updateNativeKeyBinding: vi.fn(),
@@ -64,6 +65,10 @@ beforeEach(() => {
     { name: "sample-codex-team-plan", field: "plan_type", pattern: "team", group: "codex-premium", enabled: true },
     { name: "sample-antigravity-paid-tier", field: "tier", pattern: "paid", group: "antigravity-paid", enabled: true },
   ] satisfies ClassifyRule[]);
+  apiMocks.fetchNativeCredentialOptions.mockResolvedValue([
+    { id: "tenant/codex-a.json", provider: "codex", label: "Account A", status: "active", plan: "team" },
+    { id: "tenant/codex-b.json", provider: "codex", label: "Account B", status: "active", plan: "plus" },
+  ]);
   apiMocks.createNativeKeyBinding.mockResolvedValue(existing);
   apiMocks.updateNativeKeyBinding.mockResolvedValue(existing);
   apiMocks.deleteNativeKeyBinding.mockResolvedValue(undefined);
@@ -438,6 +443,94 @@ describe("NativeKeyBindingsTab", () => {
       key: secret,
       group: "classify:codex-premium",
     });
+  });
+
+  it("creates a binding from an exact multi-select credential allow-list", async () => {
+    const secret = "sk-direct-top-level-secret-0123456789";
+    apiMocks.fetchTopLevelAPIKeys.mockResolvedValue([secret]);
+    apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValue({
+      entries: [{ key_index: 0, key_preview: "sk-dire...56789" }],
+      orphan_bindings: [],
+    });
+
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<NativeKeyBindingsTab />);
+      await tick();
+    });
+    const bindButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("配置绑定"));
+    await act(async () => {
+      bindButton!.click();
+      await tick();
+    });
+
+    const directMode = container.querySelector('input[name="native-restriction-mode"][value="auth_ids"]') as HTMLInputElement;
+    await act(async () => { directMode.click(); });
+    expect(container.querySelector("#native-binding-group")).toBeNull();
+    const credentialCheckboxes = Array.from(
+      container.querySelectorAll<HTMLInputElement>(".native-credential-option input[type=checkbox]"),
+    );
+    expect(credentialCheckboxes).toHaveLength(2);
+    await act(async () => {
+      credentialCheckboxes[1].click();
+      credentialCheckboxes[0].click();
+    });
+    expect(container.textContent).toContain("已选择 2 个凭证");
+
+    const form = container.querySelector(".native-binding-editor form") as HTMLFormElement;
+    await act(async () => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await tick();
+    });
+
+    expect(apiMocks.createNativeKeyBinding).toHaveBeenCalledWith(expect.objectContaining({
+      id: "native-key-1",
+      enabled: true,
+      key: secret,
+      auth_ids: ["tenant/codex-a.json", "tenant/codex-b.json"],
+    }));
+    const payload = apiMocks.createNativeKeyBinding.mock.calls[0][0];
+    expect(payload).not.toHaveProperty("group");
+  });
+
+  it("preserves selected Auth IDs that are no longer returned by the host", async () => {
+    const directBinding: NativeKeyBinding = {
+      ...existing,
+      group: undefined,
+      auth_ids: ["tenant/missing.json", "tenant/codex-a.json"],
+    };
+    apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValue({
+      entries: [{ key_index: 0, key_preview: directBinding.key_preview, binding: directBinding }],
+      orphan_bindings: [],
+    });
+
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<NativeKeyBindingsTab />);
+      await tick();
+    });
+    expect(container.textContent).toContain("指定 2 个凭证");
+    const editButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("编辑 / 轮换"));
+    await act(async () => {
+      editButton!.click();
+      await tick();
+    });
+    expect(container.textContent).toContain("已保存但当前不存在");
+    expect(container.textContent).toContain("tenant/missing.json");
+
+    const form = container.querySelector(".native-binding-editor form") as HTMLFormElement;
+    await act(async () => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await tick();
+    });
+    expect(apiMocks.updateNativeKeyBinding).toHaveBeenCalledWith(expect.objectContaining({
+      id: "client-a",
+      auth_ids: ["tenant/codex-a.json", "tenant/missing.json"],
+    }));
+    const payload = apiMocks.updateNativeKeyBinding.mock.calls[0][0];
+    expect(payload).not.toHaveProperty("group");
   });
 
   it("preserves an existing group that is not in the suggestion list", async () => {

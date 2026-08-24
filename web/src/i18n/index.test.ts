@@ -55,6 +55,10 @@ describe("translate", () => {
         "mapping.native.defaultScheduling",
         "mapping.native.bindThisKey",
         "mapping.native.selectedKeyHint",
+        "mapping.native.restrictionMode",
+        "mapping.native.directMode",
+        "mapping.native.credentialSelection",
+        "mapping.native.credentialHint",
       ]) {
         expect(translate(key)).not.toBe(key);
       }

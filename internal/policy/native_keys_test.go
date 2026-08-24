@@ -25,6 +25,7 @@ func TestNativeCallerScopeMatchesCPA(t *testing.T) {
 func TestDecodeConfigNormalizesNativeKeyBindings(t *testing.T) {
 	scopeA := strings.Repeat("A", 64)
 	scopeB := strings.Repeat("b", 64)
+	scopeC := strings.Repeat("c", 64)
 	raw := []byte(`
 enabled: true
 native_key_bindings:
@@ -37,12 +38,19 @@ native_key_bindings:
     enabled: false
     caller_scope: "` + scopeB + `"
     group: " TEAM "
+  - id: client-c
+    enabled: true
+    caller_scope: "` + scopeC + `"
+    auth_ids:
+      - " tenant/codex-B.json "
+      - "tenant/codex-A.json"
+      - "tenant/codex-B.json"
 `)
 	cfg, err := DecodeConfig(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.NativeKeyBindings) != 2 {
+	if len(cfg.NativeKeyBindings) != 3 {
 		t.Fatalf("bindings = %+v", cfg.NativeKeyBindings)
 	}
 	a := cfg.NativeKeyBindings[0]
@@ -52,6 +60,11 @@ native_key_bindings:
 	b := cfg.NativeKeyBindings[1]
 	if b.ID != "client-b" || b.Name != "Client B" || b.Group != "team" {
 		t.Fatalf("second binding not normalized: %+v", b)
+	}
+	c := cfg.NativeKeyBindings[2]
+	if c.Group != nativeAuthIDsFailClosedGroup || len(c.AuthIDs) != 2 ||
+		c.AuthIDs[0] != "tenant/codex-A.json" || c.AuthIDs[1] != "tenant/codex-B.json" {
+		t.Fatalf("direct binding not normalized: %+v", c)
 	}
 }
 
@@ -93,6 +106,20 @@ func TestNativeKeyBindingValidation(t *testing.T) {
 			name:     "empty classify suffix",
 			bindings: []NativeKeyBinding{{ID: "a", CallerScope: scopeA, Group: " CLASSIFY:  "}},
 			want:     "classify group suffix is required",
+		},
+		{
+			name: "group and auth ids",
+			bindings: []NativeKeyBinding{{
+				ID: "a", CallerScope: scopeA, Group: "team", AuthIDs: []string{"codex-a.json"},
+			}},
+			want: "group and auth_ids are mutually exclusive",
+		},
+		{
+			name: "blank auth ids",
+			bindings: []NativeKeyBinding{{
+				ID: "a", CallerScope: scopeA, AuthIDs: []string{" ", "\t"},
+			}},
+			want: "group is required",
 		},
 	}
 	for _, tc := range tests {
@@ -236,6 +263,96 @@ func TestNativeKeyBindingCRUDPersistenceAndReload(t *testing.T) {
 func nativeStringPtr(value string) *string { return &value }
 
 func nativeBoolPtr(value bool) *bool { return &value }
+
+func nativeStringsPtr(values ...string) *[]string { return &values }
+
+func TestNativeKeyBindingDirectAuthIDsPersistenceAndModeSwitch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	store := NewStore()
+	if err := store.Configure(Config{Enabled: true, StateFile: path}); err != nil {
+		t.Fatal(err)
+	}
+
+	const secret = "sk-native-direct-secret-0123456789abcdef"
+	created, err := store.CreateNativeKeyBinding(CreateNativeKeyBindingInput{
+		ID:      "direct",
+		Enabled: true,
+		APIKey:  secret,
+		AuthIDs: []string{" tenant/codex-B.json ", "tenant/codex-A.json", "tenant/codex-B.json"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Group != nativeAuthIDsFailClosedGroup || len(created.AuthIDs) != 2 ||
+		created.AuthIDs[0] != "tenant/codex-A.json" || created.AuthIDs[1] != "tenant/codex-B.json" {
+		t.Fatalf("created direct binding = %+v", created)
+	}
+	constraint, ok := store.ResolveNativeKeyConstraint(created.CallerScope, "codex", "gpt")
+	if !ok || constraint.Group != "" || len(constraint.AuthIDs) != 2 {
+		t.Fatalf("direct constraint = %+v, %v", constraint, ok)
+	}
+	if _, okGroup := store.ResolveNativeKeyGroup(created.CallerScope, "codex", "gpt"); okGroup {
+		t.Fatal("direct binding unexpectedly resolved as a group")
+	}
+
+	constraint.AuthIDs[0] = "mutated"
+	snapshot := store.NativeKeyBindingsSnapshot()
+	snapshot[0].AuthIDs[0] = "also-mutated"
+	fresh, ok := store.ResolveNativeKeyConstraint(created.CallerScope, "codex", "gpt")
+	if !ok || fresh.AuthIDs[0] != "tenant/codex-A.json" {
+		t.Fatalf("store leaked mutable auth_ids slice: %+v", fresh)
+	}
+
+	stateRaw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(stateRaw), `"auth_ids"`) || !strings.Contains(string(stateRaw), nativeAuthIDsFailClosedGroup) {
+		t.Fatalf("direct binding state lacks auth_ids or fail-closed group: %s", stateRaw)
+	}
+
+	reloaded := NewStore()
+	if err := reloaded.Configure(Config{Enabled: true, StateFile: path}); err != nil {
+		t.Fatal(err)
+	}
+	if got, okReload := reloaded.ResolveNativeKeyConstraint(created.CallerScope, "", ""); !okReload || len(got.AuthIDs) != 2 {
+		t.Fatalf("reloaded direct constraint = %+v, %v", got, okReload)
+	}
+
+	groupMode, err := reloaded.UpdateNativeKeyBinding("direct", UpdateNativeKeyBindingInput{
+		Group: nativeStringPtr(" TEAM "),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if groupMode.Group != "team" || len(groupMode.AuthIDs) != 0 {
+		t.Fatalf("group mode = %+v", groupMode)
+	}
+
+	directMode, err := reloaded.UpdateNativeKeyBinding("direct", UpdateNativeKeyBindingInput{
+		AuthIDs: nativeStringsPtr("codex-Z.json", "codex-Y.json"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if directMode.Group != nativeAuthIDsFailClosedGroup || len(directMode.AuthIDs) != 2 || directMode.AuthIDs[0] != "codex-Y.json" {
+		t.Fatalf("direct mode = %+v", directMode)
+	}
+
+	if _, errConflict := reloaded.UpdateNativeKeyBinding("direct", UpdateNativeKeyBindingInput{
+		Group: nativeStringPtr("free"), AuthIDs: nativeStringsPtr("codex-X.json"),
+	}); errConflict == nil || !strings.Contains(errConflict.Error(), "mutually exclusive") {
+		t.Fatalf("conflicting restriction error = %v", errConflict)
+	}
+	if _, errEmpty := reloaded.UpdateNativeKeyBinding("direct", UpdateNativeKeyBindingInput{
+		AuthIDs: nativeStringsPtr(),
+	}); errEmpty == nil || !strings.Contains(errEmpty.Error(), "group is required") {
+		t.Fatalf("empty direct restriction error = %v", errEmpty)
+	}
+	if got, okFinal := reloaded.ResolveNativeKeyConstraint(created.CallerScope, "", ""); !okFinal || len(got.AuthIDs) != 2 {
+		t.Fatalf("failed updates changed live constraint: %+v, %v", got, okFinal)
+	}
+}
 
 func TestLegacyStateBootstrapsNativeBindingsOnce(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")

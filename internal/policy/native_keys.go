@@ -12,6 +12,12 @@ import (
 
 const nativeCallerScopeDomain = "cli-proxy-api:caller-scope:v1\x00"
 
+// nativeAuthIDsFailClosedGroup keeps direct-auth bindings fail-closed when an
+// older plugin release ignores the additive auth_ids field. Custom classify
+// groups always carry the "classify:" prefix, while built-in tiers never use
+// this reserved value, so the legacy group-only scheduler cannot match it.
+const nativeAuthIDsFailClosedGroup = "@access-guard/direct-auth-ids"
+
 var (
 	ErrUnknownNativeKeyBinding     = errors.New("unknown native key binding")
 	ErrNativeKeyBindingExists      = errors.New("native key binding already exists")
@@ -19,15 +25,17 @@ var (
 )
 
 // NativeKeyBinding maps the irreversible identity of a CPA built-in API key
-// to one auth-file group. It is an authorization constraint, not an
-// authentication credential: the original API key is intentionally absent.
+// to either one auth-file group or an exact auth-ID allow-list. It is an
+// authorization constraint, not an authentication credential: the original
+// API key is intentionally absent.
 type NativeKeyBinding struct {
-	ID          string `yaml:"id" json:"id"`
-	Name        string `yaml:"name" json:"name"`
-	Enabled     bool   `yaml:"enabled" json:"enabled"`
-	CallerScope string `yaml:"caller_scope" json:"caller_scope"`
-	KeyPreview  string `yaml:"key_preview,omitempty" json:"key_preview,omitempty"`
-	Group       string `yaml:"group" json:"group"`
+	ID          string   `yaml:"id" json:"id"`
+	Name        string   `yaml:"name" json:"name"`
+	Enabled     bool     `yaml:"enabled" json:"enabled"`
+	CallerScope string   `yaml:"caller_scope" json:"caller_scope"`
+	KeyPreview  string   `yaml:"key_preview,omitempty" json:"key_preview,omitempty"`
+	Group       string   `yaml:"group" json:"group"`
+	AuthIDs     []string `yaml:"auth_ids,omitempty" json:"auth_ids,omitempty"`
 	// Optional usage limits, same semantics as the downstream KeyConfig
 	// equivalents: 0 = unlimited. USD usage is priced from the standalone
 	// model-pricing JSON, not alias mappings.
@@ -47,6 +55,7 @@ type CreateNativeKeyBindingInput struct {
 	Enabled   bool     `json:"-" yaml:"-"`
 	APIKey    string   `json:"-" yaml:"-"`
 	Group     string   `json:"-" yaml:"-"`
+	AuthIDs   []string `json:"-" yaml:"-"`
 	RPM       *int     `json:"-" yaml:"-"`
 	DailyUSD  *float64 `json:"-" yaml:"-"`
 	WeeklyUSD *float64 `json:"-" yaml:"-"`
@@ -56,13 +65,14 @@ type CreateNativeKeyBindingInput struct {
 // empty APIKey keeps the existing scope; a non-empty APIKey rotates the
 // binding to that native CPA key without persisting the plaintext.
 type UpdateNativeKeyBindingInput struct {
-	Name      *string  `json:"-" yaml:"-"`
-	Enabled   *bool    `json:"-" yaml:"-"`
-	APIKey    string   `json:"-" yaml:"-"`
-	Group     *string  `json:"-" yaml:"-"`
-	RPM       *int     `json:"-" yaml:"-"`
-	DailyUSD  *float64 `json:"-" yaml:"-"`
-	WeeklyUSD *float64 `json:"-" yaml:"-"`
+	Name      *string   `json:"-" yaml:"-"`
+	Enabled   *bool     `json:"-" yaml:"-"`
+	APIKey    string    `json:"-" yaml:"-"`
+	Group     *string   `json:"-" yaml:"-"`
+	AuthIDs   *[]string `json:"-" yaml:"-"`
+	RPM       *int      `json:"-" yaml:"-"`
+	DailyUSD  *float64  `json:"-" yaml:"-"`
+	WeeklyUSD *float64  `json:"-" yaml:"-"`
 }
 
 // NativeCallerScope mirrors CLIProxyAPI's session.CallerScope exactly. The
@@ -100,6 +110,7 @@ func normalizeNativeKeyBindings(bindings []NativeKeyBinding) error {
 		binding.CallerScope = strings.ToLower(strings.TrimSpace(binding.CallerScope))
 		binding.KeyPreview = strings.TrimSpace(binding.KeyPreview)
 		binding.Group = strings.ToLower(strings.TrimSpace(binding.Group))
+		binding.AuthIDs = normalizeNativeAuthIDs(binding.AuthIDs)
 
 		if binding.ID == "" {
 			return fmt.Errorf("native key binding %d: id is required", i)
@@ -118,10 +129,15 @@ func normalizeNativeKeyBindings(bindings []NativeKeyBinding) error {
 			return fmt.Errorf("native key bindings %q and %q have the same caller_scope", priorID, binding.ID)
 		}
 		scopes[binding.CallerScope] = binding.ID
-		if binding.Group == "" {
-			return fmt.Errorf("native key binding %q: group is required", binding.ID)
+		if len(binding.AuthIDs) > 0 {
+			if binding.Group != "" && binding.Group != nativeAuthIDsFailClosedGroup {
+				return fmt.Errorf("native key binding %q: group and auth_ids are mutually exclusive", binding.ID)
+			}
+			binding.Group = nativeAuthIDsFailClosedGroup
+		} else if binding.Group == "" || binding.Group == nativeAuthIDsFailClosedGroup {
+			return fmt.Errorf("native key binding %q: group is required when auth_ids is empty", binding.ID)
 		}
-		if strings.HasPrefix(binding.Group, ClassifyGroupPrefix) {
+		if len(binding.AuthIDs) == 0 && strings.HasPrefix(binding.Group, ClassifyGroupPrefix) {
 			suffix := strings.TrimSpace(strings.TrimPrefix(binding.Group, ClassifyGroupPrefix))
 			if suffix == "" {
 				return fmt.Errorf("native key binding %q: classify group suffix is required", binding.ID)
@@ -139,6 +155,35 @@ func normalizeNativeKeyBindings(bindings []NativeKeyBinding) error {
 		}
 	}
 	return nil
+}
+
+func normalizeNativeAuthIDs(authIDs []string) []string {
+	if len(authIDs) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(authIDs))
+	normalized := make([]string, 0, len(authIDs))
+	for _, authID := range authIDs {
+		authID = strings.TrimSpace(authID)
+		if authID == "" {
+			continue
+		}
+		if _, exists := seen[authID]; exists {
+			continue
+		}
+		seen[authID] = struct{}{}
+		normalized = append(normalized, authID)
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	sort.Strings(normalized)
+	return normalized
+}
+
+func cloneNativeKeyBinding(binding NativeKeyBinding) NativeKeyBinding {
+	binding.AuthIDs = append([]string(nil), binding.AuthIDs...)
+	return binding
 }
 
 func validateNativeCallerScope(scope string) error {
@@ -174,6 +219,7 @@ func (s *Store) CreateNativeKeyBinding(input CreateNativeKeyBindingInput) (Nativ
 		CallerScope: callerScope,
 		KeyPreview:  NativeKeyPreview(rawAPIKey),
 		Group:       input.Group,
+		AuthIDs:     append([]string(nil), input.AuthIDs...),
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
@@ -222,6 +268,10 @@ func (s *Store) CreateNativeKeyBinding(input CreateNativeKeyBindingInput) (Nativ
 func (s *Store) UpdateNativeKeyBinding(id string, input UpdateNativeKeyBindingInput) (NativeKeyBinding, error) {
 	s.updateMu.Lock()
 	defer s.updateMu.Unlock()
+	if input.Group != nil && input.AuthIDs != nil &&
+		strings.TrimSpace(*input.Group) != "" && len(normalizeNativeAuthIDs(*input.AuthIDs)) > 0 {
+		return NativeKeyBinding{}, errors.New("group and auth_ids are mutually exclusive")
+	}
 
 	id = strings.ToLower(strings.TrimSpace(id))
 	if id == "" {
@@ -255,6 +305,15 @@ func (s *Store) UpdateNativeKeyBinding(id string, input UpdateNativeKeyBindingIn
 	}
 	if input.Group != nil {
 		candidate.Group = *input.Group
+		if strings.TrimSpace(*input.Group) != "" {
+			candidate.AuthIDs = nil
+		}
+	}
+	if input.AuthIDs != nil {
+		candidate.AuthIDs = append([]string(nil), (*input.AuthIDs)...)
+		if len(normalizeNativeAuthIDs(*input.AuthIDs)) > 0 {
+			candidate.Group = ""
+		}
 	}
 	if input.RPM != nil {
 		candidate.RPM = *input.RPM
@@ -338,7 +397,7 @@ func (s *Store) NativeKeyBindingsSnapshot() []NativeKeyBinding {
 func (s *Store) nativeKeyBindingsSnapshotLocked() []NativeKeyBinding {
 	bindings := make([]NativeKeyBinding, 0, len(s.nativeKeyBindings))
 	for _, binding := range s.nativeKeyBindings {
-		bindings = append(bindings, *binding)
+		bindings = append(bindings, cloneNativeKeyBinding(*binding))
 	}
 	sort.Slice(bindings, func(i, j int) bool { return bindings[i].ID < bindings[j].ID })
 	return bindings
@@ -359,31 +418,54 @@ func (s *Store) replaceNativeKeyBindingsLocked(bindings []NativeKeyBinding) {
 	s.nativeKeyBindings = make(map[string]*NativeKeyBinding, len(bindings))
 	s.nativeKeyBindingsByScope = make(map[string]*NativeKeyBinding, len(bindings))
 	for i := range bindings {
-		binding := bindings[i]
+		binding := cloneNativeKeyBinding(bindings[i])
 		s.nativeKeyBindings[binding.ID] = &binding
 		s.nativeKeyBindingsByScope[binding.CallerScope] = &binding
 	}
+}
+
+// NativeKeyConstraint is the single authorization boundary resolved for one
+// enabled native key binding. Exactly one of Group or AuthIDs is populated.
+type NativeKeyConstraint struct {
+	Group   string
+	AuthIDs []string
+}
+
+// ResolveNativeKeyConstraint resolves a CPA-provided caller_scope into either
+// a group or an exact auth-ID allow-list. provider and model remain reserved for
+// future per-route bindings.
+func (s *Store) ResolveNativeKeyConstraint(callerScope, provider, model string) (NativeKeyConstraint, bool) {
+	_ = provider
+	_ = model
+	callerScope = strings.ToLower(strings.TrimSpace(callerScope))
+	if callerScope == "" {
+		return NativeKeyConstraint{}, false
+	}
+	s.mu.RLock()
+	binding := s.nativeKeyBindingsByScope[callerScope]
+	if binding == nil || !binding.Enabled {
+		s.mu.RUnlock()
+		return NativeKeyConstraint{}, false
+	}
+	constraint := NativeKeyConstraint{
+		AuthIDs: append([]string(nil), binding.AuthIDs...),
+	}
+	if len(constraint.AuthIDs) == 0 {
+		constraint.Group = binding.Group
+	}
+	s.mu.RUnlock()
+	return constraint, true
 }
 
 // ResolveNativeKeyGroup resolves a CPA-provided caller_scope into the single
 // scheduler group authorized for that native key. provider and model are
 // reserved for future per-route bindings; the first version intentionally
 // applies one group to every request made by the key. The bool is true only
-// for an existing, enabled binding.
+// for an existing, enabled group-mode binding.
 func (s *Store) ResolveNativeKeyGroup(callerScope, provider, model string) (string, bool) {
-	_ = provider
-	_ = model
-	callerScope = strings.ToLower(strings.TrimSpace(callerScope))
-	if callerScope == "" {
+	constraint, ok := s.ResolveNativeKeyConstraint(callerScope, provider, model)
+	if !ok || len(constraint.AuthIDs) > 0 {
 		return "", false
 	}
-	s.mu.RLock()
-	binding := s.nativeKeyBindingsByScope[callerScope]
-	if binding == nil || !binding.Enabled {
-		s.mu.RUnlock()
-		return "", false
-	}
-	group := binding.Group
-	s.mu.RUnlock()
-	return group, true
+	return constraint.Group, true
 }

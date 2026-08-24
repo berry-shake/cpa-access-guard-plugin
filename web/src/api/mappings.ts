@@ -8,6 +8,7 @@ import type {
   NativeKeyBindingCatalog,
   NativeKeyBindingCreateRequest,
   NativeKeyBindingUpdateRequest,
+  NativeCredentialOption,
 } from "../types";
 import { readPlanType } from "./models";
 
@@ -158,6 +159,54 @@ export async function fetchCredentialDescriptors(): Promise<CredentialDescriptor
     out.push({ id, provider, attributes: attrs });
   }
   return out;
+}
+
+// Fetch exact runtime Auth IDs for direct native-key restrictions. Unlike the
+// classify preview adapter above, this path must never fall back from `id` to a
+// display/file name: the Scheduler compares candidate IDs exactly, and guessing
+// would create a binding that looks valid in the UI but can never match.
+export async function fetchNativeCredentialOptions(): Promise<NativeCredentialOption[]> {
+  const c = apiClient();
+  const { data } = await c.get<unknown>("/v0/management/auth-files");
+  const root = data as Record<string, unknown> | null;
+  const list = root?.["files"] ?? root?.["auth-files"];
+  if (!Array.isArray(list)) return [];
+
+  const byID = new Map<string, NativeCredentialOption>();
+  const optionalString = (value: unknown): string | undefined =>
+    typeof value === "string" && value.trim() ? value.trim() : undefined;
+  for (const item of list) {
+    const entry = (item ?? {}) as Record<string, unknown>;
+    const id = optionalString(entry["id"]);
+    if (!id || byID.has(id)) continue;
+    const provider = (optionalString(entry["provider"]) ?? optionalString(entry["type"]) ?? "").toLowerCase();
+    const tier = optionalString(entry["tier"]);
+    const plan = provider === "codex"
+      ? readPlanType(entry)
+      : provider === "antigravity" && tier
+        ? tier.toLowerCase()
+        : "";
+    byID.set(id, {
+      id,
+      provider,
+      name: optionalString(entry["name"]),
+      label: optionalString(entry["label"]),
+      email: optionalString(entry["email"]),
+      status: optionalString(entry["status"]),
+      plan: plan || undefined,
+      disabled: entry["disabled"] === true,
+      unavailable: entry["unavailable"] === true,
+    });
+  }
+
+  return Array.from(byID.values()).sort((a, b) => {
+    const byProvider = a.provider.localeCompare(b.provider);
+    if (byProvider !== 0) return byProvider;
+    const labelA = a.label ?? a.email ?? a.name ?? a.id;
+    const labelB = b.label ?? b.email ?? b.name ?? b.id;
+    const byLabel = labelA.localeCompare(labelB);
+    return byLabel !== 0 ? byLabel : a.id.localeCompare(b.id);
+  });
 }
 
 // --- CPA top-level API-key binding CRUD ---

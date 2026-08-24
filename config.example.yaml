@@ -76,6 +76,16 @@ plugins:
       #     caller_scope: "0000000000000000000000000000000000000000000000000000000000000000" # synthetic example only
       #     key_preview: "sk-nati...ent-a"
       #     group: "classify:client-a"
+      #   # Direct mode is an alternative to group; do not set both. Values are
+      #   # exact, case-sensitive Scheduler Auth IDs from /management/auth-files.
+      #   - id: "native-client-b"
+      #     name: "Native Client B"
+      #     enabled: true
+      #     caller_scope: "1111111111111111111111111111111111111111111111111111111111111111" # synthetic example only
+      #     key_preview: "sk-nati...ent-b"
+      #     auth_ids:
+      #       - "tenant-b/codex-01.json"
+      #       - "tenant-b/codex-02.json"
 
       # The custom group above should classify the exact Scheduler auth IDs
       # allowed for this native key. Despite the historical field name,

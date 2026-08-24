@@ -130,7 +130,7 @@ func (a *App) registration() Registration {
 				{Name: "state_file", Type: "string", Description: "JSON state file used for access-policy changes made through the Management API."},
 				{Name: "pricing_file", Type: "string", Description: "Standalone model price catalog (USD per 1M tokens). Default: cpa-access-guard-model-pricing.json next to state_file. Relative paths resolve against the CPA process working directory."},
 				{Name: "keys", Type: "array", Description: "Initial downstream API-key access-policy list. State file wins after it exists."},
-				{Name: "native_key_bindings", Type: "array", Description: "Optional caller-scope bindings that constrain CPA-native downstream API keys to credential groups. Requires a Scheduler path carrying caller_scope, Home disabled, no unsupported special route, and quota-exceeded.antigravity-credits=false."},
+				{Name: "native_key_bindings", Type: "array", Description: "Optional caller-scope bindings that constrain CPA-native downstream API keys to a credential group or exact auth IDs. Requires a Scheduler path carrying caller_scope, Home disabled, no unsupported special route, and quota-exceeded.antigravity-credits=false."},
 				{Name: "pricing_sync", Type: "object", Description: "models.dev catalog refresh. Always on. Optional {interval_hours: int, url: string}."},
 			},
 		},
@@ -299,10 +299,11 @@ func (a *App) interceptResponse(raw []byte) ([]byte, error) {
 // routed ModelRule had a Group (codex plan_type / antigravity tier), restrict
 // candidate auths to those whose Attributes carry a matching identity. For a
 // request authenticated by CPA's native config-api-key provider, a persisted
-// caller_scope binding can supply the group instead. A matching native-key
-// binding always wins over generic group metadata: caller_scope is the stable
-// identity CPA derives after authentication, while group has no provider
-// provenance in the Scheduler ABI and must not be able to weaken a binding.
+// caller_scope binding can supply either a group or an exact auth-ID allow-list.
+// A matching native-key binding always wins over generic group metadata:
+// caller_scope is the stable identity CPA derives after authentication, while
+// group has no provider provenance in the Scheduler ABI and must not be able to
+// weaken a binding.
 //
 // The plugin never sees the downstream ModelRule directly here; the group was
 // stamped into request metadata by authenticate(), and the host forwards it as
@@ -332,6 +333,7 @@ func (a *App) pickScheduler(raw []byte) ([]byte, error) {
 		return OKEnvelope(SchedulerPickResponse{Handled: false})
 	}
 	group := ""
+	var authIDs []string
 	nativeBinding := false
 	// Native CPA keys are authenticated before scheduler.pick. CPA forwards
 	// their stable (hashed) identity as caller_scope, allowing the policy store
@@ -354,15 +356,19 @@ func (a *App) pickScheduler(raw []byte) ([]byte, error) {
 			code, message := nativeQuotaError(decision, req.Model)
 			return ErrorEnvelope(code, message, http.StatusTooManyRequests), nil
 		}
-		group, nativeBinding = a.store.ResolveNativeKeyGroup(callerScope, req.Provider, req.Model)
-		group = strings.ToLower(strings.TrimSpace(group))
+		constraint, resolved := a.store.ResolveNativeKeyConstraint(callerScope, req.Provider, req.Model)
+		nativeBinding = resolved
+		if nativeBinding {
+			group = strings.ToLower(strings.TrimSpace(constraint.Group))
+			authIDs = constraint.AuthIDs
+		}
 	}
 	if nativeBinding {
-		if group == "" {
-			// The store normally rejects empty groups during configuration. Keep
-			// this guard fail-closed in case a future state migration or Store
+		if group == "" && len(authIDs) == 0 {
+			// The store normally rejects empty restrictions during configuration.
+			// Keep this guard fail-closed in case a future migration or Store
 			// implementation violates that invariant.
-			return ErrorEnvelope("auth_not_found", "native key binding has no credential group", http.StatusServiceUnavailable), nil
+			return ErrorEnvelope("auth_not_found", "native key binding has no credential restriction", http.StatusServiceUnavailable), nil
 		}
 	} else {
 		group = schedulerGroupFromMetadata(req.Options.Metadata)
@@ -381,12 +387,20 @@ func (a *App) pickScheduler(raw []byte) ([]byte, error) {
 		return OKEnvelope(SchedulerPickResponse{Handled: false})
 	}
 
+	allowedAuthIDs := make(map[string]struct{}, len(authIDs))
+	for _, authID := range authIDs {
+		allowedAuthIDs[authID] = struct{}{}
+	}
 	matched := make([]SchedulerAuthCandidate, 0, len(req.Candidates))
 	for _, cand := range req.Candidates {
 		if !schedulerCandidateUsable(cand.Status) {
 			continue
 		}
-		if a.candidateMatchesGroup(cand, group) {
+		if len(allowedAuthIDs) > 0 {
+			if _, allowed := allowedAuthIDs[cand.ID]; allowed {
+				matched = append(matched, cand)
+			}
+		} else if a.candidateMatchesGroup(cand, group) {
 			matched = append(matched, cand)
 		}
 	}
@@ -629,8 +643,8 @@ func (a *App) managementRegistration() ManagementRegistrationResponse {
 			{Method: http.MethodPost, Path: base + "/keys/reset-rpm", Description: "Reset one downstream CPA key RPM counter by id."},
 			{Method: http.MethodGet, Path: base + "/keys/usage", Description: "Per-alias usage breakdown for one downstream CPA key by id."},
 			{Method: http.MethodGet, Path: base + "/status", Description: "Show Access Guard runtime status."},
-			{Method: http.MethodGet, Path: base + "/native-key-bindings", Description: "List CPA-native downstream API-key auth-file bindings."},
-			{Method: http.MethodPost, Path: base + "/native-key-bindings", Description: "Bind one CPA-native downstream API key to an auth-file group."},
+			{Method: http.MethodGet, Path: base + "/native-key-bindings", Description: "List CPA-native downstream API-key auth-file restrictions."},
+			{Method: http.MethodPost, Path: base + "/native-key-bindings", Description: "Bind one CPA-native downstream API key to an auth-file group or exact auth IDs."},
 			{Method: http.MethodPatch, Path: base + "/native-key-bindings", Description: "Update, rotate, enable, or disable one CPA-native key binding."},
 			{Method: http.MethodDelete, Path: base + "/native-key-bindings", Description: "Delete one CPA-native key binding by id."},
 			{Method: http.MethodPost, Path: base + "/native-key-bindings/catalog", Description: "Match CPA-native downstream API keys to current bindings without returning secrets."},

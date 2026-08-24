@@ -149,14 +149,14 @@ Native-key bindings are deliberately separate from plugin-owned downstream keys:
 | Key type | Authentication owner | What this plugin enforces |
 |----------|----------------------|---------------------------|
 | Plugin key (`cpa_…` or a plugin-owned custom `sk-…`) | `access-guard` | model/alias policy, RPM, budgets, billing, and optional credential group |
-| CPA top-level `api-keys` entry | CPA's built-in config API-key provider | **auth-file group only**; no automatic model/RPM/budget policy |
+| CPA top-level `api-keys` entry | CPA's built-in config API-key provider | auth-file group or exact Auth ID allow-list, plus optional RPM/USD limits; no automatic model policy |
 
-After CPA authenticates a native key, it derives a stable one-way `caller_scope`. The plugin persists only that scope, a redacted preview, and the target group — never the plaintext top-level key:
+After CPA authenticates a native key, it derives a stable one-way `caller_scope`. The plugin persists only that scope, a redacted preview, and the credential restriction — never the plaintext top-level key:
 
 ```text
 top-level api-key → CPA native auth → caller_scope
-                  → native binding → classify group
-                  → pick only an auth ID in that group
+                  → native binding → group or auth_ids
+                  → pick only within the allowed credentials
 ```
 
 Requirements and behavior:
@@ -165,8 +165,8 @@ Requirements and behavior:
 - The Web UI loads the current top-level list from CPA's Management-key-protected `GET /v0/management/api-keys` endpoint and shows every key as a redacted row, including keys with no binding. A binding whose key was removed from the host remains visible as an orphan record.
 - Selecting an unbound row avoids manual copy/paste. The plaintext stays in page memory, is sent only in Management-authenticated JSON request bodies for exact scope matching and binding creation, and is never rendered, placed in a URL, stored in browser storage, persisted, or returned by plugin APIs.
 - The key must remain in CPA's top-level `api-keys`; a binding is authorization metadata, not authentication.
-- A bound, enabled key with no usable candidate in its group fails closed with `auth_not_found` (503). It never falls back outside the group.
-- When a caller scope matches an enabled native binding, that binding takes precedence over generic Scheduler `group` metadata.
+- A bound, enabled key with no usable candidate in its group or direct allow-list fails closed with `auth_not_found` (503). It never falls back outside the restriction.
+- When a caller scope matches an enabled native binding, its group / `auth_ids` restriction takes precedence over generic Scheduler `group` metadata.
 - Unbound native keys and disabled bindings keep CPA's existing unrestricted scheduling behavior.
 - Top-level config and plugin state are not updated atomically. For a strict-isolation rotation, create a second temporary binding for the new key, add and test that key in CPA, remove the old top-level key, and only then delete the old binding.
 - Use a high-entropy native key and do not reuse the same plaintext as a plugin-owned key or another authentication principal. CPA's `caller_scope` identifies the principal text, but does not include the authentication-provider name.
@@ -179,7 +179,14 @@ Requirements and behavior:
 
 For normal operation, create bindings through this plugin's Management API or Web UI. A first-boot YAML seed necessarily contains `caller_scope`; CPA's generic, Management-key-protected plugin-config endpoint can return that YAML field. The dedicated native-binding list API and UI never return it.
 
-Bindings use the same group syntax as alias targets: built-ins such as `free`, `team`, `plus`, or `supported`, and `classify:<name>` for custom groups. For an exact file allow-list, create an anchored `filename` classify rule first. Despite that historical field name, it matches the Scheduler **auth ID**, which may include a relative directory and may differ from the UI display name.
+Each binding must use exactly one credential restriction:
+
+- **Credential group** uses the same syntax as alias targets: built-ins such as `free`, `team`, `plus`, or `supported`, and `classify:<name>` for custom groups. It is best for a dynamically maintained pool shared by multiple keys.
+- **Direct credentials** persist one or more exact, case-sensitive Scheduler Auth IDs without creating a classify rule. This is best for a small per-key allow-list. Selection is an allow-list, not a round-robin order, and new credentials are not added automatically.
+
+The Web UI reads live IDs from CPA's `/v0/management/auth-files` response and never guesses from a display filename. If a credential is removed, renamed, or moved, its saved ID remains visible as missing so unrelated edits cannot silently change authorization. If every ID is stale, requests fail closed. Group mode can still use an anchored `filename` classify rule; despite that historical field name, it also matches the Scheduler **auth ID**, which may include a relative directory and may differ from the UI display name.
+
+Direct mode also persists an internal reserved group so a legacy plugin that ignores the additive `auth_ids` field fails closed. The dedicated Management API and Web UI hide that internal value. Still back up `state_file` and preferably convert direct bindings to group mode before downgrading; the general default-scheduling risk when the plugin is disabled, unloaded, or fails to load remains unchanged.
 
 ### OpenAI-compatibility providers
 
@@ -193,7 +200,7 @@ Channels under CPA `openai-compatibility` (e.g. a named proxy) use the **channel
 |------|------|
 | Frontend auth | Know plugin keys; enforce alias allow-list, RPM, budget; stamp route + group metadata |
 | Model router | Alias → provider + target model |
-| Scheduler | When `group` is set, filter auth candidates by tier / `classify:` group |
+| Scheduler | Filter auth candidates by tier / `classify:` group or exact `auth_ids` allow-list |
 | Response interceptor | Non-stream JSON: rewrite top-level `model` back to the alias |
 | Usage | Token / per-call billing into the state file |
 | Management API + embedded Web UI | Keys, native-key bindings, aliases, classify rules, status |
@@ -331,6 +338,24 @@ curl -X POST "$CPA/v0/management/plugins/access-guard/native-key-bindings" \
   }'
 ```
 
+For direct credentials, send `auth_ids` instead of `group`:
+
+```bash
+curl -X POST "$CPA/v0/management/plugins/access-guard/native-key-bindings" \
+  -H "Authorization: Bearer $MANAGEMENT_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "client-b-native",
+    "name": "Client B",
+    "key": "sk-replace-with-an-existing-top-level-api-key",
+    "enabled": true,
+    "auth_ids": [
+      "tenant-b/codex-01.json",
+      "tenant-b/codex-02.json"
+    ]
+  }'
+```
+
 Rotate the key or change the binding:
 
 ```bash
@@ -345,11 +370,11 @@ curl -X PATCH "$CPA/v0/management/plugins/access-guard/native-key-bindings" \
   }'
 ```
 
-Omit `key` (or send an empty string) in PATCH to keep the existing scope. Directly replacing `key` changes the bound scope immediately and is not atomic with CPA's top-level configuration. For strict isolation, use this safe sequence instead:
+Omit `key` (or send an empty string) in PATCH to keep the existing scope. A non-empty `auth_ids` atomically switches to direct mode and clears the business group; a non-empty `group` switches back and clears `auth_ids`; sending both non-empty returns `400`. Directly replacing `key` changes the bound scope immediately and is not atomic with CPA's top-level configuration. For strict isolation, use this safe sequence instead:
 
-1. Create a second temporary binding for the new key and the same group.
+1. Create a second temporary binding for the new key and the same group / `auth_ids` restriction.
 2. Add the new key to CPA's top-level `api-keys`.
-3. Send a real request with the new key and verify the selected `auth_id` belongs to the group.
+3. Send a real request with the new key and verify the selected `auth_id` belongs to the restriction.
 4. Remove the old key from CPA's top-level `api-keys`.
 5. Delete the old binding.
 

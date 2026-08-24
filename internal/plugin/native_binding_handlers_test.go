@@ -158,6 +158,85 @@ func TestNativeKeyBindingManagementCRUDDoesNotExposeSecretOrScope(t *testing.T) 
 	}
 }
 
+func TestNativeKeyBindingManagementDirectAuthIDsAndModeSwitch(t *testing.T) {
+	app, statePath := configureNativeBindingManagementApp(t)
+	const (
+		basePath = "/v0/management/plugins/access-guard/native-key-bindings"
+		secret   = "sk-native-direct-management-secret-0123456789"
+	)
+
+	created := nativeBindingManagementCall(t, app, http.MethodPost, basePath, nil, map[string]any{
+		"id": "direct", "key": secret,
+		"auth_ids": []string{" tenant/codex-B.json ", "tenant/codex-A.json", "tenant/codex-B.json"},
+	})
+	if created.StatusCode != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", created.StatusCode, created.Body)
+	}
+	assertNativeBindingResponseIsRedacted(t, created.Body, secret)
+	var createPayload struct {
+		Binding publicNativeKeyBinding `json:"binding"`
+	}
+	if err := json.Unmarshal(created.Body, &createPayload); err != nil {
+		t.Fatal(err)
+	}
+	if createPayload.Binding.Group != "" || len(createPayload.Binding.AuthIDs) != 2 ||
+		createPayload.Binding.AuthIDs[0] != "tenant/codex-A.json" ||
+		bytes.Contains(created.Body, []byte("@access-guard/direct-auth-ids")) {
+		t.Fatalf("public direct binding=%+v body=%s", createPayload.Binding, created.Body)
+	}
+
+	state, err := policy.LoadState(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.NativeKeyBindings) != 1 || len(state.NativeKeyBindings[0].AuthIDs) != 2 || state.NativeKeyBindings[0].Group == "" {
+		t.Fatalf("persisted direct binding=%+v", state.NativeKeyBindings)
+	}
+
+	groupMode := nativeBindingManagementCall(t, app, http.MethodPatch, basePath, nil, map[string]any{
+		"id": "direct", "group": "team",
+	})
+	if groupMode.StatusCode != http.StatusOK {
+		t.Fatalf("group switch status=%d body=%s", groupMode.StatusCode, groupMode.Body)
+	}
+	var groupPayload struct {
+		Binding publicNativeKeyBinding `json:"binding"`
+	}
+	if err := json.Unmarshal(groupMode.Body, &groupPayload); err != nil {
+		t.Fatal(err)
+	}
+	if groupPayload.Binding.Group != "team" || len(groupPayload.Binding.AuthIDs) != 0 {
+		t.Fatalf("group switch binding=%+v", groupPayload.Binding)
+	}
+
+	directMode := nativeBindingManagementCall(t, app, http.MethodPatch, basePath, nil, map[string]any{
+		"id": "direct", "auth_ids": []string{"codex-only.json"},
+	})
+	if directMode.StatusCode != http.StatusOK {
+		t.Fatalf("direct switch status=%d body=%s", directMode.StatusCode, directMode.Body)
+	}
+	var directPayload struct {
+		Binding publicNativeKeyBinding `json:"binding"`
+	}
+	if err := json.Unmarshal(directMode.Body, &directPayload); err != nil {
+		t.Fatal(err)
+	}
+	if directPayload.Binding.Group != "" || len(directPayload.Binding.AuthIDs) != 1 || directPayload.Binding.AuthIDs[0] != "codex-only.json" {
+		t.Fatalf("direct switch binding=%+v", directPayload.Binding)
+	}
+
+	conflict := nativeBindingManagementCall(t, app, http.MethodPatch, basePath, nil, map[string]any{
+		"id": "direct", "group": "free", "auth_ids": []string{"codex-conflict.json"},
+	})
+	if conflict.StatusCode != http.StatusBadRequest || !bytes.Contains(conflict.Body, []byte("mutually exclusive")) {
+		t.Fatalf("conflicting switch status=%d body=%s", conflict.StatusCode, conflict.Body)
+	}
+	listed := nativeBindingManagementCall(t, app, http.MethodGet, basePath, nil, nil)
+	if !bytes.Contains(listed.Body, []byte("codex-only.json")) || bytes.Contains(listed.Body, []byte("codex-conflict.json")) {
+		t.Fatalf("conflicting patch changed live binding: %s", listed.Body)
+	}
+}
+
 func TestNativeKeyBindingCatalogMatchesScopesAndRedactsSecrets(t *testing.T) {
 	app, statePath := configureNativeBindingManagementApp(t)
 	const (

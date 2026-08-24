@@ -15,14 +15,15 @@ import (
 // persisted. Pointer fields let PATCH distinguish an omitted field from a
 // deliberate false/empty value.
 type nativeKeyBindingWriteRequest struct {
-	ID        string   `json:"id"`
-	Name      *string  `json:"name,omitempty"`
-	Enabled   *bool    `json:"enabled,omitempty"`
-	Key       string   `json:"key,omitempty"`
-	Group     *string  `json:"group,omitempty"`
-	RPM       *int     `json:"rpm,omitempty"`
-	DailyUSD  *float64 `json:"daily_usd,omitempty"`
-	WeeklyUSD *float64 `json:"weekly_usd,omitempty"`
+	ID        string    `json:"id"`
+	Name      *string   `json:"name,omitempty"`
+	Enabled   *bool     `json:"enabled,omitempty"`
+	Key       string    `json:"key,omitempty"`
+	Group     *string   `json:"group,omitempty"`
+	AuthIDs   *[]string `json:"auth_ids,omitempty"`
+	RPM       *int      `json:"rpm,omitempty"`
+	DailyUSD  *float64  `json:"daily_usd,omitempty"`
+	WeeklyUSD *float64  `json:"weekly_usd,omitempty"`
 }
 
 // publicNativeKeyBinding deliberately omits CallerScope. Although the scope is
@@ -33,7 +34,8 @@ type publicNativeKeyBinding struct {
 	Name       string                            `json:"name"`
 	Enabled    bool                              `json:"enabled"`
 	KeyPreview string                            `json:"key_preview"`
-	Group      string                            `json:"group"`
+	Group      string                            `json:"group,omitempty"`
+	AuthIDs    []string                          `json:"auth_ids,omitempty"`
 	RPM        int                               `json:"rpm,omitempty"`
 	DailyUSD   float64                           `json:"daily_usd,omitempty"`
 	WeeklyUSD  float64                           `json:"weekly_usd,omitempty"`
@@ -136,8 +138,16 @@ func (a *App) createNativeKeyBinding(body []byte) ManagementResponse {
 	if req.Group != nil {
 		group = strings.TrimSpace(*req.Group)
 	}
-	if group == "" {
-		return jsonError(http.StatusBadRequest, "missing_group", "group is required")
+	authIDs := []string(nil)
+	if req.AuthIDs != nil {
+		authIDs = append(authIDs, (*req.AuthIDs)...)
+	}
+	hasAuthIDs := nativeAuthIDsPresent(authIDs)
+	if group == "" && !hasAuthIDs {
+		return jsonError(http.StatusBadRequest, "missing_restriction", "group or auth_ids is required")
+	}
+	if group != "" && hasAuthIDs {
+		return jsonError(http.StatusBadRequest, "conflicting_restriction", "group and auth_ids are mutually exclusive")
 	}
 	name := req.ID
 	if req.Name != nil && strings.TrimSpace(*req.Name) != "" {
@@ -149,6 +159,7 @@ func (a *App) createNativeKeyBinding(body []byte) ManagementResponse {
 		Enabled:   applyBool(req.Enabled, true),
 		APIKey:    key,
 		Group:     group,
+		AuthIDs:   authIDs,
 		RPM:       req.RPM,
 		DailyUSD:  req.DailyUSD,
 		WeeklyUSD: req.WeeklyUSD,
@@ -176,6 +187,7 @@ func (a *App) patchNativeKeyBinding(body []byte) ManagementResponse {
 		Enabled:   req.Enabled,
 		APIKey:    strings.TrimSpace(req.Key),
 		Group:     trimmedOptionalString(req.Group),
+		AuthIDs:   req.AuthIDs,
 		RPM:       req.RPM,
 		DailyUSD:  req.DailyUSD,
 		WeeklyUSD: req.WeeklyUSD,
@@ -233,6 +245,15 @@ func trimmedOptionalString(value *string) *string {
 	return &trimmed
 }
 
+func nativeAuthIDsPresent(authIDs []string) bool {
+	for _, authID := range authIDs {
+		if strings.TrimSpace(authID) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func publicNativeKeyBindingFromPolicy(binding policy.NativeKeyBinding) publicNativeKeyBinding {
 	return publicNativeKeyBindingFromPolicyWithUsage(binding, nil)
 }
@@ -251,11 +272,15 @@ func publicNativeKeyBindingFromPolicyWithUsage(binding policy.NativeKeyBinding, 
 		Name:       binding.Name,
 		Enabled:    binding.Enabled,
 		KeyPreview: binding.KeyPreview,
-		Group:      binding.Group,
 		RPM:        binding.RPM,
 		DailyUSD:   binding.DailyUSD,
 		WeeklyUSD:  binding.WeeklyUSD,
 		Usage:      usage,
+	}
+	if len(binding.AuthIDs) > 0 {
+		out.AuthIDs = append([]string(nil), binding.AuthIDs...)
+	} else {
+		out.Group = binding.Group
 	}
 	if !binding.CreatedAt.IsZero() {
 		out.CreatedAt = binding.CreatedAt.UTC().Format(time.RFC3339)
