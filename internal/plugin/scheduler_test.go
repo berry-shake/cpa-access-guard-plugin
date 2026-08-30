@@ -184,6 +184,35 @@ func TestSchedulerPickDirectNativeBindingFiltersExactAuthIDs(t *testing.T) {
 	}
 }
 
+func TestSchedulerPickDirectNativeBindingAllowsRecoveredErrorStatus(t *testing.T) {
+	app := configureDirectNativeBindingSchedulerApp(t, "tenant/codex-a.json")
+	req, _ := json.Marshal(SchedulerPickRequest{
+		Provider: "codex",
+		Model:    "gpt-5.5",
+		Options: SchedulerPickOptions{Metadata: map[string]any{
+			SchedulerCallerScopeMetadataKey: testNativeCallerScope,
+		}},
+		Candidates: []SchedulerAuthCandidate{
+			{
+				ID:       "tenant/codex-a.json",
+				Provider: "codex",
+				Status:   "error",
+			},
+		},
+	})
+	raw, err := app.HandleMethod(MethodSchedulerPick, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resp SchedulerPickResponse
+	if err := unmarshalOK(raw, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Handled || resp.AuthID != "tenant/codex-a.json" {
+		t.Fatalf("recovered host-eligible credential was rejected: %+v", resp)
+	}
+}
+
 func TestSchedulerPickNativeBindingTakesPriorityOverExplicitGroup(t *testing.T) {
 	app := configureNativeBindingSchedulerApp(t, true)
 	req, _ := json.Marshal(SchedulerPickRequest{

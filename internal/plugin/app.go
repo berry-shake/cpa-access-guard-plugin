@@ -427,8 +427,13 @@ func (a *App) pickScheduler(raw []byte) ([]byte, error) {
 func schedulerCandidateUsable(status string) bool {
 	status = strings.ToLower(strings.TrimSpace(status))
 	status = strings.NewReplacer("-", "_", " ", "_").Replace(status)
+	// CPA filters scheduler candidates by effective model availability before
+	// invoking the plugin. An expired cooldown is therefore offered again, but
+	// the auth lifecycle status remains "error" until that credential completes
+	// a successful request. Rejecting "error" here would prevent that recovery
+	// request forever and turn an expired cooldown into a permanent 503.
 	switch status {
-	case "disabled", "error", "expired", "revoked", "invalid", "unavailable", "cooldown", "cooling_down", "quota_exhausted", "exhausted", "blocked":
+	case "disabled", "expired", "revoked", "invalid", "unavailable", "cooldown", "cooling_down", "quota_exhausted", "exhausted", "blocked":
 		return false
 	default:
 		return true
