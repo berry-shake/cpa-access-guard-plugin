@@ -6,6 +6,8 @@ import type { CatalogModel, NativeAllowedModel, NativeModelAccessPolicy } from "
 interface Props {
   value: NativeModelAccessPolicy;
   disabled?: boolean;
+  catalogOverride?: CatalogModel[];
+  onRefreshOverride?: () => void | Promise<void>;
   onChange: (value: NativeModelAccessPolicy) => void;
 }
 
@@ -55,7 +57,13 @@ export function buildNativeModelGroups(catalog: CatalogModel[]): NativeModelGrou
   })).sort((a, b) => a.provider.localeCompare(b.provider));
 }
 
-export default function NativeModelAccessPicker({ value, disabled = false, onChange }: Props) {
+export default function NativeModelAccessPicker({
+  value,
+  disabled = false,
+  catalogOverride,
+  onRefreshOverride,
+  onChange,
+}: Props) {
   const t = useT();
   const [catalog, setCatalog] = useState<CatalogModel[]>([]);
   const [loading, setLoading] = useState(value.mode === "allowlist");
@@ -65,6 +73,12 @@ export default function NativeModelAccessPicker({ value, disabled = false, onCha
 
   useEffect(() => {
     if (value.mode !== "allowlist") {
+      setLoading(false);
+      return;
+    }
+    if (catalogOverride !== undefined) {
+      setCatalog(catalogOverride);
+      setError("");
       setLoading(false);
       return;
     }
@@ -90,7 +104,7 @@ export default function NativeModelAccessPicker({ value, disabled = false, onCha
     // Reload only when entering allow-list mode or explicitly refreshing. A
     // checkbox toggle must not refetch the whole CPA model catalog.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value.mode, reload]);
+  }, [value.mode, reload, catalogOverride]);
 
   const groups = useMemo(() => buildNativeModelGroups(catalog), [catalog]);
   const selectedModels = useMemo(() => normalizedModels(value.models), [value.models]);
@@ -186,7 +200,10 @@ export default function NativeModelAccessPicker({ value, disabled = false, onCha
               className="btn sm"
               type="button"
               disabled={disabled || loading}
-              onClick={() => setReload((current) => current + 1)}
+              onClick={() => {
+                if (onRefreshOverride) void onRefreshOverride();
+                else setReload((current) => current + 1);
+              }}
             >
               {t("mapping.native.refreshModels")}
             </button>

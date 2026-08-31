@@ -59,6 +59,9 @@ describe("translate", () => {
         "mapping.native.directMode",
         "mapping.native.credentialSelection",
         "mapping.native.credentialHint",
+        "mapping.native.authFileCredentials",
+        "mapping.native.aiProviderCredentials",
+        "mapping.native.selectAllCredentials",
       ]) {
         expect(translate(key)).not.toBe(key);
       }

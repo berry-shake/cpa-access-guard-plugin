@@ -69,8 +69,17 @@ beforeEach(() => {
     { name: "sample-antigravity-paid-tier", field: "tier", pattern: "paid", group: "antigravity-paid", enabled: true },
   ] satisfies ClassifyRule[]);
   apiMocks.fetchNativeCredentialOptions.mockResolvedValue([
-    { id: "tenant/codex-a.json", provider: "codex", label: "Account A", status: "active", plan: "team" },
-    { id: "tenant/codex-b.json", provider: "codex", label: "Account B", status: "active", plan: "plus" },
+    { id: "tenant/codex-a.json", provider: "codex", label: "Account A", status: "active", plan: "team", source: "auth_file" },
+    {
+      id: "tenant/codex-b.json",
+      provider: "codex",
+      name: "Codex #1",
+      label: "Codex",
+      status: "configured",
+      source: "ai_provider",
+      authIndex: "index-12345678",
+      models: ["gpt-5.6-luna", "gpt-5.5"],
+    },
   ]);
   modelMocks.fetchCatalog.mockResolvedValue([
     { provider: "codex", group: "team", model: "gpt-5.6-luna" },
@@ -530,9 +539,13 @@ describe("NativeKeyBindingsTab", () => {
       container.querySelectorAll<HTMLInputElement>(".native-credential-option input[type=checkbox]"),
     );
     expect(credentialCheckboxes).toHaveLength(2);
+    expect(container.textContent).toContain("Auth 目录凭证");
+    expect(container.textContent).toContain("AI 提供商凭证");
+    expect(container.textContent).toContain("2 个模型");
+    const selectAll = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("全选当前结果"));
     await act(async () => {
-      credentialCheckboxes[1].click();
-      credentialCheckboxes[0].click();
+      selectAll!.click();
     });
     expect(container.textContent).toContain("已选择 2 个凭证");
 

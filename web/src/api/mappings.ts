@@ -11,6 +11,7 @@ import type {
   NativeCredentialOption,
 } from "../types";
 import { readPlanType } from "./models";
+import { fetchAIProviderCredentials } from "./aiProviderCredentials";
 
 // --- Alias mapping CRUD ---
 
@@ -132,9 +133,9 @@ export async function fetchCredentialDescriptors(): Promise<CredentialDescriptor
   const { data } = await c.get<unknown>("/v0/management/auth-files");
   const root = data as Record<string, unknown> | null;
   const list = root?.["files"] ?? root?.["auth-files"];
-  if (!Array.isArray(list)) return [];
+  const items = Array.isArray(list) ? list : [];
   const out: CredentialDescriptor[] = [];
-  for (const item of list) {
+  for (const item of items) {
     const o = (item ?? {}) as Record<string, unknown>;
     const id = ((o["id"] as string) ?? (o["name"] as string) ?? "").trim();
     if (!id) continue;
@@ -165,17 +166,36 @@ export async function fetchCredentialDescriptors(): Promise<CredentialDescriptor
 // classify preview adapter above, this path must never fall back from `id` to a
 // display/file name: the Scheduler compares candidate IDs exactly, and guessing
 // would create a binding that looks valid in the UI but can never match.
+function credentialModelIDs(payload: unknown): string[] {
+  const root = payload as Record<string, unknown> | null;
+  const raw = root?.["models"];
+  if (!Array.isArray(raw)) return [];
+  const unique = new Map<string, string>();
+  for (const item of raw) {
+    const model = (item ?? {}) as Record<string, unknown>;
+    const value = [model["id"], model["model"], model["name"]]
+      .find((candidate) => typeof candidate === "string" && candidate.trim());
+    if (typeof value !== "string") continue;
+    const id = value.trim();
+    if (!unique.has(id.toLowerCase())) unique.set(id.toLowerCase(), id);
+  }
+  return Array.from(unique.values()).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+}
+
 export async function fetchNativeCredentialOptions(): Promise<NativeCredentialOption[]> {
   const c = apiClient();
-  const { data } = await c.get<unknown>("/v0/management/auth-files");
+  const [{ data }, aiProviderCredentials] = await Promise.all([
+    c.get<unknown>("/v0/management/auth-files"),
+    fetchAIProviderCredentials(c),
+  ]);
   const root = data as Record<string, unknown> | null;
   const list = root?.["files"] ?? root?.["auth-files"];
-  if (!Array.isArray(list)) return [];
+  const items = Array.isArray(list) ? list : [];
 
   const byID = new Map<string, NativeCredentialOption>();
   const optionalString = (value: unknown): string | undefined =>
     typeof value === "string" && value.trim() ? value.trim() : undefined;
-  for (const item of list) {
+  for (const item of items) {
     const entry = (item ?? {}) as Record<string, unknown>;
     const id = optionalString(entry["id"]);
     if (!id || byID.has(id)) continue;
@@ -196,10 +216,38 @@ export async function fetchNativeCredentialOptions(): Promise<NativeCredentialOp
       plan: plan || undefined,
       disabled: entry["disabled"] === true,
       unavailable: entry["unavailable"] === true,
+      source: "auth_file",
     });
   }
 
+  const authFileCredentials = Array.from(byID.values());
+  let modelCursor = 0;
+  await Promise.all(Array.from({ length: Math.min(6, authFileCredentials.length) }, async () => {
+    for (;;) {
+      const index = modelCursor++;
+      if (index >= authFileCredentials.length) return;
+      const credential = authFileCredentials[index];
+      try {
+        const { data: modelData } = await c.get<unknown>("/v0/management/auth-files/models", {
+          params: { name: credential.id },
+        });
+        credential.models = credentialModelIDs(modelData);
+      } catch {
+        // This model list is display metadata. Runtime enforcement still uses
+        // the exact Auth ID, so a temporary catalog error must not widen access.
+      }
+    }
+  }));
+
+  for (const credential of aiProviderCredentials) {
+    if (!credential.id || byID.has(credential.id)) continue;
+    byID.set(credential.id, credential);
+  }
+
   return Array.from(byID.values()).sort((a, b) => {
+    const sourceA = a.source === "ai_provider" ? 1 : 0;
+    const sourceB = b.source === "ai_provider" ? 1 : 0;
+    if (sourceA !== sourceB) return sourceA - sourceB;
     const byProvider = a.provider.localeCompare(b.provider);
     if (byProvider !== 0) return byProvider;
     const labelA = a.label ?? a.email ?? a.name ?? a.id;

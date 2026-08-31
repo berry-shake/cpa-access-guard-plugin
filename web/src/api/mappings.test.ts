@@ -75,6 +75,7 @@ describe("native key binding API", () => {
         plan: "pro",
         disabled: true,
         unavailable: false,
+        source: "auth_file",
       },
       {
         id: "tenant/codex-b.json",
@@ -86,6 +87,7 @@ describe("native key binding API", () => {
         plan: "team",
         disabled: false,
         unavailable: false,
+        source: "auth_file",
       },
     ]);
     expect(mocks.get).toHaveBeenCalledWith("/v0/management/auth-files");

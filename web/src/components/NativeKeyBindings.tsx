@@ -524,6 +524,18 @@ function NativeKeyBindingEditor({
     () => authIDs.filter((authID) => !credentialOptionsByID.has(authID)),
     [authIDs, credentialOptionsByID],
   );
+  const directCredentialModelCatalog = useMemo(() => {
+    if (restrictionMode !== "auth_ids") return undefined;
+    const rows: Array<{ provider: string; model: string }> = [];
+    for (const authID of authIDs) {
+      const option = credentialOptionsByID.get(authID);
+      if (!option) continue;
+      for (const model of option.models ?? []) {
+        rows.push({ provider: option.provider, model });
+      }
+    }
+    return rows;
+  }, [authIDs, credentialOptionsByID, restrictionMode]);
   const visibleCredentialOptions = useMemo(() => {
     const query = credentialQuery.trim().toLowerCase();
     if (!query) return credentialOptions;
@@ -535,8 +547,25 @@ function NativeKeyBindingEditor({
       option.email,
       option.status,
       option.plan,
+      option.authIndex,
     ].some((value) => value?.toLowerCase().includes(query)));
   }, [credentialOptions, credentialQuery]);
+  const visibleCredentialGroups = useMemo(() => {
+    const authFiles: NativeCredentialOption[] = [];
+    const aiProviders: NativeCredentialOption[] = [];
+    for (const option of visibleCredentialOptions) {
+      if (option.source === "ai_provider") aiProviders.push(option);
+      else authFiles.push(option);
+    }
+    return [
+      { source: "auth_file" as const, options: authFiles },
+      { source: "ai_provider" as const, options: aiProviders },
+    ].filter((group) => group.options.length > 0);
+  }, [visibleCredentialOptions]);
+  const selectableVisibleCredentialOptions = useMemo(
+    () => visibleCredentialOptions.filter((option) => option.identityVerified !== false),
+    [visibleCredentialOptions],
+  );
   const toggleAuthID = (authID: string) => {
     setSelectedAuthIDs((previous) => {
       const next = new Set(previous);
@@ -545,6 +574,14 @@ function NativeKeyBindingEditor({
       return next;
     });
   };
+  const selectVisibleCredentials = () => {
+    setSelectedAuthIDs((previous) => {
+      const next = new Set(previous);
+      for (const option of selectableVisibleCredentialOptions) next.add(option.id);
+      return next;
+    });
+  };
+  const clearCredentials = () => setSelectedAuthIDs(new Set());
   const createKey = selectedKey?.apiKey ?? plainKey;
   const restrictionValid = restrictionMode === "group" ? group.trim() !== "" : authIDs.length > 0;
   const canSave = limitsValid && id.trim() !== "" && restrictionValid && (editing || createKey.trim() !== "");
@@ -759,7 +796,25 @@ function NativeKeyBindingEditor({
                 </button>
               </div>
               <div className="native-credential-summary">
-                {t("mapping.native.credentialSelected", { count: authIDs.length })}
+                <span>{t("mapping.native.credentialSelected", { count: authIDs.length })}</span>
+                <span className="native-credential-actions">
+                  <button
+                    className="btn sm"
+                    type="button"
+                    disabled={saving || credentialsLoading || selectableVisibleCredentialOptions.length === 0}
+                    onClick={selectVisibleCredentials}
+                  >
+                    {t("mapping.native.selectAllCredentials")}
+                  </button>
+                  <button
+                    className="btn sm"
+                    type="button"
+                    disabled={saving || authIDs.length === 0}
+                    onClick={clearCredentials}
+                  >
+                    {t("mapping.native.clearCredentials")}
+                  </button>
+                </span>
               </div>
               {credentialError && <div className="error" role="alert">{credentialError}</div>}
               <div className="native-credential-list" role="group" aria-label={t("mapping.native.credentialSelection")}>
@@ -785,46 +840,69 @@ function NativeKeyBindingEditor({
                     </span>
                   </label>
                 ))}
-                {visibleCredentialOptions.map((option) => {
-                  const displayName = option.label || option.email || option.name || option.id;
-                  const normalizedStatus = (option.status ?? "").trim().toLowerCase().replace(/[ -]/g, "_");
-                  const unavailable = option.disabled || option.unavailable || [
-                    "disabled",
-                    "error",
-                    "expired",
-                    "revoked",
-                    "invalid",
-                    "unavailable",
-                    "cooldown",
-                    "cooling_down",
-                    "quota_exhausted",
-                    "exhausted",
-                    "blocked",
-                  ].includes(normalizedStatus);
-                  const status = option.disabled
-                    ? t("mapping.native.credentialDisabled")
-                    : option.unavailable
-                      ? t("mapping.native.credentialUnavailable")
-                      : normalizedStatus === "" || normalizedStatus === "active"
-                        ? t("mapping.native.credentialAvailable")
-                        : option.status;
-                  return (
-                    <label className={`native-credential-option${unavailable ? " unavailable" : ""}`} key={option.id}>
-                      <input
-                        type="checkbox"
-                        checked={selectedAuthIDs.has(option.id)}
-                        onChange={() => toggleAuthID(option.id)}
-                        disabled={saving}
-                      />
-                      <span className="native-credential-copy">
-                        <strong>{displayName}</strong>
-                        <span className="mono">{option.id}</span>
-                        <small>{[option.provider, option.plan].filter(Boolean).join(" · ")}</small>
-                      </span>
-                      <span className={`native-credential-status${unavailable ? " danger" : ""}`}>{status}</span>
-                    </label>
-                  );
-                })}
+                {visibleCredentialGroups.map((group) => (
+                  <div className="native-credential-source-group" key={group.source}>
+                    <div className="native-credential-source-head">
+                      <span>{t(group.source === "ai_provider"
+                        ? "mapping.native.aiProviderCredentials"
+                        : "mapping.native.authFileCredentials")}</span>
+                      <small>{group.options.length}</small>
+                    </div>
+                    {group.options.map((option) => {
+                      const displayName = option.source === "ai_provider"
+                        ? option.name || option.label || option.id
+                        : option.label || option.email || option.name || option.id;
+                      const normalizedStatus = (option.status ?? "").trim().toLowerCase().replace(/[ -]/g, "_");
+                      const identityUnverified = option.identityVerified === false;
+                      const unavailable = identityUnverified || option.disabled || option.unavailable || [
+                        "disabled",
+                        "error",
+                        "expired",
+                        "revoked",
+                        "invalid",
+                        "unavailable",
+                        "cooldown",
+                        "cooling_down",
+                        "quota_exhausted",
+                        "exhausted",
+                        "blocked",
+                      ].includes(normalizedStatus);
+                      const status = identityUnverified
+                        ? t("mapping.native.credentialIdentityUnverified")
+                        : option.disabled
+                        ? t("mapping.native.credentialDisabled")
+                        : option.unavailable
+                          ? t("mapping.native.credentialUnavailable")
+                          : normalizedStatus === "configured"
+                            ? t("mapping.native.credentialConfigured")
+                            : normalizedStatus === "" || normalizedStatus === "active"
+                              ? t("mapping.native.credentialAvailable")
+                              : option.status;
+                      const detail = [
+                        option.provider,
+                        option.plan,
+                        option.models ? t("mapping.native.credentialModels", { count: option.models.length }) : "",
+                        option.authIndex ? t("mapping.native.credentialIndex", { index: option.authIndex.slice(-8) }) : "",
+                      ].filter(Boolean).join(" · ");
+                      return (
+                        <label className={`native-credential-option${unavailable ? " unavailable" : ""}`} key={option.id}>
+                          <input
+                            type="checkbox"
+                            checked={selectedAuthIDs.has(option.id)}
+                            onChange={() => toggleAuthID(option.id)}
+                            disabled={saving || identityUnverified}
+                          />
+                          <span className="native-credential-copy">
+                            <strong>{displayName}</strong>
+                            <span className="mono">{option.id}</span>
+                            <small>{detail}</small>
+                          </span>
+                          <span className={`native-credential-status${unavailable ? " danger" : ""}`}>{status}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                ))}
                 {credentialsLoading && credentialOptions.length === 0 && staleAuthIDs.length === 0 && (
                   <div className="muted native-credential-empty">{t("mapping.native.loadingCredentials")}</div>
                 )}
@@ -842,6 +920,8 @@ function NativeKeyBindingEditor({
             <NativeModelAccessPicker
               value={modelAccess}
               disabled={saving}
+              catalogOverride={directCredentialModelCatalog}
+              onRefreshOverride={restrictionMode === "auth_ids" ? loadCredentialOptions : undefined}
               onChange={setModelAccess}
             />
           </div>

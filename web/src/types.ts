@@ -290,6 +290,11 @@ export interface NativeCredentialOption {
   plan?: string;
   disabled?: boolean;
   unavailable?: boolean;
+  source?: "auth_file" | "ai_provider";
+  authIndex?: string;
+  configIndex?: number;
+  models?: string[];
+  identityVerified?: boolean;
 }
 
 // NativeKeyCatalogEntry correlates one CPA top-level api-keys item with an

@@ -15,11 +15,17 @@ let container: HTMLDivElement;
 let root: ReturnType<typeof createRoot> | null = null;
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-function Harness({ initial }: { initial: NativeModelAccessPolicy }) {
+function Harness({
+  initial,
+  catalogOverride,
+}: {
+  initial: NativeModelAccessPolicy;
+  catalogOverride?: CatalogModel[];
+}) {
   const [value, setValue] = useState(initial);
   return (
     <>
-      <NativeModelAccessPicker value={value} onChange={setValue} />
+      <NativeModelAccessPicker value={value} catalogOverride={catalogOverride} onChange={setValue} />
       <output data-testid="model-policy">{JSON.stringify(value)}</output>
     </>
   );
@@ -58,6 +64,25 @@ describe("buildNativeModelGroups", () => {
 });
 
 describe("NativeModelAccessPicker", () => {
+  it("uses only the selected direct credentials' runtime models when overridden", async () => {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<Harness
+        initial={{ mode: "allowlist", models: [{ provider: "codex", model: "gpt-5.6-luna" }] }}
+        catalogOverride={[
+          { provider: "codex", model: "gpt-5.6-luna" },
+          { provider: "codex", model: "gpt-5.5-unselected" },
+        ]}
+      />);
+      await tick();
+    });
+
+    expect(modelMocks.fetchCatalog).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("gpt-5.6-luna");
+    expect(container.textContent).toContain("gpt-5.5-unselected");
+    expect(container.textContent).not.toContain("gemini-2.5-pro");
+  });
+
   it("selects the complete visible catalog and can uncheck one model", async () => {
     await act(async () => {
       root = createRoot(container);

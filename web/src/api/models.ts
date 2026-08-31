@@ -1,4 +1,5 @@
 import { apiClient, pluginPath } from "./client";
+import { fetchAIProviderCredentials } from "./aiProviderCredentials";
 import type { CatalogModel } from "../types";
 
 /** Prefix applied to custom classify groups in catalog entries / ModelRule.group. */
@@ -54,24 +55,15 @@ const TIERED_PROVIDERS = new Set(["codex", "antigravity"]);
 // "supported"/"unknown" as the untiered bucket.
 const SUPPORTED_GROUP = "supported";
 
-// Map the per-channel API-key management endpoints to the provider identity
-// used in the catalog. The endpoint returns its key list under a top-level
-// key named like the channel (e.g. { "gemini-api-key": [...] }); the provider
-// group in the picker is the bare name ("gemini"). A non-empty list means the
-// user has configured at least one API-key credential for that provider.
-const API_KEY_CHANNELS: Record<string, string> = {
-  "gemini-api-key": "gemini",
-  "claude-api-key": "claude",
-  "codex-api-key": "codex",
-  "vertex-api-key": "vertex",
-};
-
 interface RawEntry {
   provider?: string;
   models?: unknown;
   // group is only meaningful when populated from an auth-file source; static
   // channels and openai-compat entries have no tier concept and leave it empty.
   group?: string;
+  // AI-provider rows are backed by one exact runtime Auth ID. They must remain
+  // visible even if an OAuth auth file also contributes tiered Codex rows.
+  credentialBacked?: boolean;
 }
 
 // Collect (provider, [group], model) tuples from heterogeneous CPA responses.
@@ -136,23 +128,6 @@ function toStrings(v: unknown): string[] {
 }
 
 // --- CPA response adapters (best-effort, defensive) ---
-
-function fromOpenAICompat(payload: unknown): RawEntry[] {
-  const root = payload as Record<string, unknown> | null;
-  const list = root?.["openai-compatibility"];
-  if (!Array.isArray(list)) return [];
-  return list.map((item) => {
-    const o = item as Record<string, unknown> | null;
-    // Prefer `name` (e.g. "opencode") as the provider identity on CPA's
-    // openai-compatibility entries, then fall back to provider/id.
-    const provider =
-      (o?.["name"] as string) ??
-      (o?.["provider"] as string) ??
-      (o?.["id"] as string) ??
-      "openai-compat";
-    return { provider, models: o?.["models"] };
-  });
-}
 
 // One auth-file row from /v0/management/auth-files. `id` is the runtime auth ID
 // used by SchedulerAuthCandidate.ID and therefore by filename/id classify
@@ -303,20 +278,6 @@ function fromModelDefinitions(channel: string, payload: unknown): RawEntry[] {
   return [{ provider: channel, models }];
 }
 
-// Is the *-api-key list at `endpoint` non-empty? CPA's Get<Key> handlers return
-// 200 with a top-level "<channel>-api-key": [...] array (nil/empty when none
-// configured), NOT a 404, so we must inspect the body to know whether a
-// credential is actually present. Returns the mapped provider name when at
-// least one key exists, else "".
-function apiKeyProviderIfConfigured(endpoint: string, payload: unknown): string {
-  const provider = API_KEY_CHANNELS[endpoint];
-  if (!provider) return "";
-  const root = payload as Record<string, unknown> | null;
-  if (!root) return "";
-  const list = root[endpoint];
-  return Array.isArray(list) && list.length > 0 ? provider : "";
-}
-
 // Filter the collected raw entries down to those that should be visible in the
 // picker. Bare (group-less) static entries — from model-definitions/<channel> —
 // are dropped when EITHER:
@@ -344,7 +305,7 @@ export function filterByConfigured(
       // tier subgroups are the real, backed rows; this bare one is a dup with
       // no auth file behind it)...
       const dupOfTiered =
-        TIERED_PROVIDERS.has(provider) && tieredFromAuth.has(provider);
+        !e.credentialBacked && TIERED_PROVIDERS.has(provider) && tieredFromAuth.has(provider);
       // ...or when the provider is neither configured nor has a selected model
       // (unconfigured channel should be hidden, but an edited key's rows stay
       // visible so the user can uncheck them).
@@ -395,32 +356,22 @@ export async function fetchCatalog(
     }
   };
 
-  await safe(
-    c.get("/v0/management/openai-compatibility"),
-    (d) => {
-      const compatEntries = fromOpenAICompat(d);
-      // Every provider listed under openai-compatibility is, by construction,
-      // one the user configured a credential for (the list only contains
-      // configured compat entries). Record that so filterByConfigured doesn't
-      // drop their bare entries as "unconfigured".
-      for (const e of compatEntries) {
-        const p = (e.provider ?? "").toLowerCase();
-        if (p) configuredProviders.add(p);
-      }
-      entries.push(...compatEntries);
-    },
-  );
-
-  // Per-channel API-key endpoints. These responses carry their key list under a
-  // top-level "<channel>-api-key" array (NOT under "models"/"keys"), so
-  // fromChannelKey yields no models here — we use them solely to detect whether
-  // the user has configured an API-key credential, marking the mapped provider
-  // as configured when the list is non-empty.
-  for (const ch of Object.keys(API_KEY_CHANNELS)) {
-    await safe(c.get("/v0/management/" + ch), (d) => {
-      const provider = apiKeyProviderIfConfigured(ch, d);
-      if (provider) configuredProviders.add(provider);
-    });
+  try {
+    const aiCredentials = await fetchAIProviderCredentials(c);
+    for (const credential of aiCredentials) {
+      const provider = credential.provider.trim().toLowerCase();
+      if (!provider) continue;
+      configuredProviders.add(provider);
+      entries.push({
+        provider,
+        models: credential.models ?? [],
+        credentialBacked: true,
+      });
+    }
+  } catch {
+    // Keep the remaining catalog sources available on older/incompatible CPA
+    // builds. Authentication failures still clear the shared panel session via
+    // the API client's response interceptor.
   }
 
   // auth-files: fetch file list + per-file models, then POST to the plugin

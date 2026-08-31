@@ -21,7 +21,7 @@ In plain words: you issue your own `cpa_…` keys to clients. Each key only sees
 3. **Limit** — per-key RPM, optional daily/weekly USD caps, token or per-call billing.
 4. **Isolate credentials (tiers / groups)** — pin a request to Codex free/team/… or to a **custom classify group** so it never lands on the wrong auth file.
 5. **Multi-target aliases** — one alias can point at several backends (priority or round-robin).
-6. **Bind native CPA keys** — retain top-level `api-keys` authentication while limiting each key to an auth-file group.
+6. **Bind native CPA keys** — retain top-level `api-keys` authentication while limiting each key to auth files or configured AI-provider credentials.
 7. **Web UI** — manage keys, native-key bindings, global aliases, and credential classification inside CPA.
 
 ---
@@ -186,9 +186,11 @@ For normal operation, create bindings through this plugin's Management API or We
 Each binding must use exactly one credential restriction:
 
 - **Credential group** uses the same syntax as alias targets: built-ins such as `free`, `team`, `plus`, or `supported`, and `classify:<name>` for custom groups. It is best for a dynamically maintained pool shared by multiple keys.
-- **Direct credentials** persist one or more exact, case-sensitive Scheduler Auth IDs without creating a classify rule. This is best for a small per-key allow-list. Selection is an allow-list, not a round-robin order, and new credentials are not added automatically.
+- **Direct credentials** persist one or more exact, case-sensitive Scheduler Auth IDs without creating a classify rule. The picker includes both auth-directory credentials and CPA AI-provider entries for Gemini, Interactions, Claude, Codex, xAI, Vertex, and OpenAI-compatible providers. This is best for a small per-key allow-list. Selection is an allow-list, not a round-robin order, and new credentials are not added automatically.
 
-The Web UI reads live IDs from CPA's `/v0/management/auth-files` response and never guesses from a display filename. If a credential is removed, renamed, or moved, its saved ID remains visible as missing so unrelated edits cannot silently change authorization. If every ID is stale, requests fail closed. Group mode can still use an anchored `filename` classify rule; despite that historical field name, it also matches the Scheduler **auth ID**, which may include a relative directory and may differ from the UI display name.
+The Web UI reads auth-directory IDs from CPA's `/v0/management/auth-files`. AI-provider config auths are absent from that list, so an isolated browser adapter temporarily processes CPA's existing Management response, derives the exact Scheduler Auth ID with CPA's stable-ID algorithm, and verifies it while reading runtime models through `/v0/management/auth-files/models?name=<Auth ID>`. Provider API keys never enter component state, URLs, browser storage, plugin state, plugin-backend requests, or logs; only the derived ID, `auth-index`, safe display metadata, and models leave the adapter. An entry that cannot be verified through the runtime-model route remains visible but cannot be selected.
+
+The picker never guesses identity from a display filename, array position, or masked key. If an auth file is removed, renamed, or moved—or an AI-provider key/base URL/proxy/prefix/header identity changes—its saved ID remains visible as missing so unrelated edits cannot silently change authorization. If every ID is stale, requests fail closed. Group mode can still use an anchored `filename` classify rule; despite that historical field name, it also matches the Scheduler **auth ID**, which may include a relative directory and may differ from the UI display name.
 
 Direct mode also persists a lowercase-safe redundant encoding of the exact IDs inside an internal reserved group. A legacy plugin that ignores and removes the additive `auth_ids` field still fails closed, while a fixed release can reconstruct the selection after the legacy state is rewritten. The dedicated Management API and Web UI hide that internal value. A state already reduced to the older unencoded marker cannot reveal which credentials were selected; the UI explicitly asks the operator to reselect them once and the binding remains fail-closed until repaired. Still back up `state_file` and preferably convert direct bindings to group mode before downgrading; the general default-scheduling risk when the plugin is disabled, unloaded, or fails to load remains unchanged.
 

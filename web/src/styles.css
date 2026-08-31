@@ -1134,17 +1134,34 @@ td.strong { font-weight: 600; color: var(--text); }
 .native-credential-toolbar { display: flex; gap: 8px; }
 .native-binding-editor .native-credential-toolbar input { min-width: 0; height: 36px; }
 .native-credential-toolbar .btn { flex: none; }
-.native-credential-summary { margin: 7px 0; color: var(--muted); font-size: 12px; }
+.native-credential-summary {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin: 7px 0; color: var(--muted); font-size: 12px;
+}
+.native-credential-actions { display: flex; gap: 6px; }
 .native-credential-list {
   max-height: 280px; overflow: auto; background: var(--bg);
   border: 1px solid var(--border); border-radius: var(--r-md);
+}
+.native-credential-source-group + .native-credential-source-group {
+  border-top: 1px solid var(--border-strong);
+}
+.native-credential-source-head {
+  position: sticky; z-index: 1; top: 0; display: flex; align-items: center;
+  justify-content: space-between; padding: 6px 11px; color: var(--muted);
+  background: var(--panel-2); border-bottom: 1px solid var(--border);
+  font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+}
+.native-credential-source-head small {
+  min-width: 20px; padding: 1px 6px; text-align: center;
+  background: var(--muted-bg); border-radius: var(--r-full); font-size: 10px;
 }
 .native-binding-editor .native-credential-option {
   display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center;
   gap: 10px; min-height: 48px; margin: 0; padding: 9px 11px; cursor: pointer;
   border-bottom: 1px solid var(--border); transition: background-color var(--t-fast);
 }
-.native-credential-option:last-child { border-bottom: 0; }
+.native-credential-source-group .native-credential-option:last-child { border-bottom: 0; }
 .native-credential-option:hover { background: var(--panel-2); }
 .native-credential-option:has(input:checked) { background: var(--accent-soft); }
 .native-credential-option.stale { background: var(--danger-soft); }
