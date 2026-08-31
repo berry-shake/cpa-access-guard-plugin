@@ -452,6 +452,30 @@ func TestLegacyStateBootstrapsNativeBindingsOnce(t *testing.T) {
 	}
 }
 
+func TestLegacyNativeBindingStateMigratesModelAccessToAll(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	raw := `{"version":1,"keys":[],"native_key_bindings":[{"id":"legacy-models","enabled":true,"caller_scope":"` +
+		strings.Repeat("e", 64) + `","group":"team"}],"aliases":[],"classify_rules":[],"usage":{}}`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore()
+	if err := store.Configure(Config{Enabled: true, StateFile: path}); err != nil {
+		t.Fatal(err)
+	}
+	binding := store.NativeKeyBindingsSnapshot()[0]
+	if binding.ModelAccess.Mode != NativeModelAccessAll || len(binding.ModelAccess.Models) != 0 {
+		t.Fatalf("live migrated model access = %+v", binding.ModelAccess)
+	}
+	state, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.NativeKeyBindings[0].ModelAccess.Mode != NativeModelAccessAll || len(state.NativeKeyBindings[0].ModelAccess.Models) != 0 {
+		t.Fatalf("persisted migrated model access = %+v", state.NativeKeyBindings[0].ModelAccess)
+	}
+}
+
 func TestSaveUsageOnlyCreatesExplicitEmptyNativeBindings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	if err := SaveUsageOnly(path, map[string]*UsageState{}); err != nil {
@@ -568,5 +592,106 @@ func TestConcurrentPartialNativeKeyBindingUpdatesDoNotLoseFields(t *testing.T) {
 	bindings := store.NativeKeyBindingsSnapshot()
 	if len(bindings) != 1 || bindings[0].Enabled || bindings[0].Group != "classify:vip" {
 		t.Fatalf("partial update was lost: %+v", bindings)
+	}
+}
+
+func TestNativeKeyBindingModelAccessPersistenceAndMatching(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	store := NewStore()
+	if err := store.Configure(Config{Enabled: true, StateFile: path}); err != nil {
+		t.Fatal(err)
+	}
+	access := NativeModelAccessPolicy{
+		Mode: " ALLOWLIST ",
+		Models: []NativeAllowedModel{
+			{Provider: " Gemini ", Model: "GPT-5.6-LUNA"},
+			{Provider: " CODEX ", Model: " GPT-5.6-LUNA(HIGH) "},
+			{Provider: "codex", Model: "gpt-5.6-luna"},
+		},
+	}
+	created, err := store.CreateNativeKeyBinding(CreateNativeKeyBindingInput{
+		ID: "models", Enabled: true, APIKey: "sk-native-model-secret-0123456789", Group: "team", ModelAccess: &access,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.ModelAccess.Mode != NativeModelAccessAllowlist || len(created.ModelAccess.Models) != 2 ||
+		created.ModelAccess.Models[0] != (NativeAllowedModel{Provider: "codex", Model: "gpt-5.6-luna"}) ||
+		created.ModelAccess.Models[1] != (NativeAllowedModel{Provider: "gemini", Model: "gpt-5.6-luna"}) {
+		t.Fatalf("normalized model access = %+v", created.ModelAccess)
+	}
+	constraint, ok := store.ResolveNativeKeyConstraint(created.CallerScope, "", "")
+	if !ok || !constraint.AllowsModel("codex", "gpt-5.6-luna(high)") ||
+		!constraint.AllowsModel("", "GPT-5.6-LUNA") || constraint.AllowsModel("claude", "gpt-5.6-luna") {
+		t.Fatalf("unexpected model matching: ok=%v constraint=%+v", ok, constraint)
+	}
+
+	// Returned snapshots must not share mutable model slices or runtime indexes
+	// with the live authorization policy.
+	snapshot := store.NativeKeyBindingsSnapshot()
+	snapshot[0].ModelAccess.Models[0].Model = "tampered"
+	if fresh, _ := store.ResolveNativeKeyConstraint(created.CallerScope, "", ""); !fresh.AllowsModel("codex", "gpt-5.6-luna") {
+		t.Fatal("mutating a snapshot changed live model authorization")
+	}
+
+	reloaded := NewStore()
+	if err := reloaded.Configure(Config{Enabled: true, StateFile: path}); err != nil {
+		t.Fatal(err)
+	}
+	if fresh, okReload := reloaded.ResolveNativeKeyConstraint(created.CallerScope, "", ""); !okReload || !fresh.AllowsModel("gemini", "gpt-5.6-luna") || fresh.AllowsModel("claude", "gpt-5.6-luna") {
+		t.Fatalf("reloaded model access mismatch: ok=%v constraint=%+v", okReload, fresh)
+	}
+
+	empty := NativeModelAccessPolicy{Mode: NativeModelAccessAllowlist}
+	updated, err := reloaded.UpdateNativeKeyBinding(created.ID, UpdateNativeKeyBindingInput{ModelAccess: &empty})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ModelAccess.Mode != NativeModelAccessAllowlist || len(updated.ModelAccess.Models) != 0 {
+		t.Fatalf("empty allow-list was not preserved: %+v", updated.ModelAccess)
+	}
+	if denied, _ := reloaded.ResolveNativeKeyConstraint(created.CallerScope, "", ""); denied.AllowsModel("codex", "gpt-5.6-luna") {
+		t.Fatal("empty allow-list must deny every model")
+	}
+
+	all := NativeModelAccessPolicy{
+		Mode:   NativeModelAccessAll,
+		Models: []NativeAllowedModel{{Provider: "codex", Model: "stale-model"}},
+	}
+	updated, err = reloaded.UpdateNativeKeyBinding(created.ID, UpdateNativeKeyBindingInput{ModelAccess: &all})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ModelAccess.Mode != NativeModelAccessAll || len(updated.ModelAccess.Models) != 0 {
+		t.Fatalf("all mode retained stale entries: %+v", updated.ModelAccess)
+	}
+	if unrestricted, _ := reloaded.ResolveNativeKeyConstraint(created.CallerScope, "", ""); !unrestricted.AllowsModel("future-provider", "future-model") {
+		t.Fatal("all mode must allow future provider/model pairs")
+	}
+}
+
+func TestNativeKeyBindingMissingModelAccessMigratesToAll(t *testing.T) {
+	scope := strings.Repeat("f", 64)
+	cfg := Config{NativeKeyBindings: []NativeKeyBinding{{
+		ID: "legacy", Enabled: true, CallerScope: scope, Group: "team",
+	}}}
+	if err := normalizeConfig(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.NativeKeyBindings[0].ModelAccess.Mode != NativeModelAccessAll || len(cfg.NativeKeyBindings[0].ModelAccess.Models) != 0 {
+		t.Fatalf("legacy policy = %+v", cfg.NativeKeyBindings[0].ModelAccess)
+	}
+
+	invalid := cfg.NativeKeyBindings[0]
+	invalid.ModelAccess = NativeModelAccessPolicy{
+		Mode:   NativeModelAccessAllowlist,
+		Models: []NativeAllowedModel{{Provider: "", Model: "gpt-5.6-luna"}},
+	}
+	if err := normalizeNativeKeyBindings([]NativeKeyBinding{invalid}); err == nil || !strings.Contains(err.Error(), "provider is required") {
+		t.Fatalf("invalid provider error = %v", err)
+	}
+	invalid.ModelAccess = NativeModelAccessPolicy{Mode: "surprise"}
+	if err := normalizeNativeKeyBindings([]NativeKeyBinding{invalid}); err == nil || !strings.Contains(err.Error(), "model_access.mode") {
+		t.Fatalf("invalid mode error = %v", err)
 	}
 }

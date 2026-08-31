@@ -29,8 +29,8 @@ type Config struct {
 	// as state_file.
 	PricingFile string      `yaml:"pricing_file,omitempty" json:"pricing_file,omitempty"`
 	Keys        []KeyConfig `yaml:"keys" json:"keys"`
-	// NativeKeyBindings constrain CPA's built-in downstream API keys to either an
-	// auth-file group or exact auth IDs. Unlike Keys, these entries do not
+	// NativeKeyBindings constrain CPA's built-in downstream API keys by model
+	// access and by either an auth-file group or exact auth IDs. Unlike Keys, they do not
 	// authenticate the caller and never persist the plaintext API key:
 	// CallerScope is the irreversible identity produced by NativeCallerScope.
 	NativeKeyBindings []NativeKeyBinding `yaml:"native_key_bindings,omitempty" json:"native_key_bindings,omitempty"`

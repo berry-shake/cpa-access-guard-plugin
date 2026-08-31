@@ -221,6 +221,16 @@ export interface NativeBindingUsageSummary {
   weekly_calls: number;
 }
 
+export interface NativeAllowedModel {
+  provider: string;
+  model: string;
+}
+
+export interface NativeModelAccessPolicy {
+  mode: "all" | "allowlist";
+  models: NativeAllowedModel[];
+}
+
 export interface NativeKeyBinding {
   id: string;
   name: string;
@@ -228,6 +238,8 @@ export interface NativeKeyBinding {
   key_preview: string;
   group?: string;
   auth_ids?: string[];
+  // Missing only when talking to a pre-fork.13 backend; treat it as `all`.
+  model_access?: NativeModelAccessPolicy;
   needs_reselection?: boolean;
   // Usage limits; 0/omitted = unlimited. Pricing comes from the global
   // alias table.
@@ -246,6 +258,7 @@ export interface NativeKeyBindingCreateRequest {
   key: string;
   group?: string;
   auth_ids?: string[];
+  model_access?: NativeModelAccessPolicy;
   rpm?: number;
   daily_usd?: number;
   weekly_usd?: number;
@@ -259,6 +272,7 @@ export interface NativeKeyBindingUpdateRequest {
   key?: string;
   group?: string;
   auth_ids?: string[];
+  model_access?: NativeModelAccessPolicy;
   rpm?: number;
   daily_usd?: number;
   weekly_usd?: number;

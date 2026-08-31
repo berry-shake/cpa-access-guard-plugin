@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { useT } from "../i18n";
+import NativeModelAccessPicker from "./NativeModelAccessPicker";
 import {
   createNativeKeyBinding,
   deleteNativeKeyBinding,
@@ -16,6 +17,7 @@ import type {
   NativeCredentialOption,
   NativeKeyBinding,
   NativeKeyBindingCatalog,
+  NativeModelAccessPolicy,
 } from "../types";
 
 const BUILTIN_GROUPS = ["free", "team", "plus", "supported"] as const;
@@ -285,6 +287,20 @@ export default function NativeKeyBindingsTab() {
                       </span>
                     </dd>
                   </div>
+                  {binding && (
+                    <div>
+                      <dt>{t("mapping.native.modelAccess")}</dt>
+                      <dd>
+                        <span className={`native-binding-group mono${binding.model_access?.mode === "allowlist" ? "" : " unrestricted"}`}>
+                          {binding.model_access?.mode === "allowlist"
+                            ? (binding.model_access.models?.length ?? 0) > 0
+                              ? t("mapping.native.modelSummary", { count: binding.model_access.models?.length ?? 0 })
+                              : t("mapping.native.noModelsAllowed")
+                            : t("mapping.native.allModels")}
+                        </span>
+                      </dd>
+                    </div>
+                  )}
                 </dl>
                 {!row.present && (
                   <p className="native-binding-orphan-note">{t("mapping.native.orphanHint")}</p>
@@ -442,6 +458,20 @@ function NativeKeyBindingEditor({
   const [dailyUsd, setDailyUsd] = useState(binding?.daily_usd ? String(binding.daily_usd) : "");
   const [weeklyUsd, setWeeklyUsd] = useState(binding?.weekly_usd ? String(binding.weekly_usd) : "");
   const [selectedAuthIDs, setSelectedAuthIDs] = useState<Set<string>>(() => new Set(initialAuthIDs));
+  const [modelAccess, setModelAccess] = useState<NativeModelAccessPolicy>(() => {
+    if (binding?.model_access) {
+      const models = binding.model_access.models ?? [];
+      return {
+        mode: binding.model_access.mode,
+        models: models.map((model) => ({ ...model })),
+      };
+    }
+    // A pre-fork.13 binding had unrestricted model access. New bindings start
+    // with an empty allow-list so only explicitly checked models can run.
+    return binding
+      ? { mode: "all", models: [] }
+      : { mode: "allowlist", models: [] };
+  });
   const [credentialOptions, setCredentialOptions] = useState<NativeCredentialOption[]>([]);
   const [credentialQuery, setCredentialQuery] = useState("");
   const [credentialsLoading, setCredentialsLoading] = useState(true);
@@ -538,6 +568,7 @@ function NativeKeyBindingEditor({
           name: name.trim(),
           enabled,
           ...restriction,
+          model_access: modelAccess,
           rpm: limitField(rpmValue),
           daily_usd: limitField(dailyValue),
           weekly_usd: limitField(weeklyValue),
@@ -551,6 +582,7 @@ function NativeKeyBindingEditor({
           enabled,
           key: createKey.trim(),
           ...restriction,
+          model_access: modelAccess,
           rpm: limitField(rpmValue),
           daily_usd: limitField(dailyValue),
           weekly_usd: limitField(weeklyValue),
@@ -806,6 +838,13 @@ function NativeKeyBindingEditor({
               <p className="native-binding-field-hint">{t("mapping.native.credentialHint")}</p>
             </div>
           )}
+          <div className="map-form-row native-model-access-row">
+            <NativeModelAccessPicker
+              value={modelAccess}
+              disabled={saving}
+              onChange={setModelAccess}
+            />
+          </div>
           <div className="map-form-row native-binding-limits-row">
             <label>{t("mapping.native.limitsTitle")}</label>
             <div className="native-binding-limits">

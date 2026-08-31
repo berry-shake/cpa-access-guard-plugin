@@ -149,13 +149,13 @@ Native-key bindings are deliberately separate from plugin-owned downstream keys:
 | Key type | Authentication owner | What this plugin enforces |
 |----------|----------------------|---------------------------|
 | Plugin key (`cpa_…` or a plugin-owned custom `sk-…`) | `access-guard` | model/alias policy, RPM, budgets, billing, and optional credential group |
-| CPA top-level `api-keys` entry | CPA's built-in config API-key provider | auth-file group or exact Auth ID allow-list, plus optional RPM/USD limits; no automatic model policy |
+| CPA top-level `api-keys` entry | CPA's built-in config API-key provider | model access, auth-file group or exact Auth ID allow-list, plus optional RPM/USD limits |
 
 After CPA authenticates a native key, it derives a stable one-way `caller_scope`. The plugin persists only that scope, a redacted preview, and the credential restriction — never the plaintext top-level key:
 
 ```text
 top-level api-key → CPA native auth → caller_scope
-                  → native binding → group or auth_ids
+                  → native binding → model_access AND (group or auth_ids)
                   → pick only within the allowed credentials
 ```
 
@@ -166,6 +166,9 @@ Requirements and behavior:
 - Selecting an unbound row avoids manual copy/paste. The plaintext stays in page memory, is sent only in Management-authenticated JSON request bodies for exact scope matching and binding creation, and is never rendered, placed in a URL, stored in browser storage, persisted, or returned by plugin APIs.
 - The key must remain in CPA's top-level `api-keys`; a binding is authorization metadata, not authentication.
 - A bound, enabled key with no usable candidate in its group or direct allow-list fails closed with `auth_not_found` (503). It never falls back outside the restriction.
+- `model_access.mode: all` permits current and future models. `allowlist` permits only the exact, case-insensitive `provider` + base-model pairs in `models`; the same model name under another provider remains denied. A terminal CPA thinking suffix such as `(high)` inherits the base model permission.
+- An empty model allow-list intentionally denies every model. A disallowed request returns `model_not_allowed` (403) before RPM is consumed or an upstream credential is selected. Candidate providers are checked again so a multi-provider route cannot bypass the allow-list.
+- Existing pre-fork.13 bindings with no `model_access` field migrate to `all`, preserving their prior behavior. New Web-UI bindings start as an empty allow-list and must be checked explicitly, or switched to **All models**.
 - When a caller scope matches an enabled native binding, its group / `auth_ids` restriction takes precedence over generic Scheduler `group` metadata.
 - Unbound native keys and disabled bindings keep CPA's existing unrestricted scheduling behavior.
 - Top-level config and plugin state are not updated atomically. For a strict-isolation rotation, create a second temporary binding for the new key, add and test that key in CPA, remove the old top-level key, and only then delete the old binding.
@@ -176,6 +179,7 @@ Requirements and behavior:
 - Explicitly set CPA's top-level `quota-exceeded.antigravity-credits: false`. When enabled, that last-resort Antigravity credits path bypasses plugin Scheduler selection and enumerates Antigravity credentials directly, so a request can land outside the bound group. The current plugin ABI cannot enforce a binding inside that fallback.
 - If this plugin is disabled, unloaded, or fails to load, CPA may still accept the top-level key and use default scheduling. A host-enforced required-policy/fail-closed mechanism is needed if plugin failure itself must never bypass the boundary.
 - Back up `state_file` before downgrading below v0.5.0. Older releases do not understand `native_key_bindings` and can discard them when rewriting state.
+- Do not downgrade a state containing `model_access.mode: allowlist` to fork.12 or older: those builds ignore and may erase the model policy, which makes the binding unrestricted by model. Switch the binding off or remove the top-level key before such a downgrade, and keep a backup.
 
 For normal operation, create bindings through this plugin's Management API or Web UI. A first-boot YAML seed necessarily contains `caller_scope`; CPA's generic, Management-key-protected plugin-config endpoint can return that YAML field. The dedicated native-binding list API and UI never return it.
 
@@ -187,6 +191,8 @@ Each binding must use exactly one credential restriction:
 The Web UI reads live IDs from CPA's `/v0/management/auth-files` response and never guesses from a display filename. If a credential is removed, renamed, or moved, its saved ID remains visible as missing so unrelated edits cannot silently change authorization. If every ID is stale, requests fail closed. Group mode can still use an anchored `filename` classify rule; despite that historical field name, it also matches the Scheduler **auth ID**, which may include a relative directory and may differ from the UI display name.
 
 Direct mode also persists a lowercase-safe redundant encoding of the exact IDs inside an internal reserved group. A legacy plugin that ignores and removes the additive `auth_ids` field still fails closed, while a fixed release can reconstruct the selection after the legacy state is rewritten. The dedicated Management API and Web UI hide that internal value. A state already reduced to the older unencoded marker cannot reveal which credentials were selected; the UI explicitly asks the operator to reselect them once and the binding remains fail-closed until repaired. Still back up `state_file` and preferably convert direct bindings to group mode before downgrading; the general default-scheduling risk when the plugin is disabled, unloaded, or fails to load remains unchanged.
+
+The model picker collapses credential-tier duplicates into one provider/model checkbox. **Select all** saves a snapshot of the current catalog; models added later remain denied until selected. Saved models missing from the current catalog stay visible and removable. CPA's plugin ABI cannot filter `/v1/models` per native key, so that endpoint may still show the global catalog; actual execution is enforced at `scheduler.pick`.
 
 ### OpenAI-compatibility providers
 
@@ -345,7 +351,11 @@ curl -X POST "$CPA/v0/management/plugins/access-guard/native-key-bindings" \
     "name": "Client A",
     "key": "sk-replace-with-an-existing-top-level-api-key",
     "enabled": true,
-    "group": "classify:client-a"
+    "group": "classify:client-a",
+    "model_access": {
+      "mode": "allowlist",
+      "models": [{"provider": "codex", "model": "gpt-5.6-luna"}]
+    }
   }'
 ```
 
@@ -434,6 +444,8 @@ curl -X POST "$CPA/v0/management/plugins/access-guard/aliases" \
 | Group set, no matching auth file | `auth_not_found` / unavailable (no cross-tier leak) |
 | Bound native key + usable in-group auth | Only an auth ID in that group is selected |
 | Bound native key + no in-group auth | `auth_not_found` / 503; no out-of-group fallback |
+| Bound native key + selected provider/model | Credential restriction is applied, then upstream may run |
+| Bound native key + unselected provider/model | `model_not_allowed` / 403; no quota or upstream use |
 | Unbound native key or disabled binding | Existing CPA unrestricted scheduling behavior |
 | Unknown key | Plugin declines; CPA may try native `api-keys` |
 | Non-stream chat response | Top-level `model` rewritten to alias |

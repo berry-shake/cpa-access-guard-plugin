@@ -15,15 +15,16 @@ import (
 // persisted. Pointer fields let PATCH distinguish an omitted field from a
 // deliberate false/empty value.
 type nativeKeyBindingWriteRequest struct {
-	ID        string    `json:"id"`
-	Name      *string   `json:"name,omitempty"`
-	Enabled   *bool     `json:"enabled,omitempty"`
-	Key       string    `json:"key,omitempty"`
-	Group     *string   `json:"group,omitempty"`
-	AuthIDs   *[]string `json:"auth_ids,omitempty"`
-	RPM       *int      `json:"rpm,omitempty"`
-	DailyUSD  *float64  `json:"daily_usd,omitempty"`
-	WeeklyUSD *float64  `json:"weekly_usd,omitempty"`
+	ID          string                          `json:"id"`
+	Name        *string                         `json:"name,omitempty"`
+	Enabled     *bool                           `json:"enabled,omitempty"`
+	Key         string                          `json:"key,omitempty"`
+	Group       *string                         `json:"group,omitempty"`
+	AuthIDs     *[]string                       `json:"auth_ids,omitempty"`
+	ModelAccess *policy.NativeModelAccessPolicy `json:"model_access,omitempty"`
+	RPM         *int                            `json:"rpm,omitempty"`
+	DailyUSD    *float64                        `json:"daily_usd,omitempty"`
+	WeeklyUSD   *float64                        `json:"weekly_usd,omitempty"`
 }
 
 // publicNativeKeyBinding deliberately omits CallerScope. Although the scope is
@@ -36,6 +37,7 @@ type publicNativeKeyBinding struct {
 	KeyPreview       string                            `json:"key_preview"`
 	Group            string                            `json:"group,omitempty"`
 	AuthIDs          []string                          `json:"auth_ids,omitempty"`
+	ModelAccess      policy.NativeModelAccessPolicy    `json:"model_access"`
 	NeedsReselection bool                              `json:"needs_reselection,omitempty"`
 	RPM              int                               `json:"rpm,omitempty"`
 	DailyUSD         float64                           `json:"daily_usd,omitempty"`
@@ -155,15 +157,16 @@ func (a *App) createNativeKeyBinding(body []byte) ManagementResponse {
 		name = strings.TrimSpace(*req.Name)
 	}
 	binding, err := a.store.CreateNativeKeyBinding(policy.CreateNativeKeyBindingInput{
-		ID:        req.ID,
-		Name:      name,
-		Enabled:   applyBool(req.Enabled, true),
-		APIKey:    key,
-		Group:     group,
-		AuthIDs:   authIDs,
-		RPM:       req.RPM,
-		DailyUSD:  req.DailyUSD,
-		WeeklyUSD: req.WeeklyUSD,
+		ID:          req.ID,
+		Name:        name,
+		Enabled:     applyBool(req.Enabled, true),
+		APIKey:      key,
+		Group:       group,
+		AuthIDs:     authIDs,
+		ModelAccess: req.ModelAccess,
+		RPM:         req.RPM,
+		DailyUSD:    req.DailyUSD,
+		WeeklyUSD:   req.WeeklyUSD,
 	})
 	if err != nil {
 		return nativeKeyBindingStoreError(err)
@@ -184,14 +187,15 @@ func (a *App) patchNativeKeyBinding(body []byte) ManagementResponse {
 	}
 
 	binding, err := a.store.UpdateNativeKeyBinding(id, policy.UpdateNativeKeyBindingInput{
-		Name:      trimmedOptionalString(req.Name),
-		Enabled:   req.Enabled,
-		APIKey:    strings.TrimSpace(req.Key),
-		Group:     trimmedOptionalString(req.Group),
-		AuthIDs:   req.AuthIDs,
-		RPM:       req.RPM,
-		DailyUSD:  req.DailyUSD,
-		WeeklyUSD: req.WeeklyUSD,
+		Name:        trimmedOptionalString(req.Name),
+		Enabled:     req.Enabled,
+		APIKey:      strings.TrimSpace(req.Key),
+		Group:       trimmedOptionalString(req.Group),
+		AuthIDs:     req.AuthIDs,
+		ModelAccess: req.ModelAccess,
+		RPM:         req.RPM,
+		DailyUSD:    req.DailyUSD,
+		WeeklyUSD:   req.WeeklyUSD,
 	})
 	if err != nil {
 		return nativeKeyBindingStoreError(err)
@@ -273,10 +277,14 @@ func publicNativeKeyBindingFromPolicyWithUsage(binding policy.NativeKeyBinding, 
 		Name:       binding.Name,
 		Enabled:    binding.Enabled,
 		KeyPreview: binding.KeyPreview,
-		RPM:        binding.RPM,
-		DailyUSD:   binding.DailyUSD,
-		WeeklyUSD:  binding.WeeklyUSD,
-		Usage:      usage,
+		ModelAccess: policy.NativeModelAccessPolicy{
+			Mode:   binding.ModelAccess.Mode,
+			Models: append([]policy.NativeAllowedModel{}, binding.ModelAccess.Models...),
+		},
+		RPM:       binding.RPM,
+		DailyUSD:  binding.DailyUSD,
+		WeeklyUSD: binding.WeeklyUSD,
+		Usage:     usage,
 	}
 	if len(binding.AuthIDs) > 0 {
 		out.AuthIDs = append([]string(nil), binding.AuthIDs...)

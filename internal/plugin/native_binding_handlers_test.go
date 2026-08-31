@@ -237,6 +237,83 @@ func TestNativeKeyBindingManagementDirectAuthIDsAndModeSwitch(t *testing.T) {
 	}
 }
 
+func TestNativeKeyBindingManagementModelAccessCRUD(t *testing.T) {
+	app, statePath := configureNativeBindingManagementApp(t)
+	const (
+		basePath = "/v0/management/plugins/access-guard/native-key-bindings"
+		secret   = "sk-native-model-management-secret-0123456789"
+	)
+	created := nativeBindingManagementCall(t, app, http.MethodPost, basePath, nil, map[string]any{
+		"id": "model-client", "key": secret, "auth_ids": []string{"codex.json"},
+		"model_access": map[string]any{
+			"mode": "allowlist",
+			"models": []map[string]string{
+				{"provider": "codex", "model": "gpt-5.6-luna(high)"},
+				{"provider": "CODEX", "model": "GPT-5.6-LUNA"},
+			},
+		},
+	})
+	if created.StatusCode != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", created.StatusCode, created.Body)
+	}
+	assertNativeBindingResponseIsRedacted(t, created.Body, secret)
+	var payload struct {
+		Binding publicNativeKeyBinding `json:"binding"`
+	}
+	if err := json.Unmarshal(created.Body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Binding.ModelAccess.Mode != policy.NativeModelAccessAllowlist ||
+		len(payload.Binding.ModelAccess.Models) != 1 ||
+		payload.Binding.ModelAccess.Models[0] != (policy.NativeAllowedModel{Provider: "codex", Model: "gpt-5.6-luna"}) {
+		t.Fatalf("created model access = %+v", payload.Binding.ModelAccess)
+	}
+
+	// A partial patch must preserve the model policy.
+	patched := nativeBindingManagementCall(t, app, http.MethodPatch, basePath, nil, map[string]any{
+		"id": "model-client", "name": "Renamed",
+	})
+	if patched.StatusCode != http.StatusOK {
+		t.Fatalf("patch status=%d body=%s", patched.StatusCode, patched.Body)
+	}
+	if err := json.Unmarshal(patched.Body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Binding.ModelAccess.Mode != policy.NativeModelAccessAllowlist || len(payload.Binding.ModelAccess.Models) != 1 {
+		t.Fatalf("partial patch lost model access: %+v", payload.Binding.ModelAccess)
+	}
+
+	// Empty allow-list is a deliberate fail-closed state and must round-trip.
+	empty := nativeBindingManagementCall(t, app, http.MethodPatch, basePath, nil, map[string]any{
+		"id": "model-client", "model_access": map[string]any{"mode": "allowlist", "models": []any{}},
+	})
+	if empty.StatusCode != http.StatusOK {
+		t.Fatalf("empty allow-list status=%d body=%s", empty.StatusCode, empty.Body)
+	}
+	if err := json.Unmarshal(empty.Body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Binding.ModelAccess.Mode != policy.NativeModelAccessAllowlist || len(payload.Binding.ModelAccess.Models) != 0 {
+		t.Fatalf("empty allow-list response = %+v", payload.Binding.ModelAccess)
+	}
+
+	state, err := policy.LoadState(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.NativeKeyBindings) != 1 || state.NativeKeyBindings[0].ModelAccess.Mode != policy.NativeModelAccessAllowlist ||
+		len(state.NativeKeyBindings[0].ModelAccess.Models) != 0 {
+		t.Fatalf("persisted model access = %+v", state.NativeKeyBindings)
+	}
+
+	invalid := nativeBindingManagementCall(t, app, http.MethodPatch, basePath, nil, map[string]any{
+		"id": "model-client", "model_access": map[string]any{"mode": "unexpected"},
+	})
+	if invalid.StatusCode != http.StatusBadRequest || !bytes.Contains(invalid.Body, []byte("model_access.mode")) {
+		t.Fatalf("invalid mode status=%d body=%s", invalid.StatusCode, invalid.Body)
+	}
+}
+
 func TestNativeKeyBindingManagementPromptsToRepairDegradedDirectBinding(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "state.json")
 	if err := policy.SaveState(statePath, nil, nil, nil, nil, []policy.NativeKeyBinding{{

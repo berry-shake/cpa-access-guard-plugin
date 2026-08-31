@@ -142,6 +142,7 @@ func (s *Store) Configure(cfg Config) error {
 	firstBoot := false
 	legacyNativeBindings := false
 	recoveredNativeBindings := false
+	legacyNativeModelAccess := false
 	if state, errLoad := LoadState(statePath); errLoad == nil {
 		keys = state.Keys
 		loadedUsage = state.Usage
@@ -167,6 +168,9 @@ func (s *Store) Configure(cfg Config) error {
 		// also auto-migrates any state keys still using per-key Models.
 		recoverableNativeBindings := make([]bool, len(nativeBindings))
 		for i := range nativeBindings {
+			if strings.TrimSpace(nativeBindings[i].ModelAccess.Mode) == "" {
+				legacyNativeModelAccess = true
+			}
 			_, recoverableNativeBindings[i] = decodeNativeAuthIDsGroup(nativeBindings[i].Group)
 			recoverableNativeBindings[i] = recoverableNativeBindings[i] && len(nativeBindings[i].AuthIDs) == 0
 		}
@@ -282,14 +286,14 @@ func (s *Store) Configure(cfg Config) error {
 	var baseUsage map[string]*UsageState
 	var baseAliases []AliasMapping
 	var baseRules []ClassifyRule
-	if firstBoot || legacyNativeBindings || recoveredNativeBindings {
+	if firstBoot || legacyNativeBindings || recoveredNativeBindings || legacyNativeModelAccess {
 		baseKeys = s.keysSnapshotLocked()
 		baseUsage = s.usageSnapshotLocked()
 		baseAliases = s.aliasesSnapshotLocked()
 		baseRules = s.classifyRulesSnapshotLocked()
 	}
 	s.mu.Unlock()
-	if firstBoot || legacyNativeBindings || recoveredNativeBindings {
+	if firstBoot || legacyNativeBindings || recoveredNativeBindings || legacyNativeModelAccess {
 		if errSave := s.saveState(statePath, baseKeys, baseUsage, baseAliases, baseRules); errSave != nil {
 			return fmt.Errorf("seed state: %w", errSave)
 		}

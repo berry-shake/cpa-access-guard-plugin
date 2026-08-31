@@ -64,6 +64,37 @@ native_key_bindings:
 	return app
 }
 
+func configureModelRestrictedNativeBindingSchedulerApp(t *testing.T, rpm int) *App {
+	t.Helper()
+	app := NewApp()
+	yaml := []byte(fmt.Sprintf(`
+enabled: true
+state_file: %q
+native_key_bindings:
+  - id: native-models
+    name: Native Models
+    enabled: true
+    caller_scope: %q
+    key_preview: "sk-nat...dels"
+    auth_ids:
+      - "tenant/codex.json"
+      - "tenant/claude.json"
+    model_access:
+      mode: allowlist
+      models:
+        - provider: codex
+          model: gpt-5.6-luna
+    rpm: %d
+keys: []
+`, filepath.ToSlash(filepath.Join(t.TempDir(), "state.json")), testNativeCallerScope, rpm))
+	req, _ := json.Marshal(LifecycleRequest{ConfigYAML: yaml})
+	if _, err := app.HandleMethod(MethodPluginReconfigure, req); err != nil {
+		t.Fatalf("configure model-restricted native binding app: %v", err)
+	}
+	t.Cleanup(app.Shutdown)
+	return app
+}
+
 func TestSchedulerPickNoGroupDefers(t *testing.T) {
 	app, _ := configureTestApp(t)
 	req, _ := json.Marshal(SchedulerPickRequest{
@@ -210,6 +241,99 @@ func TestSchedulerPickDirectNativeBindingAllowsRecoveredErrorStatus(t *testing.T
 	}
 	if !resp.Handled || resp.AuthID != "tenant/codex-a.json" {
 		t.Fatalf("recovered host-eligible credential was rejected: %+v", resp)
+	}
+}
+
+func TestSchedulerPickNativeBindingEnforcesModelAllowlist(t *testing.T) {
+	app := configureModelRestrictedNativeBindingSchedulerApp(t, 0)
+	pick := func(req SchedulerPickRequest) Envelope {
+		t.Helper()
+		req.Options.Metadata = map[string]any{SchedulerCallerScopeMetadataKey: testNativeCallerScope}
+		rawRequest, _ := json.Marshal(req)
+		raw, err := app.HandleMethod(MethodSchedulerPick, rawRequest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var envelope Envelope
+		if err := json.Unmarshal(raw, &envelope); err != nil {
+			t.Fatal(err)
+		}
+		return envelope
+	}
+
+	denied := pick(SchedulerPickRequest{
+		Provider: "codex", Model: "gpt-5.5",
+		Candidates: []SchedulerAuthCandidate{{ID: "tenant/codex.json", Provider: "codex"}},
+	})
+	if denied.OK || denied.Error == nil || denied.Error.Code != "model_not_allowed" || denied.Error.HTTPStatus != http.StatusForbidden {
+		t.Fatalf("unselected model must return model_not_allowed/403: %+v", denied)
+	}
+	var deniedBody struct {
+		Error struct {
+			Type string `json:"type"`
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(denied.Error.Message), &deniedBody); err != nil ||
+		deniedBody.Error.Type != "permission_error" || deniedBody.Error.Code != "model_not_allowed" {
+		t.Fatalf("downstream denial body = %+v err=%v", deniedBody, err)
+	}
+
+	allowed := pick(SchedulerPickRequest{
+		Provider: "codex", Model: "GPT-5.6-LUNA(HIGH)",
+		Candidates: []SchedulerAuthCandidate{{ID: "tenant/codex.json", Provider: "codex"}},
+	})
+	var response SchedulerPickResponse
+	if !allowed.OK || json.Unmarshal(allowed.Result, &response) != nil || !response.Handled || response.AuthID != "tenant/codex.json" {
+		t.Fatalf("selected suffixed model did not schedule: envelope=%+v response=%+v", allowed, response)
+	}
+
+	// The same model name under an unselected provider must not win, even when
+	// the host supplies a multi-provider route and gives it higher priority.
+	mixed := pick(SchedulerPickRequest{
+		Providers: []string{"claude", "codex"}, Model: "gpt-5.6-luna",
+		Candidates: []SchedulerAuthCandidate{
+			{ID: "tenant/claude.json", Provider: "claude", Priority: 100},
+			{ID: "tenant/codex.json", Provider: "codex", Priority: 1},
+		},
+	})
+	response = SchedulerPickResponse{}
+	if !mixed.OK || json.Unmarshal(mixed.Result, &response) != nil || response.AuthID != "tenant/codex.json" {
+		t.Fatalf("unselected provider bypassed model policy: envelope=%+v response=%+v", mixed, response)
+	}
+}
+
+func TestSchedulerPickDeniedModelDoesNotConsumeNativeRPM(t *testing.T) {
+	app := configureModelRestrictedNativeBindingSchedulerApp(t, 1)
+	request := func(model string) Envelope {
+		t.Helper()
+		req, _ := json.Marshal(SchedulerPickRequest{
+			Provider: "codex",
+			Model:    model,
+			Options: SchedulerPickOptions{Metadata: map[string]any{
+				SchedulerCallerScopeMetadataKey: testNativeCallerScope,
+			}},
+			Candidates: []SchedulerAuthCandidate{{ID: "tenant/codex.json", Provider: "codex"}},
+		})
+		raw, err := app.HandleMethod(MethodSchedulerPick, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var envelope Envelope
+		if err := json.Unmarshal(raw, &envelope); err != nil {
+			t.Fatal(err)
+		}
+		return envelope
+	}
+
+	if denied := request("gpt-5.5"); denied.OK || denied.Error == nil || denied.Error.Code != "model_not_allowed" {
+		t.Fatalf("denied request = %+v", denied)
+	}
+	if firstAllowed := request("gpt-5.6-luna"); !firstAllowed.OK {
+		t.Fatalf("denied model consumed RPM allowance: %+v", firstAllowed)
+	}
+	if secondAllowed := request("gpt-5.6-luna"); secondAllowed.OK || secondAllowed.Error == nil || secondAllowed.Error.Code != "quota_exceeded" {
+		t.Fatalf("second allowed request should exhaust RPM: %+v", secondAllowed)
 	}
 }
 

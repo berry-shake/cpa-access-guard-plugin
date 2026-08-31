@@ -1169,6 +1169,65 @@ td.strong { font-weight: 600; color: var(--text); }
 }
 .native-credential-status.danger { color: var(--danger); background: var(--danger-soft); }
 .native-credential-empty { padding: 22px 12px; text-align: center; font-size: 12px; }
+.native-model-access-row {
+  padding-top: 16px; border-top: 1px solid var(--border);
+}
+.native-model-access .native-model-mode { margin-bottom: 0; }
+.native-model-picker { margin-top: 12px; }
+.native-model-toolbar { display: flex; gap: 8px; }
+.native-binding-editor .native-model-toolbar input {
+  min-width: 0; height: 36px; flex: 1;
+}
+.native-model-toolbar .btn { flex: none; }
+.native-model-actions {
+  display: flex; align-items: center; gap: 7px; margin: 8px 0;
+  color: var(--muted); font-size: 12px;
+}
+.native-model-actions > span { margin-right: auto; }
+.native-model-deny-warning {
+  margin: 8px 0; padding: 8px 10px; color: var(--danger); font-size: 12px;
+  background: var(--danger-soft); border: 1px solid var(--danger-border); border-radius: var(--r-sm);
+}
+.native-model-groups {
+  max-height: 340px; overflow: auto; background: var(--bg);
+  border: 1px solid var(--border); border-radius: var(--r-md);
+}
+.native-model-provider + .native-model-provider { border-top: 1px solid var(--border); }
+.native-model-provider-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 8px 10px; color: var(--text); font-size: 12px; font-weight: 700;
+  background: var(--panel-2);
+}
+.native-model-options {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px;
+  padding: 9px 10px;
+}
+.native-binding-editor .native-model-options > label {
+  display: flex; align-items: center; gap: 7px; min-width: 0; margin: 0;
+  padding: 7px 8px; cursor: pointer; background: var(--panel);
+  border: 1px solid var(--border); border-radius: var(--r-sm); font-size: 11px;
+}
+.native-binding-editor .native-model-options > label.active {
+  background: var(--accent-soft); border-color: var(--accent);
+}
+.native-binding-editor .native-model-options > label.stale {
+  background: var(--danger-soft); border-color: var(--danger-border);
+}
+.native-binding-editor .native-model-options input {
+  flex: none; width: 15px; height: 15px; margin: 0; padding: 0;
+  border: 0; box-shadow: none; accent-color: var(--accent-3);
+}
+.native-model-options span {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.native-model-options small { margin-left: auto; color: var(--muted); font-size: 10px; }
+.native-model-stale {
+  margin-bottom: 8px; border: 1px solid var(--danger-border); border-radius: var(--r-md); overflow: hidden;
+}
+.native-model-empty {
+  padding: 24px 12px; text-align: center; font-size: 12px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-md);
+}
 
 /* Alias cards grid */
 .alias-grid {
@@ -1352,6 +1411,11 @@ td.strong { font-weight: 600; color: var(--text); }
   .native-credential-option { grid-template-columns: auto minmax(0, 1fr); }
   .native-credential-status { grid-column: 2; justify-self: start; }
   .native-binding-editor .map-form-row > label.native-binding-enable-switch { min-height: 44px; }
+  .native-model-toolbar { align-items: stretch; }
+  .native-binding-editor .native-model-toolbar input { height: 44px; font-size: 16px; }
+  .native-model-actions { flex-wrap: wrap; }
+  .native-model-actions > span { width: 100%; }
+  .native-model-options { grid-template-columns: 1fr; }
   .rule-list { max-width: 100%; }
   .map-form-page { padding: 16px; }
 }

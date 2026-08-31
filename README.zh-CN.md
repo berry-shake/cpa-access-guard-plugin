@@ -147,13 +147,13 @@ storage  authorization  auth_header  proxy_url
 | 类型 | 谁负责鉴权 | 本插件负责什么 |
 |------|------------|----------------|
 | 插件 Key（`cpa_…` 或插件托管的自定义 `sk-…`） | `access-guard` | 模型 / Alias、RPM、额度、计费和可选凭证组 |
-| CPA 顶层 `api-keys` | CPA 原生 config API-key provider | 限制认证文件组或精确 Auth ID 白名单，并可设置 RPM / 美元额度；不自动增加模型策略 |
+| CPA 顶层 `api-keys` | CPA 原生 config API-key provider | 限制模型、认证文件组或精确 Auth ID 白名单，并可设置 RPM / 美元额度 |
 
 CPA 原生鉴权成功后会产生稳定、不可逆的 `caller_scope`。插件只保存这个 scope、脱敏预览与凭证限制，不保存顶层 Key 明文：
 
 ```text
 顶层 api-key → CPA 原生鉴权 → caller_scope
-             → native binding → group 或 auth_ids
+             → native binding → model_access 且（group 或 auth_ids）
              → 只从允许范围内选择认证文件
 ```
 
@@ -165,6 +165,9 @@ CPA 原生鉴权成功后会产生稳定、不可逆的 `caller_scope`。插件�
 - 仍可手动新建绑定：粘贴原生 Key 一次；明文只用于计算 scope 和预览，不会写入 state，也不会在 API 响应中回显。
 - Key 必须仍然存在于 CPA 顶层 `api-keys`；绑定本身不负责认证。
 - 已绑定且启用的 Key 如果找不到组内或直接白名单内的可用凭证，会返回 `auth_not_found`（503），不会退回限制外文件。
+- `model_access.mode: all` 允许当前及未来新增模型；`allowlist` 只允许 `models` 中精确、大小写不敏感的 `provider + 基础模型` 组合。同名模型换一个 provider 仍然不允许；CPA 末尾的 thinking 后缀（如 `(high)`）沿用基础模型权限。
+- 空模型白名单表示禁止全部模型。未勾选模型会在消耗 RPM 和选择上游凭据前返回 `model_not_allowed`（403）；候选凭据阶段还会按 provider 再校验一次，防止多 provider 路由绕过。
+- fork.13 之前没有 `model_access` 的旧绑定升级后按 `all` 处理，保持原行为。网页新建绑定默认是空白名单，必须明确勾选模型，或改成“全部模型”。
 - `caller_scope` 命中启用的原生绑定时，绑定的 group / `auth_ids` 限制优先于通用 Scheduler `group` 元数据。
 - 未绑定或禁用绑定的原生 Key 保持 CPA 原来的自由调度行为。
 - CPA 顶层配置与插件 state 不能原子更新。严格隔离的安全轮换方式是：先为新 Key 新建第二条临时绑定，再把新 Key 加入 CPA 并验证，随后删除旧顶层 Key，最后删除旧绑定。
@@ -175,6 +178,7 @@ CPA 原生鉴权成功后会产生稳定、不可逆的 `caller_scope`。插件�
 - 必须在 CPA 顶层配置中显式设置 `quota-exceeded.antigravity-credits: false`。启用后，该 Antigravity 最终额度回退会绕过插件 Scheduler，直接枚举 Antigravity 凭证，因此请求可能落到绑定组之外；当前插件 ABI 无法在这个回退阶段强制绑定。
 - 插件被禁用、卸载或加载失败时，顶层 Key 仍可能由 CPA 原生鉴权并走默认调度；若需要“插件故障也绝不放行”的强安全边界，应让宿主增加必需策略/失败关闭机制。
 - 降级到 v0.5.0 之前的版本前必须备份 `state_file`；旧版不认识 `native_key_bindings`，重新写 state 时可能丢弃这些绑定。
+- 不要把含 `model_access.mode: allowlist` 的 state 降级到 fork.12 或更旧版本：旧版会忽略并可能抹掉模型策略，导致该绑定不再限制模型。确需降级时，先停用绑定或移除对应顶层 Key，并备份 state。
 
 日常请通过本插件管理 API 或网页创建绑定。首次启动 YAML 种子必须包含 `caller_scope`，而 CPA 通用的插件配置接口会向持有 Management Key 的调用方返回该 YAML 字段；专用绑定列表 API 和网页不会返回它。
 
@@ -186,6 +190,8 @@ CPA 原生鉴权成功后会产生稳定、不可逆的 `caller_scope`。插件�
 网页从 CPA 的 `/v0/management/auth-files` 读取实时 `id`，不会用显示文件名猜测。凭证删除、改名或移动后，已保存 ID 会保留并标记为不存在，避免编辑其它字段时静默扩大或改变授权。若全部 ID 都失效，请求会失败关闭。对于 group 模式，严格文件白名单仍可创建锚定的 `filename` 归类规则；这里的 `filename` 同样匹配 Scheduler 的 **Auth ID**，可能包含相对目录，不一定等于页面显示的文件名。
 
 直接模式会在内部保留 group 中额外写入一份不受小写转换影响的精确 ID 冗余编码。不认识 `auth_ids` 的旧插件即使重写 state 并删除该字段，仍会失败关闭；修复版再次读取时还能从内部标记恢复原选择。专用管理 API 和网页不会显示这个内部值。如果 state 已经只剩旧式、不含 ID 的固定标记，插件无法凭空知道原来选了哪些凭证；网页会明确要求重新选择一次，并在修复前保持失败关闭。降级前仍应备份 `state_file`，并优先把直接模式改回普通 group；插件被禁用、卸载或加载失败时的宿主自由调度风险仍按上面的通用警告处理。
+
+模型选择器会把同一 provider 下因 free/team 等凭据档位重复出现的模型合并成一个勾选项。“全选”保存的是当前目录快照，以后新出现的模型不会自动加入；当前目录已消失的旧选择仍会显示并可删除。CPA 插件 ABI 暂时不能按原生 Key 过滤 `/v1/models`，所以该接口仍可能显示宿主全局目录；真正调用会在 `scheduler.pick` 阶段执行模型权限。
 
 ### openai-compatibility 通道
 
@@ -327,7 +333,11 @@ curl -X POST "$CPA/v0/management/plugins/access-guard/native-key-bindings" \
     "name": "Client A",
     "key": "sk-替换为已经存在于顶层-api-keys-的真实-Key",
     "enabled": true,
-    "group": "classify:client-a"
+    "group": "classify:client-a",
+    "model_access": {
+      "mode": "allowlist",
+      "models": [{"provider": "codex", "model": "gpt-5.6-luna"}]
+    }
   }'
 ```
 
@@ -416,6 +426,8 @@ curl -X POST "$CPA/v0/management/plugins/access-guard/aliases" \
 | 写了 group 但组内无可用凭证 | `auth_not_found` / 不可用（不串档） |
 | 已绑定原生 Key + 组内有可用凭证 | 只选择该组 Auth ID |
 | 已绑定原生 Key + 组内无可用凭证 | `auth_not_found` / 503（不回退组外） |
+| 已绑定原生 Key + 已勾选 provider/模型 | 继续执行凭证限制，允许请求上游 |
+| 已绑定原生 Key + 未勾选 provider/模型 | `model_not_allowed` / 403（不消耗额度、不访问上游） |
 | 未绑定或禁用绑定的原生 Key | 保持 CPA 原生自由调度 |
 | 不认识的 key | 插件放弃，CPA 可尝试原生 `api-keys` |
 | 非流式对话响应 | 顶层 `model` 改回别名 |

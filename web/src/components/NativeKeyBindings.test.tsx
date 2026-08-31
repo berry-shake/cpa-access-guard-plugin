@@ -16,8 +16,10 @@ const apiMocks = vi.hoisted(() => ({
   deleteNativeKeyBinding: vi.fn(),
   resetNativeKeyBindingQuota: vi.fn(),
 }));
+const modelMocks = vi.hoisted(() => ({ fetchCatalog: vi.fn() }));
 
 vi.mock("../api/mappings", () => apiMocks);
+vi.mock("../api/models", () => modelMocks);
 
 import NativeKeyBindingsTab, { buildNativeBindingGroupOptions } from "./NativeKeyBindings";
 
@@ -27,6 +29,7 @@ const existing: NativeKeyBinding = {
   enabled: true,
   key_preview: "sk-ab...wxyz",
   group: "team",
+  model_access: { mode: "all", models: [] },
 };
 
 const existingSecret = "sk-existing-native-secret-0123456789";
@@ -68,6 +71,12 @@ beforeEach(() => {
   apiMocks.fetchNativeCredentialOptions.mockResolvedValue([
     { id: "tenant/codex-a.json", provider: "codex", label: "Account A", status: "active", plan: "team" },
     { id: "tenant/codex-b.json", provider: "codex", label: "Account B", status: "active", plan: "plus" },
+  ]);
+  modelMocks.fetchCatalog.mockResolvedValue([
+    { provider: "codex", group: "team", model: "gpt-5.6-luna" },
+    { provider: "codex", group: "plus", model: "gpt-5.6-luna" },
+    { provider: "codex", group: "team", model: "gpt-5.5" },
+    { provider: "gemini", model: "gemini-2.5-pro" },
   ]);
   apiMocks.createNativeKeyBinding.mockResolvedValue(existing);
   apiMocks.updateNativeKeyBinding.mockResolvedValue(existing);
@@ -191,6 +200,7 @@ describe("NativeKeyBindingsTab", () => {
       name: "Client A",
       enabled: true,
       group: "team",
+      model_access: { mode: "all", models: [] },
     });
     expect(apiMocks.updateNativeKeyBinding.mock.calls[0][0]).not.toHaveProperty("key");
   });
@@ -236,6 +246,7 @@ describe("NativeKeyBindingsTab", () => {
       name: "Client A",
       enabled: false,
       group: "team",
+      model_access: { mode: "all", models: [] },
     });
   });
 
@@ -312,6 +323,7 @@ describe("NativeKeyBindingsTab", () => {
       enabled: true,
       key: "sk-client-b-secret",
       group: "classify:tenant-a",
+      model_access: { mode: "allowlist", models: [] },
     });
   });
 
@@ -363,6 +375,7 @@ describe("NativeKeyBindingsTab", () => {
       enabled: true,
       key: "sk-client-manual-secret",
       group: "classify:manual",
+      model_access: { mode: "allowlist", models: [] },
       rpm: undefined,
       daily_usd: undefined,
       weekly_usd: undefined,
@@ -442,7 +455,52 @@ describe("NativeKeyBindingsTab", () => {
       enabled: true,
       key: secret,
       group: "classify:codex-premium",
+      model_access: { mode: "allowlist", models: [] },
     });
+  });
+
+  it("submits only the checked provider/model pairs for a new binding", async () => {
+    const secret = "sk-model-restricted-top-level-secret-0123456789";
+    apiMocks.fetchTopLevelAPIKeys.mockResolvedValue([secret]);
+    apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValue({
+      entries: [{ key_index: 0, key_preview: "sk-mode...56789" }],
+      orphan_bindings: [],
+    });
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<NativeKeyBindingsTab />);
+      await tick();
+    });
+    const bindButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("配置绑定"));
+    await act(async () => {
+      bindButton!.click();
+      await tick();
+    });
+    await act(async () => {
+      changeSelect(container.querySelector("#native-binding-group") as HTMLSelectElement, "team");
+    });
+    const luna = Array.from(container.querySelectorAll(".native-model-options label"))
+      .find((label) => label.textContent?.trim() === "gpt-5.6-luna");
+    expect(luna).toBeTruthy();
+    await act(async () => {
+      (luna!.querySelector("input") as HTMLInputElement).click();
+    });
+
+    const form = container.querySelector(".native-binding-editor form") as HTMLFormElement;
+    await act(async () => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await tick();
+    });
+    expect(apiMocks.createNativeKeyBinding).toHaveBeenCalledWith(expect.objectContaining({
+      id: "native-key-1",
+      key: secret,
+      group: "team",
+      model_access: {
+        mode: "allowlist",
+        models: [{ provider: "codex", model: "gpt-5.6-luna" }],
+      },
+    }));
   });
 
   it("creates a binding from an exact multi-select credential allow-list", async () => {
@@ -613,6 +671,7 @@ describe("NativeKeyBindingsTab", () => {
       name: "Client A",
       enabled: true,
       group: "classify:legacy-customer",
+      model_access: { mode: "all", models: [] },
     });
   });
 

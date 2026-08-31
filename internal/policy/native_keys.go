@@ -12,6 +12,16 @@ import (
 
 const nativeCallerScopeDomain = "cli-proxy-api:caller-scope:v1\x00"
 
+const (
+	// NativeModelAccessAll preserves the pre-fork.13 behavior: every model is
+	// eligible, including models added to CPA after the binding was saved.
+	NativeModelAccessAll = "all"
+	// NativeModelAccessAllowlist permits only the exact provider/model pairs in
+	// NativeModelAccessPolicy.Models. An empty allow-list intentionally denies
+	// every model.
+	NativeModelAccessAllowlist = "allowlist"
+)
+
 // nativeAuthIDsFailClosedGroup keeps direct-auth bindings fail-closed when an
 // older plugin release ignores the additive auth_ids field. Custom classify
 // groups always carry the "classify:" prefix, while built-in tiers never use
@@ -32,17 +42,22 @@ var (
 )
 
 // NativeKeyBinding maps the irreversible identity of a CPA built-in API key
-// to either one auth-file group or an exact auth-ID allow-list. It is an
-// authorization constraint, not an authentication credential: the original
-// API key is intentionally absent.
+// to a model-access policy and either one auth-file group or an exact auth-ID
+// allow-list. It is an authorization constraint, not an authentication
+// credential: the original API key is intentionally absent.
 type NativeKeyBinding struct {
-	ID          string   `yaml:"id" json:"id"`
-	Name        string   `yaml:"name" json:"name"`
-	Enabled     bool     `yaml:"enabled" json:"enabled"`
-	CallerScope string   `yaml:"caller_scope" json:"caller_scope"`
-	KeyPreview  string   `yaml:"key_preview,omitempty" json:"key_preview,omitempty"`
-	Group       string   `yaml:"group" json:"group"`
-	AuthIDs     []string `yaml:"auth_ids,omitempty" json:"auth_ids,omitempty"`
+	ID          string                  `yaml:"id" json:"id"`
+	Name        string                  `yaml:"name" json:"name"`
+	Enabled     bool                    `yaml:"enabled" json:"enabled"`
+	CallerScope string                  `yaml:"caller_scope" json:"caller_scope"`
+	KeyPreview  string                  `yaml:"key_preview,omitempty" json:"key_preview,omitempty"`
+	Group       string                  `yaml:"group" json:"group"`
+	AuthIDs     []string                `yaml:"auth_ids,omitempty" json:"auth_ids,omitempty"`
+	ModelAccess NativeModelAccessPolicy `yaml:"model_access" json:"model_access"`
+	// Runtime indexes are rebuilt from ModelAccess during normalization. They
+	// are immutable after publication and intentionally never serialized.
+	modelIndex    map[string]struct{}
+	modelAnyIndex map[string]struct{}
 	// Optional usage limits, same semantics as the downstream KeyConfig
 	// equivalents: 0 = unlimited. USD usage is priced from the standalone
 	// model-pricing JSON, not alias mappings.
@@ -53,33 +68,51 @@ type NativeKeyBinding struct {
 	UpdatedAt time.Time `yaml:"updated_at,omitempty" json:"updated_at,omitempty"`
 }
 
+// NativeAllowedModel identifies one exact scheduler provider/model pair. A
+// model name selected for one provider does not authorize the same name under
+// another provider.
+type NativeAllowedModel struct {
+	Provider string `yaml:"provider" json:"provider"`
+	Model    string `yaml:"model" json:"model"`
+}
+
+// NativeModelAccessPolicy controls which models a CPA-native key may execute.
+// A missing policy from a pre-fork.13 state file is normalized to mode=all for
+// backward compatibility. New callers should always submit an explicit mode.
+type NativeModelAccessPolicy struct {
+	Mode   string               `yaml:"mode" json:"mode"`
+	Models []NativeAllowedModel `yaml:"models" json:"models"`
+}
+
 // CreateNativeKeyBindingInput is deliberately separate from the persisted
 // NativeKeyBinding. APIKey is consumed once to derive CallerScope and
 // KeyPreview and can never be serialized accidentally.
 type CreateNativeKeyBindingInput struct {
-	ID        string   `json:"-" yaml:"-"`
-	Name      string   `json:"-" yaml:"-"`
-	Enabled   bool     `json:"-" yaml:"-"`
-	APIKey    string   `json:"-" yaml:"-"`
-	Group     string   `json:"-" yaml:"-"`
-	AuthIDs   []string `json:"-" yaml:"-"`
-	RPM       *int     `json:"-" yaml:"-"`
-	DailyUSD  *float64 `json:"-" yaml:"-"`
-	WeeklyUSD *float64 `json:"-" yaml:"-"`
+	ID          string                   `json:"-" yaml:"-"`
+	Name        string                   `json:"-" yaml:"-"`
+	Enabled     bool                     `json:"-" yaml:"-"`
+	APIKey      string                   `json:"-" yaml:"-"`
+	Group       string                   `json:"-" yaml:"-"`
+	AuthIDs     []string                 `json:"-" yaml:"-"`
+	ModelAccess *NativeModelAccessPolicy `json:"-" yaml:"-"`
+	RPM         *int                     `json:"-" yaml:"-"`
+	DailyUSD    *float64                 `json:"-" yaml:"-"`
+	WeeklyUSD   *float64                 `json:"-" yaml:"-"`
 }
 
 // UpdateNativeKeyBindingInput replaces the mutable display/policy fields. An
 // empty APIKey keeps the existing scope; a non-empty APIKey rotates the
 // binding to that native CPA key without persisting the plaintext.
 type UpdateNativeKeyBindingInput struct {
-	Name      *string   `json:"-" yaml:"-"`
-	Enabled   *bool     `json:"-" yaml:"-"`
-	APIKey    string    `json:"-" yaml:"-"`
-	Group     *string   `json:"-" yaml:"-"`
-	AuthIDs   *[]string `json:"-" yaml:"-"`
-	RPM       *int      `json:"-" yaml:"-"`
-	DailyUSD  *float64  `json:"-" yaml:"-"`
-	WeeklyUSD *float64  `json:"-" yaml:"-"`
+	Name        *string                  `json:"-" yaml:"-"`
+	Enabled     *bool                    `json:"-" yaml:"-"`
+	APIKey      string                   `json:"-" yaml:"-"`
+	Group       *string                  `json:"-" yaml:"-"`
+	AuthIDs     *[]string                `json:"-" yaml:"-"`
+	ModelAccess *NativeModelAccessPolicy `json:"-" yaml:"-"`
+	RPM         *int                     `json:"-" yaml:"-"`
+	DailyUSD    *float64                 `json:"-" yaml:"-"`
+	WeeklyUSD   *float64                 `json:"-" yaml:"-"`
 }
 
 // NativeCallerScope mirrors CLIProxyAPI's session.CallerScope exactly. The
@@ -118,6 +151,9 @@ func normalizeNativeKeyBindings(bindings []NativeKeyBinding) error {
 		binding.KeyPreview = strings.TrimSpace(binding.KeyPreview)
 		binding.Group = strings.ToLower(strings.TrimSpace(binding.Group))
 		binding.AuthIDs = normalizeNativeAuthIDs(binding.AuthIDs)
+		if err := normalizeNativeModelAccess(binding); err != nil {
+			return fmt.Errorf("native key binding %q: %w", binding.ID, err)
+		}
 		if len(binding.AuthIDs) == 0 {
 			if recovered, ok := decodeNativeAuthIDsGroup(binding.Group); ok {
 				binding.AuthIDs = recovered
@@ -241,8 +277,114 @@ func normalizeNativeAuthIDs(authIDs []string) []string {
 	return normalized
 }
 
+func normalizeNativeModelAccess(binding *NativeKeyBinding) error {
+	mode := strings.ToLower(strings.TrimSpace(binding.ModelAccess.Mode))
+	if mode == "" {
+		if len(binding.ModelAccess.Models) > 0 {
+			mode = NativeModelAccessAllowlist
+		} else {
+			// State written before fork.13 has no model_access field. Preserve its
+			// unrestricted behavior instead of silently locking existing keys.
+			mode = NativeModelAccessAll
+		}
+	}
+	binding.ModelAccess.Mode = mode
+	binding.modelIndex = nil
+	binding.modelAnyIndex = nil
+
+	switch mode {
+	case NativeModelAccessAll:
+		binding.ModelAccess.Models = []NativeAllowedModel{}
+		return nil
+	case NativeModelAccessAllowlist:
+	default:
+		return fmt.Errorf("model_access.mode must be %q or %q", NativeModelAccessAll, NativeModelAccessAllowlist)
+	}
+
+	seen := make(map[string]struct{}, len(binding.ModelAccess.Models))
+	models := make([]NativeAllowedModel, 0, len(binding.ModelAccess.Models))
+	any := make(map[string]struct{}, len(binding.ModelAccess.Models))
+	for i, allowed := range binding.ModelAccess.Models {
+		provider := canonicalNativeProvider(allowed.Provider)
+		model := canonicalNativeModel(allowed.Model)
+		if provider == "" {
+			return fmt.Errorf("model_access.models[%d].provider is required", i)
+		}
+		if model == "" {
+			return fmt.Errorf("model_access.models[%d].model is required", i)
+		}
+		key := nativeModelKey(provider, model)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		any[model] = struct{}{}
+		models = append(models, NativeAllowedModel{Provider: provider, Model: model})
+	}
+	sort.Slice(models, func(i, j int) bool {
+		if models[i].Provider != models[j].Provider {
+			return models[i].Provider < models[j].Provider
+		}
+		return models[i].Model < models[j].Model
+	})
+	binding.ModelAccess.Models = models
+	binding.modelIndex = seen
+	binding.modelAnyIndex = any
+	return nil
+}
+
+// canonicalNativeModel mirrors CPA's terminal thinking-suffix handling. A
+// request for "model(high)" is authorized by the same entry as "model".
+func canonicalNativeModel(model string) string {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if !strings.HasSuffix(model, ")") {
+		return model
+	}
+	open := strings.LastIndex(model, "(")
+	if open <= 0 || strings.TrimSpace(model[open+1:len(model)-1]) == "" {
+		return model
+	}
+	base := strings.TrimSpace(model[:open])
+	if base == "" {
+		return model
+	}
+	return base
+}
+
+func nativeModelKey(provider, model string) string {
+	return canonicalNativeProvider(provider) + "\x00" + canonicalNativeModel(model)
+}
+
+// CPA exposes an OpenAI-compatible channel by its configured name in the
+// Management catalog but uses openai-compatible-<name> internally in
+// scheduler.pick. Treat those two host representations as one provider.
+func canonicalNativeProvider(provider string) string {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	return strings.TrimPrefix(provider, "openai-compatible-")
+}
+
+func cloneNativeModelAccess(access NativeModelAccessPolicy) NativeModelAccessPolicy {
+	access.Models = append([]NativeAllowedModel{}, access.Models...)
+	return access
+}
+
 func cloneNativeKeyBinding(binding NativeKeyBinding) NativeKeyBinding {
 	binding.AuthIDs = append([]string(nil), binding.AuthIDs...)
+	binding.ModelAccess = cloneNativeModelAccess(binding.ModelAccess)
+	if binding.modelIndex != nil {
+		original := binding.modelIndex
+		binding.modelIndex = make(map[string]struct{}, len(original))
+		for key := range original {
+			binding.modelIndex[key] = struct{}{}
+		}
+	}
+	if binding.modelAnyIndex != nil {
+		original := binding.modelAnyIndex
+		binding.modelAnyIndex = make(map[string]struct{}, len(original))
+		for key := range original {
+			binding.modelAnyIndex[key] = struct{}{}
+		}
+	}
 	return binding
 }
 
@@ -280,8 +422,12 @@ func (s *Store) CreateNativeKeyBinding(input CreateNativeKeyBindingInput) (Nativ
 		KeyPreview:  NativeKeyPreview(rawAPIKey),
 		Group:       input.Group,
 		AuthIDs:     append([]string(nil), input.AuthIDs...),
+		ModelAccess: NativeModelAccessPolicy{Mode: NativeModelAccessAll},
 		CreatedAt:   now,
 		UpdatedAt:   now,
+	}
+	if input.ModelAccess != nil {
+		candidate.ModelAccess = cloneNativeModelAccess(*input.ModelAccess)
 	}
 	if input.RPM != nil {
 		candidate.RPM = *input.RPM
@@ -378,6 +524,9 @@ func (s *Store) UpdateNativeKeyBinding(id string, input UpdateNativeKeyBindingIn
 		if len(normalizeNativeAuthIDs(*input.AuthIDs)) > 0 {
 			candidate.Group = ""
 		}
+	}
+	if input.ModelAccess != nil {
+		candidate.ModelAccess = cloneNativeModelAccess(*input.ModelAccess)
 	}
 	if input.RPM != nil {
 		candidate.RPM = *input.RPM
@@ -489,15 +638,20 @@ func (s *Store) replaceNativeKeyBindingsLocked(bindings []NativeKeyBinding) {
 }
 
 // NativeKeyConstraint is the single authorization boundary resolved for one
-// enabled native key binding. Exactly one of Group or AuthIDs is populated.
+// enabled native key binding. Exactly one of Group or AuthIDs is populated,
+// and the immutable model indexes enforce the same binding before selection.
 type NativeKeyConstraint struct {
-	Group   string
-	AuthIDs []string
+	Group         string
+	AuthIDs       []string
+	allModels     bool
+	modelIndex    map[string]struct{}
+	modelAnyIndex map[string]struct{}
 }
 
 // ResolveNativeKeyConstraint resolves a CPA-provided caller_scope into either
-// a group or an exact auth-ID allow-list. provider and model remain reserved for
-// future per-route bindings.
+// a group or an exact auth-ID allow-list plus its model-access policy. The
+// provider and model arguments are retained for source compatibility; callers
+// enforce the returned constraint with AllowsModel.
 func (s *Store) ResolveNativeKeyConstraint(callerScope, provider, model string) (NativeKeyConstraint, bool) {
 	_ = provider
 	_ = model
@@ -512,13 +666,36 @@ func (s *Store) ResolveNativeKeyConstraint(callerScope, provider, model string) 
 		return NativeKeyConstraint{}, false
 	}
 	constraint := NativeKeyConstraint{
-		AuthIDs: append([]string(nil), binding.AuthIDs...),
+		AuthIDs:       append([]string(nil), binding.AuthIDs...),
+		allModels:     binding.ModelAccess.Mode == NativeModelAccessAll,
+		modelIndex:    binding.modelIndex,
+		modelAnyIndex: binding.modelAnyIndex,
 	}
 	if len(constraint.AuthIDs) == 0 {
 		constraint.Group = binding.Group
 	}
 	s.mu.RUnlock()
 	return constraint, true
+}
+
+// AllowsModel reports whether this binding authorizes a provider/model pair.
+// An empty provider checks whether any explicitly selected provider carries
+// that model, which is used only when an older host omits request providers.
+func (c NativeKeyConstraint) AllowsModel(provider, model string) bool {
+	if c.allModels {
+		return true
+	}
+	model = canonicalNativeModel(model)
+	if model == "" {
+		return false
+	}
+	provider = canonicalNativeProvider(provider)
+	if provider == "" {
+		_, allowed := c.modelAnyIndex[model]
+		return allowed
+	}
+	_, allowed := c.modelIndex[nativeModelKey(provider, model)]
+	return allowed
 }
 
 // ResolveNativeKeyGroup resolves a CPA-provided caller_scope into the single

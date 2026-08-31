@@ -131,7 +131,7 @@ func (a *App) registration() Registration {
 				{Name: "state_file", Type: "string", Description: "JSON state file used for access-policy changes made through the Management API."},
 				{Name: "pricing_file", Type: "string", Description: "Standalone model price catalog (USD per 1M tokens). Default: cpa-access-guard-model-pricing.json next to state_file. Relative paths resolve against the CPA process working directory."},
 				{Name: "keys", Type: "array", Description: "Initial downstream API-key access-policy list. State file wins after it exists."},
-				{Name: "native_key_bindings", Type: "array", Description: "Optional caller-scope bindings that constrain CPA-native downstream API keys to a credential group or exact auth IDs. Requires a Scheduler path carrying caller_scope, Home disabled, no unsupported special route, and quota-exceeded.antigravity-credits=false."},
+				{Name: "native_key_bindings", Type: "array", Description: "Optional caller-scope bindings that constrain CPA-native downstream API keys by model access and by a credential group or exact auth IDs. Requires a Scheduler path carrying caller_scope, Home disabled, no unsupported special route, and quota-exceeded.antigravity-credits=false."},
 				{Name: "pricing_sync", Type: "object", Description: "Dual-source price refresh with LiteLLM primary and models.dev fallback. Always on. Optional {interval_hours, litellm_url, models_dev_url}; legacy url remains a models.dev override."},
 			},
 		},
@@ -229,6 +229,24 @@ func nativeQuotaError(decision policy.NativeQuotaDecision, model string) (code, 
 		return "quota_exceeded", "The usage limit has been reached"
 	}
 	return "quota_exceeded", string(body)
+}
+
+// nativeModelNotAllowedMessage is a complete OpenAI-compatible error body.
+// CPA preserves valid JSON error text verbatim; a plain message would cause
+// its generic 403 adapter to replace our machine-readable code with
+// insufficient_quota.
+func nativeModelNotAllowedMessage() string {
+	body, err := json.Marshal(map[string]any{
+		"error": map[string]any{
+			"type":    "permission_error",
+			"code":    "model_not_allowed",
+			"message": "Model is not allowed for this API key",
+		},
+	})
+	if err != nil {
+		return "Model is not allowed for this API key"
+	}
+	return string(body)
 }
 
 // noCandidateMessage renders the group-isolation rejection exactly like the
@@ -335,6 +353,7 @@ func (a *App) pickScheduler(raw []byte) ([]byte, error) {
 	}
 	group := ""
 	var authIDs []string
+	var nativeConstraint policy.NativeKeyConstraint
 	nativeBinding := false
 	// Native CPA keys are authenticated before scheduler.pick. CPA forwards
 	// their stable (hashed) identity as caller_scope, allowing the policy store
@@ -350,18 +369,25 @@ func (a *App) pickScheduler(raw []byte) ([]byte, error) {
 		return ErrorEnvelope("invalid_scheduler_metadata", "invalid caller_scope metadata", http.StatusServiceUnavailable), nil
 	}
 	if callerScope != "" {
-		// Usage-limit gate for native keys: RPM decrements here (concurrency
-		// safe), USD limits compare against the usage.handle ledger. A binding
-		// with no limits configured passes through with zero side effects.
-		if decision, limited := a.store.CheckNativeKeyQuota(callerScope); limited {
-			code, message := nativeQuotaError(decision, req.Model)
-			return ErrorEnvelope(code, message, http.StatusTooManyRequests), nil
-		}
 		constraint, resolved := a.store.ResolveNativeKeyConstraint(callerScope, req.Provider, req.Model)
 		nativeBinding = resolved
 		if nativeBinding {
+			nativeConstraint = constraint
 			group = strings.ToLower(strings.TrimSpace(constraint.Group))
 			authIDs = constraint.AuthIDs
+			if !schedulerRequestModelAllowed(constraint, req) {
+				return ErrorEnvelope("model_not_allowed", nativeModelNotAllowedMessage(), http.StatusForbidden), nil
+			}
+		}
+		// Usage-limit gate for native keys: RPM decrements here (concurrency
+		// safe), USD limits compare against the usage.handle ledger. A binding
+		// with no limits configured passes through with zero side effects. Model
+		// authorization runs first so a rejected request never consumes RPM.
+		if nativeBinding {
+			if decision, limited := a.store.CheckNativeKeyQuota(callerScope); limited {
+				code, message := nativeQuotaError(decision, req.Model)
+				return ErrorEnvelope(code, message, http.StatusTooManyRequests), nil
+			}
 		}
 	}
 	if nativeBinding {
@@ -397,6 +423,12 @@ func (a *App) pickScheduler(raw []byte) ([]byte, error) {
 		if !schedulerCandidateUsable(cand.Status) {
 			continue
 		}
+		if nativeBinding && !nativeConstraint.AllowsModel(cand.Provider, req.Model) {
+			// The request-level check permits a multi-provider route when at least
+			// one provider is selected. Recheck each candidate so an unselected
+			// provider carrying the same model name cannot bypass the policy.
+			continue
+		}
 		if len(allowedAuthIDs) > 0 {
 			if _, allowed := allowedAuthIDs[cand.ID]; allowed {
 				matched = append(matched, cand)
@@ -422,6 +454,36 @@ func (a *App) pickScheduler(raw []byte) ([]byte, error) {
 		}
 	}
 	return OKEnvelope(SchedulerPickResponse{Handled: true, AuthID: best.ID})
+}
+
+func schedulerRequestModelAllowed(constraint policy.NativeKeyConstraint, req SchedulerPickRequest) bool {
+	providers := schedulerRequestProviders(req)
+	if len(providers) == 0 {
+		return constraint.AllowsModel("", req.Model)
+	}
+	for _, provider := range providers {
+		if constraint.AllowsModel(provider, req.Model) {
+			return true
+		}
+	}
+	return false
+}
+
+func schedulerRequestProviders(req SchedulerPickRequest) []string {
+	providers := make([]string, 0, len(req.Providers)+1)
+	seen := make(map[string]struct{}, len(req.Providers)+1)
+	for _, provider := range append([]string{req.Provider}, req.Providers...) {
+		provider = strings.ToLower(strings.TrimSpace(provider))
+		if provider == "" {
+			continue
+		}
+		if _, exists := seen[provider]; exists {
+			continue
+		}
+		seen[provider] = struct{}{}
+		providers = append(providers, provider)
+	}
+	return providers
 }
 
 func schedulerCandidateUsable(status string) bool {
