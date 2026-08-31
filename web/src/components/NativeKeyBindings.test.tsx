@@ -604,6 +604,65 @@ describe("NativeKeyBindingsTab", () => {
     expect(payload).not.toHaveProperty("group");
   });
 
+  it("round-trips a fork.13 direct binding unchanged when AI provider credentials are available", async () => {
+    const legacyDirectBinding: NativeKeyBinding = {
+      ...existing,
+      group: undefined,
+      auth_ids: ["tenant/missing.json", "tenant/codex-a.json"],
+      model_access: {
+        mode: "allowlist",
+        models: [
+          { provider: "codex", model: "retired-model" },
+          { provider: "gemini", model: "gemini-2.5-pro" },
+        ],
+      },
+    };
+    apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValue({
+      entries: [{
+        key_index: 0,
+        key_preview: legacyDirectBinding.key_preview,
+        binding: legacyDirectBinding,
+      }],
+      orphan_bindings: [],
+    });
+
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<NativeKeyBindingsTab />);
+      await tick();
+    });
+    const editButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("编辑 / 轮换"));
+    await act(async () => {
+      editButton!.click();
+      await tick();
+    });
+
+    expect(container.textContent).toContain("AI 提供商凭证");
+    expect(container.textContent).toContain("tenant/missing.json");
+    expect(container.textContent).toContain("retired-model");
+
+    const form = container.querySelector(".native-binding-editor form") as HTMLFormElement;
+    await act(async () => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await tick();
+    });
+
+    expect(apiMocks.updateNativeKeyBinding).toHaveBeenCalledWith({
+      id: "client-a",
+      name: "Client A",
+      enabled: true,
+      auth_ids: ["tenant/codex-a.json", "tenant/missing.json"],
+      model_access: {
+        mode: "allowlist",
+        models: [
+          { provider: "codex", model: "retired-model" },
+          { provider: "gemini", model: "gemini-2.5-pro" },
+        ],
+      },
+    });
+  });
+
   it("shows a degraded direct binding as requiring credential reselection", async () => {
     const degraded: NativeKeyBinding = {
       ...existing,
