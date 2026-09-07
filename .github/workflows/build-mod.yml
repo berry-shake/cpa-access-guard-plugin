@@ -37,6 +37,9 @@ jobs:
       - name: Web build (embed UI)
         run: make web-build
 
+      - name: Web tests
+        run: npm --prefix web test
+
       - name: Test
         run: go test ./...
 
@@ -154,7 +157,7 @@ jobs:
         timeout-minutes: 45
         uses: go-cross/cgo-actions@v1
         env:
-          GOFLAGS: -trimpath -buildmode=c-shared
+          GOFLAGS: -trimpath -buildmode=c-shared -tags=cshared -buildvcs=false
         with:
           dir: ./cmd/cpa-access-guard
           packages: .

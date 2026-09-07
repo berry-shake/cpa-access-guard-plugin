@@ -1,7 +1,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ClassifyRule, NativeKeyBinding } from "../types";
+import type { ClassifyRule, NativeBindingUsageSummary, NativeKeyBinding } from "../types";
 import { _resetLocale } from "../i18n";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -37,6 +37,37 @@ const existingSecret = "sk-existing-native-secret-0123456789";
 let container: HTMLDivElement;
 let root: ReturnType<typeof createRoot> | null = null;
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+const weeklyUsage: NativeBindingUsageSummary = {
+  rpm_limit: 0,
+  daily_usd_limit: 0,
+  weekly_usd_limit: 100,
+  rpm_used: 0,
+  daily_usd_used: 0,
+  weekly_usd_used: 17,
+  daily_calls: 1840,
+  weekly_calls: 3932,
+};
+
+function quotaCatalog(binding: NativeKeyBinding) {
+  return {
+    entries: [{ key_index: 0, key_preview: binding.key_preview, binding }],
+    orphan_bindings: [],
+  };
+}
+
+async function renderQuotaBinding(binding: NativeKeyBinding) {
+  apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValue(quotaCatalog(binding));
+  await act(async () => {
+    root = createRoot(container);
+    root.render(<NativeKeyBindingsTab />);
+    await tick();
+  });
+}
+
+function weeklyMeter() {
+  return container.querySelector('[role="meter"][aria-label="周额度剩余"]');
+}
 
 function change(input: HTMLInputElement, value: string) {
   // Bypass React's per-element value tracker so the synthetic onChange sees
@@ -109,6 +140,183 @@ describe("buildNativeBindingGroupOptions", () => {
       { name: "c", field: "filename", pattern: "c", group: "off", enabled: false },
     ]);
     expect(options).toEqual(["free", "team", "plus", "supported", "classify:vip"]);
+  });
+});
+
+describe("NativeKeyBindingsTab weekly quota", () => {
+  it("shows remaining dollars and percentage between calls and card actions", async () => {
+    await renderQuotaBinding({ ...existing, usage: weeklyUsage });
+
+    const meter = weeklyMeter();
+    expect(meter).toBeTruthy();
+    expect(meter!.getAttribute("aria-valuemin")).toBe("0");
+    expect(meter!.getAttribute("aria-valuemax")).toBe("100");
+    expect(meter!.getAttribute("aria-valuenow")).toBe("83");
+    const quota = meter!.closest(".native-weekly-quota")!;
+    expect(quota.textContent).toContain("7D");
+    expect(quota.textContent).toContain("83%");
+    expect(quota.textContent).toContain("剩余 $83.00 / $100.00");
+    expect(quota.classList.contains("ok")).toBe(true);
+
+    const card = meter!.closest(".native-binding-card")!;
+    const calls = Array.from(card.querySelectorAll("dd"))
+      .find((node) => node.textContent?.trim() === "1840/3932");
+    const actions = card.querySelector(".native-binding-actions")!;
+    expect(calls).toBeTruthy();
+    expect(calls!.compareDocumentPosition(meter!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(meter!.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(card.textContent).not.toContain("$17.00/$100.00");
+  });
+
+  it.each([
+    { name: "unlimited weekly quota with daily and RPM limits", usage: { ...weeklyUsage, weekly_usd_limit: 0, daily_usd_limit: 10, rpm_limit: 60 } },
+    { name: "negative weekly limit", usage: { ...weeklyUsage, weekly_usd_limit: -1 } },
+    { name: "non-finite weekly limit", usage: { ...weeklyUsage, weekly_usd_limit: Infinity } },
+    { name: "NaN weekly limit", usage: { ...weeklyUsage, weekly_usd_limit: NaN } },
+    { name: "negative used dollars", usage: { ...weeklyUsage, weekly_usd_used: -1 } },
+    { name: "non-finite used dollars", usage: { ...weeklyUsage, weekly_usd_used: Infinity } },
+    { name: "NaN used dollars", usage: { ...weeklyUsage, weekly_usd_used: NaN } },
+    { name: "missing usage", usage: undefined },
+  ])("hides the entire remaining quota region for $name", async ({ usage }) => {
+    await renderQuotaBinding({ ...existing, usage });
+
+    expect(weeklyMeter()).toBeNull();
+    expect(container.querySelector(".native-weekly-quota")).toBeNull();
+    expect(container.textContent).not.toContain("周额度剩余");
+    expect(container.textContent).not.toContain("NaN");
+    expect(container.textContent).not.toContain("Infinity");
+  });
+
+  it("hides the quota region for a disabled binding with a configured limit", async () => {
+    await renderQuotaBinding({ ...existing, enabled: false, usage: weeklyUsage });
+
+    expect(weeklyMeter()).toBeNull();
+    expect(container.querySelector(".native-weekly-quota")).toBeNull();
+  });
+
+  it.each([
+    { used: 0, percent: "100%", value: 100, color: "ok", remaining: "$100.00", exhausted: false },
+    { used: 42, percent: "58%", value: 58, color: "ok", remaining: "$58.00", exhausted: false },
+    { used: 71, percent: "29%", value: 29, color: "ok", remaining: "$29.00", exhausted: false },
+    { used: 79, percent: "21%", value: 21, color: "ok", remaining: "$21.00", exhausted: false },
+    { used: 80, percent: "20%", value: 20, color: "warn", remaining: "$20.00", exhausted: false },
+    { used: 95, percent: "5%", value: 5, color: "warn", remaining: "$5.00", exhausted: false },
+    { used: 96, percent: "4%", value: 4, color: "danger", remaining: "$4.00", exhausted: false },
+    { used: 99.5, percent: "<1%", value: 0.5, color: "danger", remaining: "$0.50", exhausted: false },
+    { used: 99.999, percent: "<1%", value: 0.001, color: "danger", remaining: "<$0.01", exhausted: false },
+    { used: 100, percent: "0%", value: 0, color: "danger", remaining: "$0.00", exhausted: true },
+    { used: 117, percent: "0%", value: 0, color: "danger", remaining: "$0.00", exhausted: true },
+  ])("represents a $used dollar usage balance without losing threshold or exhaustion state", async ({ used, percent, value, color, remaining, exhausted }) => {
+    await renderQuotaBinding({ ...existing, usage: { ...weeklyUsage, weekly_usd_used: used } });
+
+    const meter = weeklyMeter()!;
+    expect(meter).toBeTruthy();
+    expect(Number(meter.getAttribute("aria-valuenow"))).toBeCloseTo(value, 6);
+    const quota = meter.closest(".native-weekly-quota")!;
+    expect(quota.classList.contains(color)).toBe(true);
+    expect(quota.textContent).toContain(percent);
+    expect(quota.textContent).toContain(`剩余 ${remaining} / $100.00`);
+    expect(quota.textContent?.includes("已用尽")).toBe(exhausted);
+    expect(quota.textContent).not.toContain("NaN");
+  });
+
+  it.each([
+    { used: 2.4, percent: "20%", value: 20, remaining: "$0.60" },
+    { used: 2.85, percent: "5%", value: 5, remaining: "$0.15" },
+  ])("keeps the warning threshold exact for $used dollars used from a 3 dollar limit", async ({ used, percent, value, remaining }) => {
+    await renderQuotaBinding({
+      ...existing,
+      usage: { ...weeklyUsage, weekly_usd_limit: 3, weekly_usd_used: used },
+    });
+
+    const meter = weeklyMeter()!;
+    const quota = meter.closest(".native-weekly-quota")!;
+    expect(Number(meter.getAttribute("aria-valuenow"))).toBeCloseTo(value, 6);
+    expect(quota.querySelector(".native-weekly-quota-percent")?.textContent).toBe(percent);
+    expect(quota.classList.contains("warn")).toBe(true);
+    expect(quota.textContent).toContain(`剩余 ${remaining} / $3.00`);
+  });
+
+  it("does not label a nearly full balance as completely unused after precision normalization", async () => {
+    await renderQuotaBinding({ ...existing, usage: { ...weeklyUsage, weekly_usd_used: 1e-12 } });
+
+    const quota = weeklyMeter()!.closest(".native-weekly-quota")!;
+    expect(quota.querySelector(".native-weekly-quota-percent")?.textContent).toBe("99%");
+    expect(quota.classList.contains("ok")).toBe(true);
+    expect(quota.textContent).not.toContain("已用尽");
+  });
+
+  it("shows the backend reset time in local time for an active weekly window", async () => {
+    const resetAt = "2099-09-14T10:29:00";
+    await renderQuotaBinding({
+      ...existing,
+      usage: { ...weeklyUsage, weekly_reset_at: resetAt },
+    });
+
+    const quota = weeklyMeter()!.closest(".native-weekly-quota")!;
+    const resetTime = quota.querySelector("time");
+    expect(resetTime?.getAttribute("datetime")).toBe(resetAt);
+    expect(resetTime?.textContent).toContain("09/14");
+    expect(resetTime?.textContent).toContain("10:29");
+    expect(quota.textContent).toContain("重置");
+    expect(quota.textContent).not.toContain("使用后开始计时");
+  });
+
+  it.each([undefined, "2099-09-14T10:29:00", "invalid-date"])(
+    "shows the start-on-use state without a moving date when no weekly calls exist (%s)",
+    async (resetAt) => {
+      await renderQuotaBinding({
+        ...existing,
+        usage: { ...weeklyUsage, weekly_usd_used: 0, daily_calls: 0, weekly_calls: 0, weekly_reset_at: resetAt },
+      });
+
+      const quota = weeklyMeter()!.closest(".native-weekly-quota")!;
+      expect(quota.textContent).toContain("使用后开始计时");
+      expect(quota.querySelector("time")).toBeNull();
+      expect(quota.textContent).not.toContain("Invalid Date");
+    },
+  );
+
+  it.each([undefined, "", "invalid-date"])(
+    "omits unavailable or invalid reset dates for an active weekly window (%s)",
+    async (resetAt) => {
+      await renderQuotaBinding({ ...existing, usage: { ...weeklyUsage, weekly_reset_at: resetAt } });
+
+      const quota = weeklyMeter()!.closest(".native-weekly-quota")!;
+      expect(quota.querySelector("time")).toBeNull();
+      expect(quota.textContent).not.toContain("使用后开始计时");
+      expect(quota.textContent).not.toContain("Invalid Date");
+      expect(quota.textContent).toContain("83%");
+    },
+  );
+
+  it("refreshes the meter and clears the old reset date after resetting quota", async () => {
+    await renderQuotaBinding({
+      ...existing,
+      usage: { ...weeklyUsage, weekly_reset_at: "2099-09-14T10:29:00" },
+    });
+    expect(weeklyMeter()!.getAttribute("aria-valuenow")).toBe("83");
+    expect(weeklyMeter()!.closest(".native-weekly-quota")!.querySelector("time")).toBeTruthy();
+
+    apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValue(quotaCatalog({
+      ...existing,
+      usage: { ...weeklyUsage, weekly_usd_used: 0, daily_calls: 0, weekly_calls: 0, weekly_reset_at: "2099-09-21T10:29:00" },
+    }));
+    const resetButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("重置额度"));
+    await act(async () => {
+      resetButton!.click();
+      await tick();
+    });
+
+    expect(apiMocks.resetNativeKeyBindingQuota).toHaveBeenCalledWith("client-a");
+    expect(apiMocks.fetchNativeKeyBindingCatalog).toHaveBeenCalledTimes(2);
+    const meter = weeklyMeter()!;
+    const quota = meter.closest(".native-weekly-quota")!;
+    expect(meter.getAttribute("aria-valuenow")).toBe("100");
+    expect(quota.textContent).toContain("剩余 $100.00 / $100.00");
+    expect(quota.textContent).toContain("使用后开始计时");
+    expect(quota.querySelector("time")).toBeNull();
   });
 });
 

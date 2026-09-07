@@ -219,6 +219,7 @@ export interface NativeBindingUsageSummary {
   weekly_usd_used: number;
   daily_calls: number;
   weekly_calls: number;
+  weekly_reset_at?: string;
 }
 
 export interface NativeAllowedModel {

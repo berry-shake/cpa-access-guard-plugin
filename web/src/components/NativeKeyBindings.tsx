@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { useT } from "../i18n";
 import NativeModelAccessPicker from "./NativeModelAccessPicker";
+import WeeklyQuotaRemaining from "./WeeklyQuotaRemaining";
 import {
   createNativeKeyBinding,
   deleteNativeKeyBinding,
@@ -323,14 +324,6 @@ export default function NativeKeyBindingsTab() {
                         </dd>
                       </div>
                     )}
-                    {binding.usage.weekly_usd_limit > 0 && (
-                      <div>
-                        <dt>{t("mapping.native.weeklyUsd")}</dt>
-                        <dd className={`mono${binding.usage.weekly_usd_used >= binding.usage.weekly_usd_limit ? " native-quota-full" : ""}`}>
-                          ${binding.usage.weekly_usd_used.toFixed(2)}/${binding.usage.weekly_usd_limit.toFixed(2)}
-                        </dd>
-                      </div>
-                    )}
                     {(binding.usage.daily_calls > 0 || binding.usage.weekly_calls > 0) && (
                       <div>
                         <dt>{t("mapping.native.calls")}</dt>
@@ -341,6 +334,7 @@ export default function NativeKeyBindingsTab() {
                     )}
                   </dl>
                 )}
+                {binding?.enabled && binding.usage && <WeeklyQuotaRemaining usage={binding.usage} />}
                 <div className="native-binding-actions">
                   {binding ? (
                     <>

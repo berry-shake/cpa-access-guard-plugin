@@ -293,9 +293,11 @@ UI areas:
 | Keys | Create / edit / rotate / delete keys; bind models or aliases; RPM & budgets |
 | Mapping → Aliases | Global multi-target aliases, dispatch, pricing |
 | Mapping → Classification | Custom credential groups + match preview |
-| Mapping → Native key bindings | List every CPA top-level key; configure built-in or `classify:` auth-file groups; retain orphan bindings for review |
+| Mapping → Native key bindings | List every CPA top-level key; select credential groups or individual auth-file / AI-provider credentials; view weekly quota remaining; retain orphan bindings for review |
 | Model Pricing | LiteLLM primary and models.dev fallback status; search, manual overrides, deletion tombstones, and automatic restore |
 | Model picker | Catalog of providers; tier / **Custom · …** subgroups |
+
+Enabled native-key cards show a 7D remaining-quota bar only when a weekly USD cap is configured; an empty or zero weekly cap hides the entire block. The balance uses the plugin's billed USD usage. Green indicates more than 20% remaining, amber 5–20%, and red less than 5%; exhausted quotas show 0%. The reset time is displayed in your browser's local timezone for an active seven-day usage window. Before use, after a manual quota reset, or after an idle window expires, the card shows "Starts on next use" instead of a provisional reset date. The display updates when you refresh the list, save a binding, or reset its quota.
 
 Dev UI without rebuilding the `.so`:
 

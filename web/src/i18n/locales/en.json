@@ -401,6 +401,11 @@
       "limitsInvalid": "Limits must be zero or positive numbers.",
       "limitsHint": "Empty or 0 = unlimited. USD usage is billed from the model price catalog.",
       "calls": "Calls (day/week)",
+      "weeklyRemaining": "Weekly quota remaining",
+      "weeklyRemainingAmount": "Remaining {{remaining}} / {{limit}}",
+      "quotaExhausted": "Exhausted",
+      "quotaStartsOnUse": "Starts on next use",
+      "quotaResetsAt": "Resets",
       "resetQuota": "Reset quota",
       "resetQuotaConfirm": "Reset RPM, daily/weekly usage, and all usage records for native key binding {{id}}? This cannot be undone."
     },
