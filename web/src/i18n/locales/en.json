@@ -394,7 +394,7 @@
       "requestRouting": "Request routing",
       "roundRobin": "Concurrent round robin",
       "roundRobinHint": "Distribute requests in turn across available bound credentials, allowing multiple credentials to work concurrently. Each request uses one credential at a time.",
-      "roundRobinScope": "Applies only while this binding is enabled. This key bypasses session affinity; other keys retain their settings. Give credentials the same priority to rotate among them.",
+      "roundRobinScope": "Applies only while this binding is enabled. When on, rotate requests without pinning a session to one credential; when off, keep existing priority selection. Other keys retain their settings. Give credentials the same priority to rotate among them.",
       "enableBinding": "Enable binding",
       "saving": "Saving…",
       "limitsTitle": "Usage limits (optional)",

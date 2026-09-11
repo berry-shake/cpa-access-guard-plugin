@@ -12,6 +12,8 @@ In plain words: you issue your own `cpa_…` keys to clients. Each key only sees
 | **Lineage** | Derived from [origin652/cpa-plugin-key-policy](https://github.com/origin652/cpa-plugin-key-policy) under the MIT license |
 | **中文说明** | [README.zh-CN.md](./README.zh-CN.md) |
 
+**v0.4.4-fork.15 release scope:** per-native-key Concurrent round robin, off by default. Session-affinity changes and single-credential optimizations are deferred. With the switch off, multi-credential bindings retain highest-priority selection and use the lowest Auth ID to break ties; they do not gain CPA session affinity. Single-credential bindings retain their existing path. Unbound native keys keep CPA's native scheduling and affinity. This release adds no CPA SDK dependency or request interceptor/lifecycle hooks.
+
 ---
 
 ## What it does (human version)
@@ -192,7 +194,7 @@ Native bindings have an optional **Concurrent round robin** switch (`round_robin
 
 Rotation follows the next available credential ID and continues across requests and temporary candidate changes. A direct credential joins only after it is added to the binding. Removing a credential from the binding excludes it from subsequent selections; updating a binding does not itself cancel requests already sent. The switch is persisted, while cursors live only in memory and may restart after reload. CPA still controls error classification, retries, and cooldowns; its retry-credential cap and the binding's RPM limit can restrict failover.
 
-This switch overrides session-sticky selection only for the opted-in native binding. No global CPA routing or session-affinity setting is changed. Unbound native keys still defer to CPA, and bindings with the switch off retain their existing priority-based selection. The plugin always returns an explicitly allowed credential, never delegates a restricted binding back to CPA's unrestricted pool.
+On an enabled native binding, the switch rotates each request without pinning sessions to a credential or sending one request to several credentials at once. **When off, the binding keeps the existing highest-priority selection with the lowest Auth ID as the tie-breaker; it does not use CPA's native session-affinity selector.** Single-credential bindings keep their existing path. No global CPA routing or session-affinity setting is changed, and unbound native keys still defer to CPA. The plugin always returns an explicitly allowed credential, never delegates a restricted binding back to CPA's unrestricted pool.
 
 The Web UI reads auth-directory IDs from CPA's `/v0/management/auth-files`. AI-provider config auths are absent from that list, so an isolated browser adapter temporarily processes CPA's existing Management response, derives the exact Scheduler Auth ID with CPA's stable-ID algorithm, and verifies it while reading runtime models through `/v0/management/auth-files/models?name=<Auth ID>`. Provider API keys never enter component state, URLs, browser storage, plugin state, plugin-backend requests, or logs; only the derived ID, `auth-index`, safe display metadata, and models leave the adapter. An entry that cannot be verified through the runtime-model route remains visible but cannot be selected.
 

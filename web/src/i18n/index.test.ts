@@ -75,6 +75,21 @@ describe("translate", () => {
   );
 
   it.each([
+    ["zh-CN", "关闭后保持原有优先级选择", "不按会话固定凭据"],
+    ["zh-TW", "關閉後維持原有優先順序選擇", "不依工作階段固定憑證"],
+    ["en", "when off, keep existing priority selection", "without pinning a session"],
+    ["ru", "при выключении сохраняется прежний выбор по приоритету", "без закрепления сессии"],
+  ] as const)(
+    "describes fork.15 legacy off behavior and request rotation in %s",
+    (locale, offFragment, rotationFragment) => {
+      _resetLocale(locale);
+      const scope = translate("mapping.native.roundRobinScope");
+      expect(scope).toContain(offFragment);
+      expect(scope).toContain(rotationFragment);
+    },
+  );
+
+  it.each([
     ["zh-CN", "仍然有效", "默认/自由调度"],
     ["zh-TW", "仍然有效", "預設/自由調度"],
     ["en", "remains valid", "default/free scheduling"],
