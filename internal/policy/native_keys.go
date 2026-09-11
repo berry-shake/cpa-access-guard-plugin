@@ -49,6 +49,7 @@ type NativeKeyBinding struct {
 	ID          string                  `yaml:"id" json:"id"`
 	Name        string                  `yaml:"name" json:"name"`
 	Enabled     bool                    `yaml:"enabled" json:"enabled"`
+	RoundRobin  bool                    `yaml:"round_robin" json:"round_robin"`
 	CallerScope string                  `yaml:"caller_scope" json:"caller_scope"`
 	KeyPreview  string                  `yaml:"key_preview,omitempty" json:"key_preview,omitempty"`
 	Group       string                  `yaml:"group" json:"group"`
@@ -91,6 +92,7 @@ type CreateNativeKeyBindingInput struct {
 	ID          string                   `json:"-" yaml:"-"`
 	Name        string                   `json:"-" yaml:"-"`
 	Enabled     bool                     `json:"-" yaml:"-"`
+	RoundRobin  bool                     `json:"-" yaml:"-"`
 	APIKey      string                   `json:"-" yaml:"-"`
 	Group       string                   `json:"-" yaml:"-"`
 	AuthIDs     []string                 `json:"-" yaml:"-"`
@@ -106,6 +108,7 @@ type CreateNativeKeyBindingInput struct {
 type UpdateNativeKeyBindingInput struct {
 	Name        *string                  `json:"-" yaml:"-"`
 	Enabled     *bool                    `json:"-" yaml:"-"`
+	RoundRobin  *bool                    `json:"-" yaml:"-"`
 	APIKey      string                   `json:"-" yaml:"-"`
 	Group       *string                  `json:"-" yaml:"-"`
 	AuthIDs     *[]string                `json:"-" yaml:"-"`
@@ -305,8 +308,8 @@ func normalizeNativeModelAccess(binding *NativeKeyBinding) error {
 	models := make([]NativeAllowedModel, 0, len(binding.ModelAccess.Models))
 	any := make(map[string]struct{}, len(binding.ModelAccess.Models))
 	for i, allowed := range binding.ModelAccess.Models {
-		provider := canonicalNativeProvider(allowed.Provider)
-		model := canonicalNativeModel(allowed.Model)
+		provider := CanonicalNativeProvider(allowed.Provider)
+		model := CanonicalNativeModel(allowed.Model)
 		if provider == "" {
 			return fmt.Errorf("model_access.models[%d].provider is required", i)
 		}
@@ -333,9 +336,10 @@ func normalizeNativeModelAccess(binding *NativeKeyBinding) error {
 	return nil
 }
 
-// canonicalNativeModel mirrors CPA's terminal thinking-suffix handling. A
-// request for "model(high)" is authorized by the same entry as "model".
-func canonicalNativeModel(model string) string {
+// CanonicalNativeModel mirrors CPA's terminal thinking-suffix handling. Model
+// authorization and credential rotation share one identity for "model(high)"
+// and "model".
+func CanonicalNativeModel(model string) string {
 	model = strings.ToLower(strings.TrimSpace(model))
 	if !strings.HasSuffix(model, ")") {
 		return model
@@ -352,13 +356,14 @@ func canonicalNativeModel(model string) string {
 }
 
 func nativeModelKey(provider, model string) string {
-	return canonicalNativeProvider(provider) + "\x00" + canonicalNativeModel(model)
+	return CanonicalNativeProvider(provider) + "\x00" + CanonicalNativeModel(model)
 }
 
-// CPA exposes an OpenAI-compatible channel by its configured name in the
+// CanonicalNativeProvider normalizes the identity shared by authorization and
+// credential rotation. CPA exposes an OpenAI-compatible channel by its name in the
 // Management catalog but uses openai-compatible-<name> internally in
 // scheduler.pick. Treat those two host representations as one provider.
-func canonicalNativeProvider(provider string) string {
+func CanonicalNativeProvider(provider string) string {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	return strings.TrimPrefix(provider, "openai-compatible-")
 }
@@ -418,6 +423,7 @@ func (s *Store) CreateNativeKeyBinding(input CreateNativeKeyBindingInput) (Nativ
 		ID:          input.ID,
 		Name:        input.Name,
 		Enabled:     input.Enabled,
+		RoundRobin:  input.RoundRobin,
 		CallerScope: callerScope,
 		KeyPreview:  NativeKeyPreview(rawAPIKey),
 		Group:       input.Group,
@@ -464,7 +470,11 @@ func (s *Store) CreateNativeKeyBinding(input CreateNativeKeyBindingInput) (Nativ
 	}
 	s.mu.Lock()
 	s.replaceNativeKeyBindingsLocked(existing)
+	onChanged := s.onNativeKeyBindingsChanged
 	s.mu.Unlock()
+	if onChanged != nil {
+		onChanged()
+	}
 	return candidate, nil
 }
 
@@ -513,6 +523,9 @@ func (s *Store) UpdateNativeKeyBinding(id string, input UpdateNativeKeyBindingIn
 	if input.Enabled != nil {
 		candidate.Enabled = *input.Enabled
 	}
+	if input.RoundRobin != nil {
+		candidate.RoundRobin = *input.RoundRobin
+	}
 	if input.Group != nil {
 		candidate.Group = *input.Group
 		if strings.TrimSpace(*input.Group) != "" {
@@ -555,7 +568,11 @@ func (s *Store) UpdateNativeKeyBinding(id string, input UpdateNativeKeyBindingIn
 	}
 	s.mu.Lock()
 	s.replaceNativeKeyBindingsLocked(existing)
+	onChanged := s.onNativeKeyBindingsChanged
 	s.mu.Unlock()
+	if onChanged != nil {
+		onChanged()
+	}
 	return candidate, nil
 }
 
@@ -593,8 +610,20 @@ func (s *Store) DeleteNativeKeyBinding(id string) error {
 	}
 	s.mu.Lock()
 	s.replaceNativeKeyBindingsLocked(next)
+	onChanged := s.onNativeKeyBindingsChanged
 	s.mu.Unlock()
+	if onChanged != nil {
+		onChanged()
+	}
 	return nil
+}
+
+// SetOnNativeKeyBindingsChanged registers a callback after a durable binding
+// mutation is published. It runs without s.mu and may read the new policies.
+func (s *Store) SetOnNativeKeyBindingsChanged(fn func()) {
+	s.mu.Lock()
+	s.onNativeKeyBindingsChanged = fn
+	s.mu.Unlock()
 }
 
 // NativeKeyBindingsSnapshot returns a stable ID-sorted copy for management
@@ -643,6 +672,7 @@ func (s *Store) replaceNativeKeyBindingsLocked(bindings []NativeKeyBinding) {
 type NativeKeyConstraint struct {
 	Group         string
 	AuthIDs       []string
+	RoundRobin    bool
 	allModels     bool
 	modelIndex    map[string]struct{}
 	modelAnyIndex map[string]struct{}
@@ -667,6 +697,7 @@ func (s *Store) ResolveNativeKeyConstraint(callerScope, provider, model string) 
 	}
 	constraint := NativeKeyConstraint{
 		AuthIDs:       append([]string(nil), binding.AuthIDs...),
+		RoundRobin:    binding.RoundRobin,
 		allModels:     binding.ModelAccess.Mode == NativeModelAccessAll,
 		modelIndex:    binding.modelIndex,
 		modelAnyIndex: binding.modelAnyIndex,
@@ -685,11 +716,11 @@ func (c NativeKeyConstraint) AllowsModel(provider, model string) bool {
 	if c.allModels {
 		return true
 	}
-	model = canonicalNativeModel(model)
+	model = CanonicalNativeModel(model)
 	if model == "" {
 		return false
 	}
-	provider = canonicalNativeProvider(provider)
+	provider = CanonicalNativeProvider(provider)
 	if provider == "" {
 		_, allowed := c.modelAnyIndex[model]
 		return allowed

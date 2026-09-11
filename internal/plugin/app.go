@@ -17,6 +17,7 @@ type App struct {
 	store             *policy.Store
 	classifyMu        sync.RWMutex
 	classifyCache     map[string][]string
+	nativeRoundRobin  nativeRoundRobinState
 	pricingRunMu      sync.Mutex
 	pricingSyncMu     sync.Mutex
 	pricingSyncer     *pricingSyncer
@@ -30,7 +31,9 @@ func NewApp() *App {
 	// configuration. Configuring defaults here would create a stray
 	// cpa-access-guard-state.json in the host process working directory before the
 	// configured state_file path is known.
-	return &App{store: policy.NewStore(), classifyCache: make(map[string][]string)}
+	app := &App{store: policy.NewStore(), classifyCache: make(map[string][]string)}
+	app.store.SetOnNativeKeyBindingsChanged(app.pruneNativeRoundRobin)
+	return app
 }
 
 func (a *App) HandleMethod(method string, request []byte) ([]byte, error) {
@@ -96,6 +99,7 @@ func (a *App) configure(raw []byte) error {
 		a.clearClassifyCache()
 	})
 	a.clearClassifyCache()
+	a.clearNativeRoundRobin()
 	a.store.StartUsageFlusher()
 	a.startPricingSyncer(cfg.PricingSync)
 	return nil
@@ -336,8 +340,9 @@ func (a *App) interceptResponse(raw []byte) ([]byte, error) {
 //     bucket), so a supported-but-untiered auth file serves them rather than
 //     any tiered one.
 //
-// Among filtered candidates, pick the host's highest-priority one (ties broken
-// by lowest ID for determinism). CPA filters the scheduler candidate list for
+// Among filtered candidates, pick the host's highest-priority one. Native keys
+// may opt into round-robin among equal priorities; otherwise ties use lowest ID
+// for backward compatibility. CPA filters the scheduler candidate list for
 // the routed model before invoking this plugin. On an execution retry it calls
 // scheduler.pick again with already-tried auths removed, so the group filter is
 // reapplied and exhaustion fails closed instead of falling back across groups.
@@ -452,6 +457,9 @@ func (a *App) pickScheduler(raw []byte) ([]byte, error) {
 			(cand.Priority == best.Priority && cand.ID < best.ID) {
 			best = cand
 		}
+	}
+	if nativeBinding && nativeConstraint.RoundRobin {
+		return OKEnvelope(SchedulerPickResponse{Handled: true, AuthID: a.pickNativeRoundRobin(callerScope, req, matched, best.Priority)})
 	}
 	return OKEnvelope(SchedulerPickResponse{Handled: true, AuthID: best.ID})
 }

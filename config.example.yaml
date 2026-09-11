@@ -105,6 +105,9 @@ plugins:
       #     auth_ids:
       #       - "tenant-b/codex-01.json"
       #       - "tenant-b/codex-02.json"
+      #     # Optional per-key rotation; omitted/false preserves existing routing.
+      #     # Use equal credential priorities to include all bound credentials.
+      #     round_robin: false
       #     model_access:
       #       mode: "all"
 

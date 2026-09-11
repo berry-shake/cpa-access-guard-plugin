@@ -150,6 +150,17 @@ describe("native key binding API", () => {
     expect(mocks.patch.mock.calls[0][1]).not.toHaveProperty("key");
   });
 
+  it.each([true, false])("sends an explicit round-robin setting of %s without changing other fields", async (roundRobin) => {
+    const updated = { ...binding, round_robin: roundRobin };
+    mocks.patch.mockResolvedValueOnce({ data: { binding: updated } });
+    const input = { id: binding.id, round_robin: roundRobin };
+
+    await expect(updateNativeKeyBinding(input)).resolves.toEqual(updated);
+    expect(mocks.patch).toHaveBeenCalledWith("/plugin/native-key-bindings", input);
+    expect(mocks.patch.mock.calls[0][1]).not.toHaveProperty("enabled");
+    expect(mocks.patch.mock.calls[0][1]).not.toHaveProperty("key");
+  });
+
   it("deletes by id in the request body", async () => {
     mocks.delete.mockResolvedValueOnce({ data: {} });
     await deleteNativeKeyBinding("client-a");

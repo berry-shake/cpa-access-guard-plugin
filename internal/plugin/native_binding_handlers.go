@@ -18,6 +18,7 @@ type nativeKeyBindingWriteRequest struct {
 	ID          string                          `json:"id"`
 	Name        *string                         `json:"name,omitempty"`
 	Enabled     *bool                           `json:"enabled,omitempty"`
+	RoundRobin  *bool                           `json:"round_robin,omitempty"`
 	Key         string                          `json:"key,omitempty"`
 	Group       *string                         `json:"group,omitempty"`
 	AuthIDs     *[]string                       `json:"auth_ids,omitempty"`
@@ -34,6 +35,7 @@ type publicNativeKeyBinding struct {
 	ID               string                            `json:"id"`
 	Name             string                            `json:"name"`
 	Enabled          bool                              `json:"enabled"`
+	RoundRobin       bool                              `json:"round_robin"`
 	KeyPreview       string                            `json:"key_preview"`
 	Group            string                            `json:"group,omitempty"`
 	AuthIDs          []string                          `json:"auth_ids,omitempty"`
@@ -160,6 +162,7 @@ func (a *App) createNativeKeyBinding(body []byte) ManagementResponse {
 		ID:          req.ID,
 		Name:        name,
 		Enabled:     applyBool(req.Enabled, true),
+		RoundRobin:  applyBool(req.RoundRobin, false),
 		APIKey:      key,
 		Group:       group,
 		AuthIDs:     authIDs,
@@ -189,6 +192,7 @@ func (a *App) patchNativeKeyBinding(body []byte) ManagementResponse {
 	binding, err := a.store.UpdateNativeKeyBinding(id, policy.UpdateNativeKeyBindingInput{
 		Name:        trimmedOptionalString(req.Name),
 		Enabled:     req.Enabled,
+		RoundRobin:  req.RoundRobin,
 		APIKey:      strings.TrimSpace(req.Key),
 		Group:       trimmedOptionalString(req.Group),
 		AuthIDs:     req.AuthIDs,
@@ -276,6 +280,7 @@ func publicNativeKeyBindingFromPolicyWithUsage(binding policy.NativeKeyBinding, 
 		ID:         binding.ID,
 		Name:       binding.Name,
 		Enabled:    binding.Enabled,
+		RoundRobin: binding.RoundRobin,
 		KeyPreview: binding.KeyPreview,
 		ModelAccess: policy.NativeModelAccessPolicy{
 			Mode:   binding.ModelAccess.Mode,

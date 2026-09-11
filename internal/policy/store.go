@@ -50,7 +50,8 @@ type Store struct {
 	pendingPicks map[string][]pendingPick
 	// onClassifyRulesChanged is called when classify rules change, so the
 	// plugin can clear its classify cache. Set by the plugin App.
-	onClassifyRulesChanged func()
+	onClassifyRulesChanged     func()
+	onNativeKeyBindingsChanged func()
 }
 
 // pendingPick is one Authenticate-time target selection waiting for Route.

@@ -416,10 +416,83 @@ describe("NativeKeyBindingsTab", () => {
       id: "client-a",
       name: "Client A",
       enabled: true,
+      round_robin: false,
       group: "team",
       model_access: { mode: "all", models: [] },
     });
     expect(apiMocks.updateNativeKeyBinding.mock.calls[0][0]).not.toHaveProperty("key");
+  });
+
+  it.each([
+    { initial: undefined, toggle: false, expected: false, name: "keeps legacy bindings disabled" },
+    { initial: false, toggle: true, expected: true, name: "enables only the edited key" },
+    { initial: true, toggle: false, expected: true, name: "preserves an enabled setting" },
+    { initial: true, toggle: true, expected: false, name: "sends explicit false when disabled" },
+  ])("round-robin routing $name", async ({ initial, toggle, expected }) => {
+    const translationBinding: NativeKeyBinding = {
+      ...existing,
+      group: undefined,
+      auth_ids: ["tenant/codex-a.json", "tenant/codex-b.json"],
+      round_robin: initial,
+      model_access: { mode: "allowlist", models: [{ provider: "codex", model: "gpt-5.3-codex-spark" }] },
+    };
+    const normalBinding: NativeKeyBinding = { ...existing, id: "normal-key", name: "Normal Key" };
+    apiMocks.fetchTopLevelAPIKeys.mockResolvedValue([existingSecret, "sk-normal-key-secret"]);
+    apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValue({
+      entries: [
+        { key_index: 0, key_preview: translationBinding.key_preview, binding: translationBinding },
+        { key_index: 1, key_preview: "sk-nor...cret", binding: normalBinding },
+      ],
+      orphan_bindings: [],
+    });
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<NativeKeyBindingsTab />);
+      await tick();
+    });
+
+    const cards = container.querySelectorAll(".native-binding-card");
+    expect(cards[0].textContent?.includes("轮询并发")).toBe(initial === true);
+    expect(cards[1].textContent).not.toContain("轮询并发");
+    const editButton = Array.from(cards[0].querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("编辑 / 轮换"));
+    await act(async () => { editButton!.click(); await tick(); });
+
+    const input = container.querySelector<HTMLInputElement>("#native-binding-round-robin")!;
+    expect(input.checked).toBe(initial === true);
+    expect(input.labels?.[0].textContent).toBe("轮询并发");
+    expect(input.getAttribute("aria-describedby")).toBe("native-binding-round-robin-hint native-binding-round-robin-scope");
+    expect(container.querySelector("#native-binding-round-robin-scope")?.textContent).toContain("仅对当前启用的绑定生效");
+    expect(container.querySelector("#native-binding-round-robin-scope")?.textContent).toContain("其他 Key 保持原有设置");
+    expect(container.querySelector("#native-binding-round-robin-scope")?.textContent).toContain("相同优先级");
+    if (toggle) await act(async () => { input.click(); });
+
+    const form = container.querySelector<HTMLFormElement>(".native-binding-editor form")!;
+    await act(async () => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await tick();
+    });
+    expect(apiMocks.updateNativeKeyBinding).toHaveBeenCalledTimes(1);
+    expect(apiMocks.updateNativeKeyBinding).toHaveBeenCalledWith(expect.objectContaining({
+      id: translationBinding.id,
+      enabled: true,
+      round_robin: expected,
+      auth_ids: translationBinding.auth_ids,
+      model_access: translationBinding.model_access,
+    }));
+    expect(apiMocks.updateNativeKeyBinding.mock.calls[0][0]).not.toHaveProperty("key");
+    expect(window.confirm).not.toHaveBeenCalled();
+  });
+
+  it("does not show round-robin routing as active when its binding is disabled", async () => {
+    await renderQuotaBinding({ ...existing, enabled: false, round_robin: true });
+
+    expect(container.querySelector(".native-binding-card")?.textContent).not.toContain("轮询并发");
+    const editButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("编辑 / 轮换"));
+    await act(async () => { editButton!.click(); });
+    expect(container.querySelector<HTMLInputElement>("#native-binding-round-robin")?.checked).toBe(true);
+    expect(container.querySelector<HTMLInputElement>("#native-binding-enabled")?.checked).toBe(false);
   });
 
   it("also warns before disabling through the edit dialog", async () => {
@@ -434,7 +507,7 @@ describe("NativeKeyBindingsTab", () => {
     await act(async () => { editButton!.click(); });
 
     const enabledInput = container.querySelector(
-      '.native-binding-editor input[type="checkbox"]',
+      "#native-binding-enabled",
     ) as HTMLInputElement;
     const switchLabel = enabledInput.closest("label");
     expect(switchLabel?.classList.contains("native-binding-enable-switch")).toBe(true);
@@ -462,6 +535,7 @@ describe("NativeKeyBindingsTab", () => {
       id: "client-a",
       name: "Client A",
       enabled: false,
+      round_robin: false,
       group: "team",
       model_access: { mode: "all", models: [] },
     });
@@ -538,6 +612,7 @@ describe("NativeKeyBindingsTab", () => {
       id: "client-b",
       name: "Client B",
       enabled: true,
+      round_robin: false,
       key: "sk-client-b-secret",
       group: "classify:tenant-a",
       model_access: { mode: "allowlist", models: [] },
@@ -590,6 +665,7 @@ describe("NativeKeyBindingsTab", () => {
       id: "client-manual",
       name: "顶层 API Key 2",
       enabled: true,
+      round_robin: false,
       key: "sk-client-manual-secret",
       group: "classify:manual",
       model_access: { mode: "allowlist", models: [] },
@@ -670,6 +746,7 @@ describe("NativeKeyBindingsTab", () => {
       id: "native-key-1",
       name: "顶层 API Key 1",
       enabled: true,
+      round_robin: false,
       key: secret,
       group: "classify:codex-premium",
       model_access: { mode: "allowlist", models: [] },
@@ -757,6 +834,10 @@ describe("NativeKeyBindingsTab", () => {
     });
     expect(container.textContent).toContain("已选择 2 个凭证");
 
+    const roundRobin = container.querySelector<HTMLInputElement>("#native-binding-round-robin")!;
+    expect(roundRobin.checked).toBe(false);
+    await act(async () => { roundRobin.click(); });
+
     const form = container.querySelector(".native-binding-editor form") as HTMLFormElement;
     await act(async () => {
       form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
@@ -766,6 +847,7 @@ describe("NativeKeyBindingsTab", () => {
     expect(apiMocks.createNativeKeyBinding).toHaveBeenCalledWith(expect.objectContaining({
       id: "native-key-1",
       enabled: true,
+      round_robin: true,
       key: secret,
       auth_ids: ["tenant/codex-a.json", "tenant/codex-b.json"],
     }));
@@ -860,6 +942,7 @@ describe("NativeKeyBindingsTab", () => {
       id: "client-a",
       name: "Client A",
       enabled: true,
+      round_robin: false,
       auth_ids: ["tenant/codex-a.json", "tenant/missing.json"],
       model_access: {
         mode: "allowlist",
@@ -950,6 +1033,7 @@ describe("NativeKeyBindingsTab", () => {
       id: "client-a",
       name: "Client A",
       enabled: true,
+      round_robin: false,
       group: "classify:legacy-customer",
       model_access: { mode: "all", models: [] },
     });

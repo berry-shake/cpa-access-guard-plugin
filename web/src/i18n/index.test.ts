@@ -62,6 +62,10 @@ describe("translate", () => {
         "mapping.native.authFileCredentials",
         "mapping.native.aiProviderCredentials",
         "mapping.native.selectAllCredentials",
+        "mapping.native.requestRouting",
+        "mapping.native.roundRobin",
+        "mapping.native.roundRobinHint",
+        "mapping.native.roundRobinScope",
       ]) {
         expect(translate(key)).not.toBe(key);
       }

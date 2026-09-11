@@ -302,6 +302,12 @@ export default function NativeKeyBindingsTab() {
                       </dd>
                     </div>
                   )}
+                  {binding?.enabled && binding.round_robin && (
+                    <div>
+                      <dt>{t("mapping.native.requestRouting")}</dt>
+                      <dd>{t("mapping.native.roundRobin")}</dd>
+                    </div>
+                  )}
                 </dl>
                 {!row.present && (
                   <p className="native-binding-orphan-note">{t("mapping.native.orphanHint")}</p>
@@ -437,6 +443,7 @@ function NativeKeyBindingEditor({
   const [id, setID] = useState(binding?.id ?? initialID ?? "");
   const [name, setName] = useState(binding?.name ?? initialName ?? "");
   const [enabled, setEnabled] = useState(binding?.enabled ?? true);
+  const [roundRobin, setRoundRobin] = useState(binding?.round_robin ?? false);
   const [plainKey, setPlainKey] = useState("");
   const initialGroup = binding?.group ?? "";
   const initialAuthIDs = binding?.auth_ids ?? [];
@@ -598,6 +605,7 @@ function NativeKeyBindingEditor({
           id: binding.id,
           name: name.trim(),
           enabled,
+          round_robin: roundRobin,
           ...restriction,
           model_access: modelAccess,
           rpm: limitField(rpmValue),
@@ -611,6 +619,7 @@ function NativeKeyBindingEditor({
           id: id.trim(),
           name: name.trim() || undefined,
           enabled,
+          round_robin: roundRobin,
           key: createKey.trim(),
           ...restriction,
           model_access: modelAccess,
@@ -919,6 +928,26 @@ function NativeKeyBindingEditor({
               onChange={setModelAccess}
             />
           </div>
+          <div className="map-form-row native-binding-routing-row">
+            <label className="switch native-binding-enable-switch" htmlFor="native-binding-round-robin">
+              <span className="native-binding-enable-label">{t("mapping.native.roundRobin")}</span>
+              <input
+                id="native-binding-round-robin"
+                type="checkbox"
+                checked={roundRobin}
+                onChange={(e) => setRoundRobin(e.target.checked)}
+                disabled={saving}
+                aria-describedby="native-binding-round-robin-hint native-binding-round-robin-scope"
+              />
+              <span className="track" aria-hidden="true"><span className="thumb" /></span>
+            </label>
+            <p id="native-binding-round-robin-hint" className="native-binding-field-hint">
+              {t("mapping.native.roundRobinHint")}
+            </p>
+            <p id="native-binding-round-robin-scope" className="native-binding-field-hint">
+              {t("mapping.native.roundRobinScope")}
+            </p>
+          </div>
           <div className="map-form-row native-binding-limits-row">
             <label>{t("mapping.native.limitsTitle")}</label>
             <div className="native-binding-limits">
@@ -974,6 +1003,7 @@ function NativeKeyBindingEditor({
             <label className="switch native-binding-enable-switch">
               <span className="native-binding-enable-label">{t("mapping.native.enableBinding")}</span>
               <input
+                id="native-binding-enabled"
                 type="checkbox"
                 checked={enabled}
                 onChange={(e) => setEnabled(e.target.checked)}

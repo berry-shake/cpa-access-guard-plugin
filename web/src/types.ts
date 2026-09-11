@@ -236,6 +236,8 @@ export interface NativeKeyBinding {
   id: string;
   name: string;
   enabled: boolean;
+  // Older backends omit this field; default to the existing scheduling behavior.
+  round_robin?: boolean;
   key_preview: string;
   group?: string;
   auth_ids?: string[];
@@ -256,6 +258,7 @@ export interface NativeKeyBindingCreateRequest {
   id: string;
   name?: string;
   enabled?: boolean;
+  round_robin?: boolean;
   key: string;
   group?: string;
   auth_ids?: string[];
@@ -269,6 +272,7 @@ export interface NativeKeyBindingUpdateRequest {
   id: string;
   name?: string;
   enabled?: boolean;
+  round_robin?: boolean;
   // Empty/omitted keeps the currently bound top-level API key.
   key?: string;
   group?: string;
