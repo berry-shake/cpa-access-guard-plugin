@@ -302,6 +302,16 @@ export interface NativeCredentialOption {
   identityVerified?: boolean;
 }
 
+// Read-only identity data for native-key cards. Group members are exact Auth
+// IDs; unavailable groups must not be presented as empty or complete lists.
+export interface NativeBindingCredentialCatalog {
+  credentials: NativeCredentialOption[];
+  identitiesComplete: boolean;
+  groups: Record<string, string[]>;
+  unavailableGroups: string[];
+  groupsAvailable: boolean;
+}
+
 // NativeKeyCatalogEntry correlates one CPA top-level api-keys item with an
 // existing Access Guard binding. The plaintext key is deliberately absent;
 // key_index points back to the in-memory list returned by CPA Management.

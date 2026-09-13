@@ -9,6 +9,7 @@ import { _resetLocale } from "../i18n";
 const apiMocks = vi.hoisted(() => ({
   fetchTopLevelAPIKeys: vi.fn(),
   fetchNativeKeyBindingCatalog: vi.fn(),
+  fetchNativeBindingCredentialCatalog: vi.fn(),
   fetchNativeCredentialOptions: vi.fn(),
   fetchClassifyRules: vi.fn(),
   createNativeKeyBinding: vi.fn(),
@@ -37,6 +38,13 @@ const existingSecret = "sk-existing-native-secret-0123456789";
 let container: HTMLDivElement;
 let root: ReturnType<typeof createRoot> | null = null;
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+const originalClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+
+function mockClipboard(writeText = vi.fn().mockResolvedValue(undefined)) {
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+  vi.stubGlobal("isSecureContext", true);
+  return writeText;
+}
 
 const weeklyUsage: NativeBindingUsageSummary = {
   rpm_limit: 0,
@@ -93,6 +101,9 @@ beforeEach(() => {
     entries: [{ key_index: 0, key_preview: existing.key_preview, binding: existing }],
     orphan_bindings: [],
   });
+  apiMocks.fetchNativeBindingCredentialCatalog.mockResolvedValue({
+    credentials: [], identitiesComplete: true, groups: {}, unavailableGroups: [], groupsAvailable: true,
+  });
   apiMocks.fetchClassifyRules.mockResolvedValue([
     { name: "sample-tenant-a-filename", field: "filename", pattern: "tenant-a", group: "tenant-a", enabled: true },
     { name: "sample-claude-provider", field: "provider", pattern: "claude", group: "claude-auth", enabled: true },
@@ -130,6 +141,9 @@ afterEach(() => {
   container.remove();
   vi.restoreAllMocks();
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
+  if (originalClipboard) Object.defineProperty(navigator, "clipboard", originalClipboard);
+  else Reflect.deleteProperty(navigator, "clipboard");
 });
 
 describe("buildNativeBindingGroupOptions", () => {
@@ -140,6 +154,248 @@ describe("buildNativeBindingGroupOptions", () => {
       { name: "c", field: "filename", pattern: "c", group: "off", enabled: false },
     ]);
     expect(options).toEqual(["free", "team", "plus", "supported", "classify:vip"]);
+  });
+});
+
+describe("NativeKeyBindingsTab copy and credential identities", () => {
+  it("copies each card's exact full key while keeping text, attributes, and browser storage redacted", async () => {
+    const secrets = ["sk-copy-first-full-secret-012345", "sk-copy-second-full-secret-678910"];
+    const preview = "sk-copy...redacted";
+    apiMocks.fetchTopLevelAPIKeys.mockResolvedValue(secrets);
+    apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValue({
+      entries: [
+        { key_index: 1, key_preview: preview },
+        { key_index: 0, key_preview: preview, binding: existing },
+      ],
+      orphan_bindings: [],
+    });
+    const writeText = mockClipboard();
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<NativeKeyBindingsTab />);
+      await tick();
+    });
+
+    const cards = container.querySelectorAll(".native-binding-card");
+    expect(cards).toHaveLength(2);
+    for (const [index, card] of Array.from(cards).entries()) {
+      const copy = card.querySelector<HTMLButtonElement>(".native-key-copy")!;
+      expect(copy?.textContent).toBe("复制完整 Key");
+      expect(copy.disabled).toBe(false);
+      expect(card.textContent).toContain(preview);
+      for (const secret of secrets) expect(container.innerHTML).not.toContain(secret);
+      await act(async () => { copy.click(); await tick(); });
+      expect(writeText).toHaveBeenNthCalledWith(index + 1, secrets[index]);
+      expect(card.textContent).toContain("已复制");
+    }
+    expect(writeText).toHaveBeenCalledTimes(2);
+    for (const secret of secrets) {
+      expect(container.innerHTML).not.toContain(secret);
+      expect(JSON.stringify(setItem.mock.calls)).not.toContain(secret);
+      expect(JSON.stringify(Object.entries(localStorage))).not.toContain(secret);
+      expect(JSON.stringify(Object.entries(sessionStorage))).not.toContain(secret);
+    }
+  });
+
+  it("shows a safe copy error without rendering the key or clipboard exception", async () => {
+    const writeText = mockClipboard(vi.fn().mockRejectedValue(new Error(`Clipboard blocked for ${existingSecret}`)));
+    await renderQuotaBinding(existing);
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".native-key-copy")!.click();
+      await tick();
+    });
+
+    expect(writeText).toHaveBeenCalledWith(existingSecret);
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("复制失败");
+    expect(container.innerHTML).not.toContain(existingSecret);
+    expect(container.textContent).not.toContain("Clipboard blocked");
+    expect(container.textContent).not.toContain("已复制");
+  });
+
+  it("disables copying an orphan binding whose complete key is unavailable", async () => {
+    apiMocks.fetchTopLevelAPIKeys.mockResolvedValue([]);
+    apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValue({ entries: [], orphan_bindings: [existing] });
+    const writeText = mockClipboard();
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<NativeKeyBindingsTab />);
+      await tick();
+    });
+    const copy = container.querySelector<HTMLButtonElement>(".native-key-copy")!;
+    expect(copy).toBeTruthy();
+    expect(copy.disabled).toBe(true);
+    expect(copy.title).toContain("无法复制完整 Key");
+    await act(async () => { copy.click(); await tick(); });
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it("renders direct binding emails as separate credential rows without replacing the count badge", async () => {
+    apiMocks.fetchNativeBindingCredentialCatalog.mockResolvedValue({
+      credentials: [
+        { id: "auth-a", provider: "codex", email: "first@example.test", label: "Ignore label A" },
+        { id: "auth-b", provider: "codex", email: "second@example.test", name: "Ignore name B" },
+        { id: "unbound", provider: "codex", email: "unbound@example.test" },
+      ],
+      groups: {}, unavailableGroups: [], groupsAvailable: true,
+    });
+    await renderQuotaBinding({ ...existing, group: undefined, auth_ids: ["auth-a", "auth-b"], round_robin: true });
+    const list = container.querySelector('ul.native-binding-credentials[aria-label="绑定凭据"]')!;
+    expect(list).toBeTruthy();
+    const rows = list.querySelectorAll("li.native-binding-credential");
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toContain("first@example.test");
+    expect(rows[1].textContent).toContain("second@example.test");
+    expect(list.textContent).not.toContain("Ignore label");
+    expect(list.textContent).not.toContain("Ignore name");
+    expect(list.textContent).not.toContain("unbound@example.test");
+    expect(container.textContent).toContain("指定 2 个凭证");
+    expect(container.textContent).toContain("轮询并发");
+  });
+
+  it.each(["team", "classify:vip"])("shows only credentials mapped to group %s", async (group) => {
+    apiMocks.fetchNativeBindingCredentialCatalog.mockResolvedValue({
+      credentials: [
+        { id: "group-a", provider: "codex", email: "group-a@example.test" },
+        { id: "outside", provider: "codex", email: "outside@example.test" },
+        { id: "group-b", provider: "codex", email: "group-b@example.test" },
+      ],
+      groups: { [group]: ["group-a", "group-b"] }, unavailableGroups: [], groupsAvailable: true,
+    });
+    await renderQuotaBinding({ ...existing, group });
+    const rows = container.querySelectorAll("li.native-binding-credential");
+    expect(rows).toHaveLength(2);
+    expect(Array.from(rows).map((row) => row.textContent)).toEqual([
+      expect.stringContaining("group-a@example.test"), expect.stringContaining("group-b@example.test"),
+    ]);
+    expect(container.querySelector(".native-binding-group")?.textContent).toBe(group);
+    expect(container.querySelector(".native-binding-credentials")?.textContent).not.toContain("outside@example.test");
+    expect(apiMocks.fetchNativeBindingCredentialCatalog).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ group: "codex-premium", enabled: true }),
+    ]));
+  });
+
+  it("keeps separate rows for different credential IDs sharing one account email", async () => {
+    apiMocks.fetchNativeBindingCredentialCatalog.mockResolvedValue({
+      credentials: [
+        { id: "same-account-a", provider: "codex", email: "shared@example.test" },
+        { id: "same-account-b", provider: "codex", email: "shared@example.test" },
+      ],
+      groups: {}, unavailableGroups: [], groupsAvailable: true,
+    });
+    await renderQuotaBinding({ ...existing, group: undefined, auth_ids: ["same-account-a", "same-account-b"] });
+    const rows = container.querySelectorAll("li.native-binding-credential");
+    expect(rows).toHaveLength(2);
+    expect(Array.from(rows).map((row) => row.textContent)).toEqual(["shared@example.test", "shared@example.test"]);
+  });
+
+  it("uses safe display fallbacks and marks a missing direct credential", async () => {
+    apiMocks.fetchNativeBindingCredentialCatalog.mockResolvedValue({
+      credentials: [
+        { id: "label-id", provider: "codex", label: "Friendly label", name: "Secondary name" },
+        { id: "name-id", provider: "codex", name: "Provider name" },
+        { id: "plain-auth-id", provider: "codex" },
+      ],
+      groups: {}, unavailableGroups: [], groupsAvailable: true,
+    });
+    await renderQuotaBinding({ ...existing, group: undefined, auth_ids: ["label-id", "name-id", "plain-auth-id", "missing-auth-id"] });
+    const rows = container.querySelectorAll("li.native-binding-credential");
+    expect(rows).toHaveLength(4);
+    expect(rows[0].textContent).toContain("Friendly label");
+    expect(rows[0].textContent).not.toContain("Secondary name");
+    expect(rows[1].textContent).toContain("Provider name");
+    expect(rows[2].textContent).toContain("plain-auth-id");
+    expect(rows[3].textContent).toContain("missing-auth-id");
+    expect(rows[3].textContent).toContain("凭据不存在");
+    expect(container.textContent).toContain("指定 4 个凭证");
+  });
+
+  it.each([
+    { unavailableGroups: ["classify:vip"], groupsAvailable: true },
+    { unavailableGroups: [], groupsAvailable: false },
+  ])("does not describe unavailable group identities as an empty pool (%j)", async (availability) => {
+    apiMocks.fetchNativeBindingCredentialCatalog.mockResolvedValue({ credentials: [], groups: {}, ...availability });
+    await renderQuotaBinding({ ...existing, group: "classify:vip" });
+    expect(container.textContent).toContain("暂时无法确定此组的凭据");
+    expect(container.textContent).not.toContain("此组当前没有匹配的凭据");
+    expect(container.querySelector(".native-binding-card")).toBeTruthy();
+  });
+
+  it("distinguishes a successfully loaded empty group from unavailable identities", async () => {
+    apiMocks.fetchNativeBindingCredentialCatalog.mockResolvedValue({
+      credentials: [], groups: { team: [] }, unavailableGroups: [], groupsAvailable: true,
+    });
+    await renderQuotaBinding(existing);
+    expect(container.textContent).toContain("此组当前没有匹配的凭据");
+    expect(container.textContent).not.toContain("暂时无法确定此组的凭据");
+  });
+
+  it("does not label a credential deleted when its identity inventory failed", async () => {
+    apiMocks.fetchNativeBindingCredentialCatalog.mockResolvedValue({
+      credentials: [], identitiesComplete: false, groups: {}, unavailableGroups: [], groupsAvailable: false,
+    });
+    await renderQuotaBinding({ ...existing, group: undefined, auth_ids: ["temporarily-unavailable"] });
+    expect(container.querySelector(".native-binding-credentials")?.textContent).toContain("凭据身份加载失败");
+    expect(container.textContent).not.toContain("凭据不存在");
+    expect(container.querySelector<HTMLButtonElement>(".native-key-copy")?.disabled).toBe(false);
+  });
+
+  it("stops the identity loading indicator when refreshing the host key list fails", async () => {
+    await renderQuotaBinding(existing);
+    apiMocks.fetchTopLevelAPIKeys.mockRejectedValueOnce(new Error("host refresh unavailable"));
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".native-binding-toolbar button")!.click();
+      await tick();
+    });
+    expect(container.textContent).toContain("host refresh unavailable");
+    expect(container.textContent).toContain("凭据身份加载失败");
+    expect(container.textContent).not.toContain("正在加载凭证");
+  });
+
+  it("ignores an old identity response after the card list has been refreshed", async () => {
+    let finishFirst!: (value: unknown) => void;
+    apiMocks.fetchNativeBindingCredentialCatalog.mockReturnValueOnce(new Promise((resolve) => { finishFirst = resolve; }));
+    await renderQuotaBinding({ ...existing, group: undefined, auth_ids: ["same-id"] });
+    apiMocks.fetchNativeBindingCredentialCatalog.mockResolvedValue({
+      credentials: [{ id: "same-id", provider: "codex", email: "current@example.test" }],
+      identitiesComplete: true, groups: {}, unavailableGroups: [], groupsAvailable: true,
+    });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".native-binding-toolbar button")!.click();
+      await tick();
+    });
+    await act(async () => {
+      finishFirst({
+        credentials: [{ id: "same-id", provider: "codex", email: "old@example.test" }],
+        identitiesComplete: true, groups: {}, unavailableGroups: [], groupsAvailable: true,
+      });
+      await tick();
+    });
+    expect(container.querySelector(".native-binding-credentials")?.textContent).toContain("current@example.test");
+    expect(container.textContent).not.toContain("old@example.test");
+  });
+
+  it("keeps key cards and editing usable if credential identity loading fails", async () => {
+    apiMocks.fetchNativeBindingCredentialCatalog.mockRejectedValue(new Error("credential identities unavailable"));
+    const binding = { ...existing, group: undefined, auth_ids: ["tenant/codex-a.json"], round_robin: true };
+    await renderQuotaBinding(binding);
+    expect(container.querySelector(".native-binding-card")).toBeTruthy();
+    expect(container.textContent).toContain("凭据身份加载失败");
+    expect(container.textContent).toContain("轮询并发");
+    expect(container.textContent).not.toContain("顶层 Key 列表加载失败");
+    const editButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("编辑 / 轮换"))!;
+    await act(async () => { editButton.click(); await tick(); });
+    expect(container.querySelector<HTMLInputElement>("#native-binding-round-robin")?.checked).toBe(true);
+    await act(async () => {
+      const form = container.querySelector<HTMLFormElement>(".native-binding-editor form")!;
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await tick();
+    });
+    expect(apiMocks.updateNativeKeyBinding).toHaveBeenCalledWith(expect.objectContaining({
+      id: existing.id, round_robin: true, auth_ids: binding.auth_ids,
+    }));
+    expect(container.querySelector(".native-binding-editor")).toBeNull();
   });
 });
 

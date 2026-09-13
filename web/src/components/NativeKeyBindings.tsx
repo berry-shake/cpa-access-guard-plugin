@@ -1,13 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useT } from "../i18n";
 import NativeModelAccessPicker from "./NativeModelAccessPicker";
 import WeeklyQuotaRemaining from "./WeeklyQuotaRemaining";
+import { copyTextToClipboard } from "../clipboard";
 import {
   createNativeKeyBinding,
   deleteNativeKeyBinding,
   fetchClassifyRules,
   fetchNativeKeyBindingCatalog,
+  fetchNativeBindingCredentialCatalog,
   fetchNativeCredentialOptions,
   fetchTopLevelAPIKeys,
   resetNativeKeyBindingQuota,
@@ -16,6 +18,7 @@ import {
 import type {
   ClassifyRule,
   NativeCredentialOption,
+  NativeBindingCredentialCatalog,
   NativeKeyBinding,
   NativeKeyBindingCatalog,
   NativeModelAccessPolicy,
@@ -61,7 +64,7 @@ interface NativeKeyRow {
   present: boolean;
   keyPreview: string;
   // Plaintext exists only for a current host entry and stays in React memory.
-  // Never render it or use it in a DOM attribute, URL, log, or storage key.
+  // Never display it on the card or use it in an attribute, URL, log, or storage.
   apiKey?: string;
   topLevelIndex?: number;
   binding?: NativeKeyBinding;
@@ -116,6 +119,84 @@ function suggestedBindingID(index: number, rows: NativeKeyRow[]): string {
   return `${base}-${suffix}`;
 }
 
+function NativeKeyCopyButton({ apiKey }: { apiKey?: string }) {
+  const t = useT();
+  const [status, setStatus] = useState<"idle" | "copying" | "copied" | "failed">("idle");
+  useEffect(() => { setStatus("idle"); }, [apiKey]);
+
+  const copy = async () => {
+    if (!apiKey) return;
+    setStatus("copying");
+    try {
+      await copyTextToClipboard(apiKey);
+      setStatus("copied");
+    } catch {
+      // Clipboard errors are not user content and must never echo key material.
+      setStatus("failed");
+    }
+  };
+
+  return (
+    <>
+      <button
+        className="btn sm native-key-copy"
+        type="button"
+        disabled={!apiKey || status === "copying"}
+        title={t(apiKey ? "mapping.native.copyKey" : "mapping.native.copyKeyUnavailable")}
+        onClick={() => { void copy(); }}
+      >
+        {t(status === "copied" ? "mapping.native.keyCopied" : "mapping.native.copyKey")}
+      </button>
+      {status === "copied" && <span className="sr-only" role="status">{t("mapping.native.keyCopied")}</span>}
+      {status === "failed" && (
+        <span className="native-key-copy-status" role="alert">{t("mapping.native.copyKeyFailed")}</span>
+      )}
+    </>
+  );
+}
+
+function BoundCredentialList({ binding, catalog, loading, failed }: {
+  binding: NativeKeyBinding;
+  catalog: NativeBindingCredentialCatalog | null;
+  loading: boolean;
+  failed: boolean;
+}) {
+  const t = useT();
+  if (binding.needs_reselection) return null;
+  if (loading) return <p className="native-binding-field-hint">{t("mapping.native.loadingCredentials")}</p>;
+  if (failed || !catalog) return <p className="native-binding-field-hint">{t("mapping.native.credentialsLoadFailed")}</p>;
+
+  const direct = !!binding.auth_ids?.length;
+  const group = binding.group?.trim().toLowerCase() ?? "";
+  if (!direct && (!catalog.groupsAvailable || catalog.unavailableGroups.includes(group))) {
+    return <p className="native-binding-field-hint">{t("mapping.native.groupCredentialsUnavailable")}</p>;
+  }
+  const ids = Array.from(new Set(direct ? binding.auth_ids : catalog.groups[group] ?? []));
+  const byID = new Map(catalog.credentials.map((credential) => [credential.id, credential]));
+  if (ids.length === 0) return <p className="native-binding-field-hint">{t("mapping.native.noGroupCredentials")}</p>;
+
+  return (
+    <ul className="native-binding-credentials" aria-label={t("mapping.native.boundCredentials")}>
+      {ids.map((id) => {
+        const credential = byID.get(id);
+        const identity = credential?.email || credential?.label || credential?.name || id;
+        return (
+          <li className="native-binding-credential" key={id}>
+            <span>{identity}</span>
+            {!credential && (
+              <span className="muted">
+                {t(catalog.identitiesComplete === false
+                  ? "mapping.native.credentialsLoadFailed"
+                  : "mapping.native.credentialMissing")}
+              </span>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 export default function NativeKeyBindingsTab() {
   const t = useT();
   const [rows, setRows] = useState<NativeKeyRow[]>([]);
@@ -124,26 +205,57 @@ export default function NativeKeyBindingsTab() {
   const [error, setError] = useState("");
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [pendingID, setPendingID] = useState("");
+  const [credentialCatalog, setCredentialCatalog] = useState<NativeBindingCredentialCatalog | null>(null);
+  const [credentialCatalogLoading, setCredentialCatalogLoading] = useState(true);
+  const [credentialCatalogFailed, setCredentialCatalogFailed] = useState(false);
+  const loadVersion = useRef(0);
 
   const load = useCallback(async () => {
+    const version = ++loadVersion.current;
     setLoading(true);
     setError("");
+    setCredentialCatalog(null);
+    setCredentialCatalogLoading(true);
+    setCredentialCatalogFailed(false);
     try {
       const [apiKeys, nextRules] = await Promise.all([
         fetchTopLevelAPIKeys(),
-        fetchClassifyRules().catch(() => [] as ClassifyRule[]),
+        fetchClassifyRules().catch(() => null),
       ]);
+      if (version !== loadVersion.current) return;
       const catalog = await fetchNativeKeyBindingCatalog(apiKeys);
-      setRows(buildNativeKeyRows(apiKeys, catalog));
-      setRules(nextRules);
+      if (version !== loadVersion.current) return;
+      const nextRows = buildNativeKeyRows(apiKeys, catalog);
+      setRows(nextRows);
+      setRules(nextRules ?? []);
+      if (nextRows.some((row) => row.binding)) {
+        // Identity metadata is independent of key management. A failed lookup
+        // must not block copying keys or editing their existing restrictions.
+        void fetchNativeBindingCredentialCatalog(nextRules).then((nextCatalog) => {
+          if (version === loadVersion.current) setCredentialCatalog(nextCatalog);
+        }).catch(() => {
+          if (version === loadVersion.current) setCredentialCatalogFailed(true);
+        }).finally(() => {
+          if (version === loadVersion.current) setCredentialCatalogLoading(false);
+        });
+      } else {
+        setCredentialCatalogLoading(false);
+      }
     } catch (e: unknown) {
-      setError(messageFromError(e));
+      if (version === loadVersion.current) {
+        setError(messageFromError(e));
+        setCredentialCatalogLoading(false);
+        setCredentialCatalogFailed(true);
+      }
     } finally {
-      setLoading(false);
+      if (version === loadVersion.current) setLoading(false);
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    return () => { loadVersion.current++; };
+  }, [load]);
 
   const groupOptions = useMemo(() => buildNativeBindingGroupOptions(rules), [rules]);
   const topLevelCount = rows.filter((row) => row.present).length;
@@ -274,7 +386,10 @@ export default function NativeKeyBindingsTab() {
                 <dl className="native-binding-meta">
                   <div>
                     <dt>{t("mapping.native.keyPreview")}</dt>
-                    <dd className="mono">{row.keyPreview}</dd>
+                    <dd className="native-key-preview-row">
+                      <span className="mono">{row.keyPreview}</span>
+                      <NativeKeyCopyButton apiKey={row.apiKey} />
+                    </dd>
                   </div>
                   <div>
                     <dt>{t("mapping.native.restriction")}</dt>
@@ -286,6 +401,14 @@ export default function NativeKeyBindingsTab() {
                           ? t("mapping.native.directSummary", { count: binding.auth_ids.length })
                           : binding?.group || t("mapping.native.defaultScheduling")}
                       </span>
+                      {binding && (
+                        <BoundCredentialList
+                          binding={binding}
+                          catalog={credentialCatalog}
+                          loading={credentialCatalogLoading}
+                          failed={credentialCatalogFailed}
+                        />
+                      )}
                     </dd>
                   </div>
                   {binding && (

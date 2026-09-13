@@ -250,12 +250,16 @@ function isAuthFailure(reason: unknown): boolean {
   return status === 401 || status === 403;
 }
 
-async function optionalGet(client: AxiosInstance, path: string): Promise<unknown> {
+async function optionalGet(client: AxiosInstance, path: string, requireComplete = false): Promise<unknown> {
   try {
     const { data } = await client.get(path);
     return data;
   } catch (reason) {
     if (isAuthFailure(reason)) throw reason;
+    const status = (reason as { response?: { status?: number } } | null)?.response?.status;
+    // Identity-only group previews need a complete inventory. Unsupported
+    // endpoints are absent providers; transient failures are not empty lists.
+    if (requireComplete && status !== 404) throw reason;
     return undefined;
   }
 }
@@ -377,30 +381,39 @@ async function populateRuntimeModels(client: AxiosInstance, credentials: Pending
   await Promise.all(workers);
 }
 
-async function loadAIProviderCredentials(client: AxiosInstance): Promise<NativeCredentialOption[]> {
+async function loadAIProviderCredentials(client: AxiosInstance, includeModels: boolean): Promise<NativeCredentialOption[]> {
   const paths = CHANNELS.map((spec) => "/v0/management/" + spec.endpoint);
   paths.push("/v0/management/openai-compatibility");
-  const payloads = await Promise.all(paths.map((path) => optionalGet(client, path)));
+  const payloads = await Promise.all(paths.map((path) => optionalGet(client, path, !includeModels)));
   const generator = new RuntimeIDGenerator();
   const pending: PendingCredential[] = [];
   for (let index = 0; index < CHANNELS.length; index++) {
     await addChannelCredentials(pending, generator, CHANNELS[index], payloads[index]);
   }
   await addOpenAICompatibleCredentials(pending, generator, payloads[CHANNELS.length]);
-  await populateRuntimeModels(client, pending);
-  return pending.map(({ fallbackModels: _discarded, ...credential }) => credential);
+  if (includeModels) {
+    await populateRuntimeModels(client, pending);
+    return pending.map(({ fallbackModels: _discarded, ...credential }) => credential);
+  }
+  return pending.map(({ fallbackModels: _discarded, models: _models, ...credential }) => credential);
 }
 
-let inFlight: Promise<NativeCredentialOption[]> | undefined;
+const inFlight = new WeakMap<AxiosInstance, Map<boolean, Promise<NativeCredentialOption[]>>>();
 
-// Concurrent credential/model pickers share one in-flight load, but completed
-// results are not retained across logins or refreshes.
-export function fetchAIProviderCredentials(client: AxiosInstance = apiClient()): Promise<NativeCredentialOption[]> {
-  if (inFlight) return inFlight;
-  const request = loadAIProviderCredentials(client);
-  inFlight = request;
+// Concurrent loads on the same authenticated client share work. A fresh login
+// or host uses a different client and must never inherit another host's data.
+export function fetchAIProviderCredentials(client: AxiosInstance = apiClient(), includeModels = true): Promise<NativeCredentialOption[]> {
+  let requests = inFlight.get(client);
+  if (!requests) {
+    requests = new Map();
+    inFlight.set(client, requests);
+  }
+  const current = requests.get(includeModels);
+  if (current) return current;
+  const request = loadAIProviderCredentials(client, includeModels);
+  requests.set(includeModels, request);
   const clear = () => {
-    if (inFlight === request) inFlight = undefined;
+    if (requests.get(includeModels) === request) requests.delete(includeModels);
   };
   void request.then(clear, clear);
   return request;

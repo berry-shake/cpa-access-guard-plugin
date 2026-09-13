@@ -8,11 +8,13 @@ In plain words: you issue your own `cpa_…` keys to clients. Each key only sees
 |---|---|
 | **Repo** | [berry-shake/cpa-access-guard-plugin](https://github.com/berry-shake/cpa-access-guard-plugin) |
 | **License** | MIT |
-| **Install** | Build from source until the first Access Guard GitHub release is published |
+| **Install** | Download the archive for your platform from [GitHub Releases](https://github.com/berry-shake/cpa-access-guard-plugin/releases) |
 | **Lineage** | Derived from [origin652/cpa-plugin-key-policy](https://github.com/origin652/cpa-plugin-key-policy) under the MIT license |
 | **中文说明** | [README.zh-CN.md](./README.zh-CN.md) |
 
-**v0.4.4-fork.15 release scope:** per-native-key Concurrent round robin, off by default. Session-affinity changes and single-credential optimizations are deferred. With the switch off, multi-credential bindings retain highest-priority selection and use the lowest Auth ID to break ties; they do not gain CPA session affinity. Single-credential bindings retain their existing path. Unbound native keys keep CPA's native scheduling and affinity. This release adds no CPA SDK dependency or request interceptor/lifecycle hooks.
+**v0.4.4-fork.16:** native-key cards can copy the complete current host key and list bound credential emails one per line, including matching credentials for classification groups. Cards remain redacted, and orphan bindings cannot copy a key that no longer exists in CPA. This update changes the management UI and identity display only; CPA and credential scheduling remain unchanged.
+
+**Routing inherited from v0.4.4-fork.15:** per-native-key Concurrent round robin, off by default. Session-affinity changes and single-credential optimizations are deferred. With the switch off, multi-credential bindings retain highest-priority selection and use the lowest Auth ID to break ties; they do not gain CPA session affinity. Single-credential bindings retain their existing path. Unbound native keys keep CPA's native scheduling and affinity. No CPA SDK dependency or request interceptor/lifecycle hooks are added.
 
 ---
 
@@ -165,7 +167,8 @@ Requirements and behavior:
 
 - Requires CLIProxyAPI **v7.2.101 or newer**, where Scheduler metadata includes `caller_scope`.
 - The Web UI loads the current top-level list from CPA's Management-key-protected `GET /v0/management/api-keys` endpoint and shows every key as a redacted row, including keys with no binding. A binding whose key was removed from the host remains visible as an orphan record.
-- Selecting an unbound row avoids manual copy/paste. The plaintext stays in page memory, is sent only in Management-authenticated JSON request bodies for exact scope matching and binding creation, and is never rendered, placed in a URL, stored in browser storage, persisted, or returned by plugin APIs.
+- Selecting an unbound row avoids manual copy/paste. Cards remain redacted; **Copy full key** copies the complete current host key. Orphan bindings cannot recover plaintext and cannot be copied. Plaintext stays in page memory and user-initiated copy operations; it is never placed in URLs, browser storage, or plugin state, or returned by plugin APIs. The HTTP clipboard fallback clears and removes its temporary input immediately.
+- Cards list bound credential emails one per line, falling back to a name or exact Auth ID when email is absent. Group bindings reuse the plugin's classification rules to list matching credentials and report when a reliable preview is unavailable. These are binding/group members; actual requests remain subject to model, status, and priority constraints.
 - The key must remain in CPA's top-level `api-keys`; a binding is authorization metadata, not authentication.
 - A bound, enabled key with no usable candidate in its group or direct allow-list fails closed with `auth_not_found` (503). It never falls back outside the restriction.
 - `model_access.mode: all` permits current and future models. `allowlist` permits only the exact, case-insensitive `provider` + base-model pairs in `models`; the same model name under another provider remains denied. A terminal CPA thinking suffix such as `(high)` inherits the base model permission.
@@ -301,7 +304,7 @@ UI areas:
 | Keys | Create / edit / rotate / delete keys; bind models or aliases; RPM & budgets |
 | Mapping → Aliases | Global multi-target aliases, dispatch, pricing |
 | Mapping → Classification | Custom credential groups + match preview |
-| Mapping → Native key bindings | List every CPA top-level key; select credential groups or individual auth-file / AI-provider credentials; view weekly quota remaining; retain orphan bindings for review |
+| Mapping → Native key bindings | Copy complete current host keys from redacted cards; view bound credential emails; select credential restrictions; view weekly quota remaining; retain orphan bindings for review |
 | Model Pricing | LiteLLM primary and models.dev fallback status; search, manual overrides, deletion tombstones, and automatic restore |
 | Model picker | Catalog of providers; tier / **Custom · …** subgroups |
 

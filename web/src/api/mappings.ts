@@ -9,6 +9,7 @@ import type {
   NativeKeyBindingCreateRequest,
   NativeKeyBindingUpdateRequest,
   NativeCredentialOption,
+  NativeBindingCredentialCatalog,
 } from "../types";
 import { readPlanType } from "./models";
 import { fetchAIProviderCredentials } from "./aiProviderCredentials";
@@ -61,11 +62,11 @@ export async function reorderClassifyRules(names: string[]): Promise<void> {
 export async function classifyPreview(
   descriptors: CredentialDescriptor[],
   rules?: ClassifyRule[],
+  client = apiClient(),
 ): Promise<ClassifyPreviewResponse> {
-  const c = apiClient();
   const body: Record<string, unknown> = { descriptors };
   if (rules !== undefined) body.rules = rules;
-  const { data } = await c.post<ClassifyPreviewResponse>(pluginPath("/classify-preview"), body);
+  const { data } = await client.post<ClassifyPreviewResponse>(pluginPath("/classify-preview"), body);
   // Older/incompatible backends may return only group aggregates. Treat that
   // as unavailable: a missing per-rule result must never become a UI claim of
   // "0 matches" for every rule.
@@ -123,6 +124,55 @@ function copyDescriptorScalarAttribute(
   }
 }
 
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function authFileRows(payload: unknown): Record<string, unknown>[] | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const root = payload as Record<string, unknown>;
+  const rows = root["files"] ?? root["auth-files"];
+  if (!Array.isArray(rows)) return null;
+  return rows.filter((row): row is Record<string, unknown> =>
+    row !== null && typeof row === "object" && !Array.isArray(row));
+}
+
+function authFileDescriptor(entry: Record<string, unknown>, allowNameFallback: boolean): CredentialDescriptor | undefined {
+  const id = optionalString(entry["id"]) ?? (allowNameFallback ? optionalString(entry["name"]) : undefined);
+  if (!id) return undefined;
+  const provider = (optionalString(entry["provider"]) ?? optionalString(entry["type"]) ?? "").toLowerCase();
+  const attributes: Record<string, string> = {};
+  const plan = provider === "codex" ? readPlanType(entry) : "";
+  if (plan) attributes["plan_type"] = plan;
+  const tier = optionalString(entry["tier"]);
+  if (provider === "antigravity" && tier) attributes["tier"] = tier.toLowerCase();
+  copyDescriptorStringAttribute(entry, attributes, "path");
+  copyDescriptorScalarAttribute(entry, attributes, "weight");
+  return { id, provider, attributes };
+}
+
+function authFileIdentity(entry: Record<string, unknown>): NativeCredentialOption | undefined {
+  const id = optionalString(entry["id"]);
+  if (!id) return undefined;
+  const provider = (optionalString(entry["provider"]) ?? optionalString(entry["type"]) ?? "").toLowerCase();
+  const tier = optionalString(entry["tier"]);
+  const plan = provider === "codex"
+    ? readPlanType(entry)
+    : provider === "antigravity" && tier ? tier.toLowerCase() : "";
+  return {
+    id,
+    provider,
+    name: optionalString(entry["name"]),
+    label: optionalString(entry["label"]),
+    email: optionalString(entry["email"]),
+    status: optionalString(entry["status"]),
+    plan: plan || undefined,
+    disabled: entry["disabled"] === true,
+    unavailable: entry["unavailable"] === true,
+    source: "auth_file",
+  };
+}
+
 // fetchCredentialDescriptors pulls the auth-file list from CPA and builds
 // CredentialDescriptor[] for the classify-preview endpoint. It deliberately
 // copies only fields whose management representation corresponds to the
@@ -131,33 +181,10 @@ function copyDescriptorScalarAttribute(
 export async function fetchCredentialDescriptors(): Promise<CredentialDescriptor[]> {
   const c = apiClient();
   const { data } = await c.get<unknown>("/v0/management/auth-files");
-  const root = data as Record<string, unknown> | null;
-  const list = root?.["files"] ?? root?.["auth-files"];
-  const items = Array.isArray(list) ? list : [];
   const out: CredentialDescriptor[] = [];
-  for (const item of items) {
-    const o = (item ?? {}) as Record<string, unknown>;
-    const id = ((o["id"] as string) ?? (o["name"] as string) ?? "").trim();
-    if (!id) continue;
-    const provider = ((o["provider"] as string) ?? (o["type"] as string) ?? "").trim().toLowerCase();
-    const attrs: Record<string, string> = {};
-    // Codex exposes plan_type through its id_token claims. Antigravity uses a
-    // separate top-level tier value; never relabel one provider's identity as
-    // the other provider's Scheduler Attribute.
-    const planType = provider === "codex" ? readPlanType(o) : "";
-    if (planType) attrs["plan_type"] = planType;
-    const tier = (o["tier"] as string) ?? "";
-    if (provider === "antigravity" && typeof tier === "string" && tier.trim()) {
-      attrs["tier"] = tier.trim().toLowerCase();
-    }
-    // `path` is emitted from Auth.Attributes by CPA. `weight` is normalized
-    // into Auth.Attributes by CPA's file synthesizer (including plugin-parsed
-    // files). Do not copy note/priority/websockets here: the management route
-    // may synthesize those values from Metadata even when scheduler.pick will
-    // not receive a corresponding Attribute.
-    copyDescriptorStringAttribute(o, attrs, "path");
-    copyDescriptorScalarAttribute(o, attrs, "weight");
-    out.push({ id, provider, attributes: attrs });
+  for (const entry of authFileRows(data) ?? []) {
+    const descriptor = authFileDescriptor(entry, true);
+    if (descriptor) out.push(descriptor);
   }
   return out;
 }
@@ -188,36 +215,10 @@ export async function fetchNativeCredentialOptions(): Promise<NativeCredentialOp
     c.get<unknown>("/v0/management/auth-files"),
     fetchAIProviderCredentials(c),
   ]);
-  const root = data as Record<string, unknown> | null;
-  const list = root?.["files"] ?? root?.["auth-files"];
-  const items = Array.isArray(list) ? list : [];
-
   const byID = new Map<string, NativeCredentialOption>();
-  const optionalString = (value: unknown): string | undefined =>
-    typeof value === "string" && value.trim() ? value.trim() : undefined;
-  for (const item of items) {
-    const entry = (item ?? {}) as Record<string, unknown>;
-    const id = optionalString(entry["id"]);
-    if (!id || byID.has(id)) continue;
-    const provider = (optionalString(entry["provider"]) ?? optionalString(entry["type"]) ?? "").toLowerCase();
-    const tier = optionalString(entry["tier"]);
-    const plan = provider === "codex"
-      ? readPlanType(entry)
-      : provider === "antigravity" && tier
-        ? tier.toLowerCase()
-        : "";
-    byID.set(id, {
-      id,
-      provider,
-      name: optionalString(entry["name"]),
-      label: optionalString(entry["label"]),
-      email: optionalString(entry["email"]),
-      status: optionalString(entry["status"]),
-      plan: plan || undefined,
-      disabled: entry["disabled"] === true,
-      unavailable: entry["unavailable"] === true,
-      source: "auth_file",
-    });
+  for (const entry of authFileRows(data) ?? []) {
+    const identity = authFileIdentity(entry);
+    if (identity && !byID.has(identity.id)) byID.set(identity.id, identity);
   }
 
   const authFileCredentials = Array.from(byID.values());
@@ -255,6 +256,156 @@ export async function fetchNativeCredentialOptions(): Promise<NativeCredentialOp
     const byLabel = labelA.localeCompare(labelB);
     return byLabel !== 0 ? byLabel : a.id.localeCompare(b.id);
   });
+}
+
+function nativeBindingCustomGroup(group: string): string {
+  const normalized = group.trim().toLowerCase();
+  return normalized.startsWith("classify:") ? normalized : "classify:" + normalized;
+}
+
+function descriptorBuiltinGroup(descriptor: CredentialDescriptor): string {
+  const attributes = descriptor.attributes ?? {};
+  return attributes["plan_type"]?.trim().toLowerCase()
+    || attributes["tier"]?.trim().toLowerCase()
+    || (["codex", "antigravity"].includes(descriptor.provider) ? "supported" : "");
+}
+
+function nativeBindingGroupCatalog(
+  descriptors: CredentialDescriptor[],
+  rules: ClassifyRule[],
+  preview: ClassifyPreviewResponse,
+  missingFields: Set<string>,
+): Pick<NativeBindingCredentialCatalog, "groups" | "unavailableGroups" | "groupsAvailable"> {
+  if (!preview.groups || typeof preview.groups !== "object" || Array.isArray(preview.groups)) {
+    return { groups: {}, unavailableGroups: [], groupsAvailable: false };
+  }
+  const knownIDs = new Set(descriptors.map(({ id }) => id));
+  const groups = new Map<string, Set<string>>();
+  const unavailable = new Set<string>();
+  const customMatches = new Set<string>();
+  const customNames = new Set<string>();
+  const builtinGroups = new Set(descriptors.map(descriptorBuiltinGroup).filter(Boolean));
+  let builtinAvailable = true;
+  const safeMembers = (raw: unknown, group: string): string[] => {
+    if (!Array.isArray(raw)) {
+      unavailable.add(group);
+      return [];
+    }
+    const ids: string[] = [];
+    for (const value of raw) {
+      if (typeof value !== "string" || !knownIDs.has(value)) {
+        unavailable.add(group);
+      } else {
+        ids.push(value);
+      }
+    }
+    return ids;
+  };
+  for (const rule of rules) {
+    if (!rule.enabled) continue;
+    const group = nativeBindingCustomGroup(rule.group);
+    customNames.add(rule.group.trim().toLowerCase());
+    customNames.add(group);
+    if (!groups.has(group)) groups.set(group, new Set());
+    const field = rule.field.trim().toLowerCase();
+    if (!canPreviewClassifyField(field) || missingFields.has(field)) {
+      unavailable.add(group);
+      builtinAvailable = false;
+      continue;
+    }
+    const ids = safeMembers(preview.rule_matches[rule.name.trim()], group);
+    if (unavailable.has(group)) builtinAvailable = false;
+    for (const id of ids) {
+      groups.get(group)!.add(id);
+      customMatches.add(id);
+    }
+  }
+
+  // Preview aggregates use raw custom names, which may collide with built-in
+  // tiers. Rule-specific results identify every known custom match to subtract
+  // before exposing built-in members; native runtime uses classify: prefixes.
+  for (const [rawGroup, rawMembers] of Object.entries(preview.groups)) {
+    const group = rawGroup.trim().toLowerCase();
+    if (!group || group.startsWith("classify:")) continue;
+    const members = safeMembers(rawMembers, group).filter((id) => !customMatches.has(id));
+    if (members.length === 0 && customNames.has(group)) continue;
+    builtinGroups.add(group);
+    groups.set(group, new Set(members));
+  }
+  if (!builtinAvailable) {
+    for (const group of builtinGroups) unavailable.add(group);
+  }
+  return {
+    groups: Object.fromEntries(Array.from(groups, ([group, ids]) => [group, Array.from(ids).sort()])),
+    unavailableGroups: Array.from(unavailable).sort(),
+    groupsAvailable: true,
+  };
+}
+
+// Load card identities once for the whole key list. This deliberately excludes
+// per-credential model discovery and never reconstructs regex matching in JS.
+// Missing classification data affects display only, never saved restrictions.
+export async function fetchNativeBindingCredentialCatalog(
+  rules: ClassifyRule[] | null,
+): Promise<NativeBindingCredentialCatalog> {
+  const c = apiClient();
+  const [authResult, aiResult] = await Promise.allSettled([
+    c.get<unknown>("/v0/management/auth-files"),
+    fetchAIProviderCredentials(c, false),
+  ]);
+  const rows = authResult.status === "fulfilled" ? authFileRows(authResult.value.data) : null;
+  const byID = new Map<string, NativeCredentialOption>();
+  const descriptors = new Map<string, CredentialDescriptor>();
+  for (const row of rows ?? []) {
+    const identity = authFileIdentity(row);
+    const descriptor = authFileDescriptor(row, false);
+    if (!identity || !descriptor || byID.has(identity.id)) continue;
+    byID.set(identity.id, identity);
+    descriptors.set(identity.id, descriptor);
+  }
+  const missingFields = new Set<string>();
+  if (aiResult.status === "fulfilled") {
+    for (const credential of aiResult.value) {
+      const id = optionalString(credential.id);
+      if (!id || byID.has(id)) continue;
+      const provider = (optionalString(credential.provider) ?? "").toLowerCase();
+      byID.set(id, {
+        id, provider,
+        email: optionalString(credential.email),
+        label: optionalString(credential.label),
+        name: optionalString(credential.name),
+        status: optionalString(credential.status),
+        disabled: credential.disabled === true,
+        unavailable: credential.unavailable === true,
+        source: "ai_provider",
+      });
+      // Configured API providers expose exact derived IDs and provider names,
+      // but their safe weight attribute is not part of this identity adapter.
+      // Do not treat that unknown value as a proven non-match for weight rules.
+      descriptors.set(id, { id, provider, attributes: {} });
+      missingFields.add("weight");
+    }
+  }
+  const credentials = Array.from(byID.values()).sort((left, right) => {
+    const a = left.email ?? left.label ?? left.name ?? left.id;
+    const b = right.email ?? right.label ?? right.name ?? right.id;
+    return a.localeCompare(b) || left.id.localeCompare(right.id);
+  });
+  const identitiesComplete = rows !== null && aiResult.status === "fulfilled"
+    && rows.every((row) => optionalString(row["id"]) !== undefined);
+  const unavailable: NativeBindingCredentialCatalog = {
+    credentials, identitiesComplete, groups: {}, unavailableGroups: [], groupsAvailable: false,
+  };
+  if (rules === null || !identitiesComplete) {
+    return unavailable;
+  }
+  const input = Array.from(descriptors.values());
+  try {
+    const preview = await classifyPreview(input, rules, c);
+    return { credentials, identitiesComplete, ...nativeBindingGroupCatalog(input, rules, preview, missingFields) };
+  } catch {
+    return unavailable;
+  }
 }
 
 // --- CPA top-level API-key binding CRUD ---

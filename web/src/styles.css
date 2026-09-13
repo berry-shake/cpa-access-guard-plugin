@@ -999,6 +999,24 @@ td.strong { font-weight: 600; color: var(--text); }
   font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
 }
 .native-binding-meta dd { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+.native-key-preview-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+.native-key-preview-row > .mono { min-width: 0; overflow-wrap: anywhere; }
+.native-key-copy { flex: none; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  border: 0; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+.native-key-copy-status { color: var(--ok); font-size: 11px; line-height: 1.4; }
+.native-key-copy-status[role="alert"] { color: var(--danger); }
+.native-binding-credentials {
+  display: grid; gap: 5px; margin: 7px 0 0; padding: 0; list-style: none;
+}
+.native-binding-credential {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px;
+  min-width: 0; overflow-wrap: anywhere; font-size: 12px; line-height: 1.5;
+}
+.native-binding-credential > span { min-width: 0; }
+.native-binding-credential > .muted { font-size: 11px; }
 .native-binding-group {
   display: inline-block; padding: 2px 8px; background: var(--panel-2);
   border: 1px solid var(--border); border-radius: var(--r-sm); font-size: 12px;

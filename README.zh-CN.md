@@ -8,11 +8,13 @@
 |---|---|
 | **仓库** | [berry-shake/cpa-access-guard-plugin](https://github.com/berry-shake/cpa-access-guard-plugin) |
 | **协议** | MIT |
-| **安装** | 首个 Access Guard GitHub Release 发布前请从源码编译 |
+| **安装** | 从 [GitHub Releases](https://github.com/berry-shake/cpa-access-guard-plugin/releases) 下载对应平台的插件包 |
 | **沿袭** | 基于 MIT 协议的 [origin652/cpa-plugin-key-policy](https://github.com/origin652/cpa-plugin-key-policy) 演进而来 |
 | **English** | [README.md](./README.md) |
 
-**v0.4.4-fork.15 发布范围：** 只增加每个原生 Key 独立的“轮询并发”开关，默认关闭；会话粘滞改动和单凭据优化暂不发布。关闭开关的多凭据绑定仍使用“最高优先级，同级取最小 Auth ID”的原有选择方式，本版不会为其补上 CPA 会话粘滞。单凭据绑定保留旧流程，未绑定的原生 Key 保持 CPA 自身的调度与粘滞。本版不引入 CPA SDK 依赖，也不增加请求拦截或请求生命周期钩子。
+**v0.4.4-fork.16：** 原生 Key 卡片新增“复制完整 Key”，并逐行显示绑定凭据邮箱，分类绑定也可展示匹配凭据。卡片仍保留脱敏预览，宿主已删除 Key 的孤立绑定不可复制。本次只更新管理界面与身份展示，不修改 CPA 和凭据调度逻辑。
+
+**沿用 v0.4.4-fork.15 的路由行为：** 每个原生 Key 独立的“轮询并发”开关默认关闭；会话粘滞改动和单凭据优化暂不发布。关闭开关的多凭据绑定仍使用“最高优先级，同级取最小 Auth ID”的原有选择方式，不会为其补上 CPA 会话粘滞。单凭据绑定保留旧流程，未绑定的原生 Key 保持 CPA 自身的调度与粘滞。不引入 CPA SDK 依赖，也不增加请求拦截或请求生命周期钩子。
 
 ---
 
@@ -163,7 +165,8 @@ CPA 原生鉴权成功后会产生稳定、不可逆的 `caller_scope`。插件�
 
 - 需要 CLIProxyAPI **v7.2.101 或更高版本**，因为 Scheduler 必须收到 `Options.Metadata.caller_scope`。
 - 网页通过受 Management Key 保护的 `GET /v0/management/api-keys` 读取 CPA 当前顶层列表，默认以脱敏形式列出每一把 Key，包括尚未绑定的 Key；已经从宿主删除、但 state 中仍有绑定的 Key 会保留为“孤立绑定”供检查。
-- 从未绑定行直接创建时无需手动复制粘贴。明文只停留在页面内存，并且只通过受 Management 鉴权的 JSON 请求体用于精确 scope 匹配和创建绑定；不会渲染到页面、放进 URL、写入浏览器存储或插件 state，也不会由插件 API 返回。
+- 从未绑定行直接创建时无需手动复制粘贴。卡片保持脱敏显示，点击“复制完整 Key”可复制宿主中仍存在的完整 Key；孤立绑定无法找回明文，因此不能复制。明文只在页面内存及用户发起的复制操作中使用，不写入 URL、浏览器存储或插件 state，也不会由插件 API 返回；HTTP 页面复制降级所用的临时输入框会立即清空并移除。
+- 卡片在凭据限制下逐行显示绑定凭据邮箱；没有邮箱时显示名称或精确凭据 ID。分类绑定复用插件规则展示匹配名单，无法可靠预览的分组会提示暂不可展示。这份名单表示绑定或分组成员，实际请求仍受模型、状态及优先级限制。
 - 仍可手动新建绑定：粘贴原生 Key 一次；明文只用于计算 scope 和预览，不会写入 state，也不会在 API 响应中回显。
 - Key 必须仍然存在于 CPA 顶层 `api-keys`；绑定本身不负责认证。
 - 已绑定且启用的 Key 如果找不到组内或直接白名单内的可用凭证，会返回 `auth_not_found`（503），不会退回限制外文件。
