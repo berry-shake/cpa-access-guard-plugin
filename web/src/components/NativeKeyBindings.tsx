@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useT } from "../i18n";
 import NativeModelAccessPicker from "./NativeModelAccessPicker";
@@ -155,45 +155,77 @@ function NativeKeyCopyButton({ apiKey }: { apiKey?: string }) {
   );
 }
 
-function BoundCredentialList({ binding, catalog, loading, failed }: {
+const CODEX_PLAN_LABELS = new Map([
+  ["free", "Free"], ["plus", "Plus"], ["team", "Team"],
+  ["pro", "Pro"], ["enterprise", "Enterprise"], ["edu", "Edu"],
+]);
+
+function BoundCredentialPanel({ binding, catalog, loading, failed }: {
   binding: NativeKeyBinding;
   catalog: NativeBindingCredentialCatalog | null;
   loading: boolean;
   failed: boolean;
 }) {
   const t = useT();
+  const contentID = useId();
+  const [expanded, setExpanded] = useState(false);
   if (binding.needs_reselection) return null;
-  if (loading) return <p className="native-binding-field-hint">{t("mapping.native.loadingCredentials")}</p>;
-  if (failed || !catalog) return <p className="native-binding-field-hint">{t("mapping.native.credentialsLoadFailed")}</p>;
-
   const direct = !!binding.auth_ids?.length;
   const group = binding.group?.trim().toLowerCase() ?? "";
-  if (!direct && (!catalog.groupsAvailable || catalog.unavailableGroups.includes(group))) {
-    return <p className="native-binding-field-hint">{t("mapping.native.groupCredentialsUnavailable")}</p>;
-  }
-  const ids = Array.from(new Set(direct ? binding.auth_ids : catalog.groups[group] ?? []));
-  const byID = new Map(catalog.credentials.map((credential) => [credential.id, credential]));
-  if (ids.length === 0) return <p className="native-binding-field-hint">{t("mapping.native.noGroupCredentials")}</p>;
+  const groupUnavailable = !direct && (!catalog?.groupsAvailable || catalog.unavailableGroups.includes(group));
+  const ids = Array.from(new Set(direct ? binding.auth_ids : catalog?.groups[group] ?? []));
+  const byID = new Map(catalog?.credentials.map((credential) => [credential.id, credential]) ?? []);
+  const hint = loading ? "mapping.native.loadingCredentials"
+    : failed || !catalog ? "mapping.native.credentialsLoadFailed"
+    : groupUnavailable ? "mapping.native.groupCredentialsUnavailable"
+    : ids.length === 0 ? "mapping.native.noGroupCredentials" : "";
+  const count = direct || (!loading && !failed && catalog && !groupUnavailable) ? ids.length : undefined;
+  const heading = <>{t("mapping.native.boundAccounts")}{count !== undefined && (
+    <span className="native-binding-account-count">{count}</span>
+  )}</>;
 
   return (
-    <ul className="native-binding-credentials" aria-label={t("mapping.native.boundCredentials")}>
-      {ids.map((id) => {
-        const credential = byID.get(id);
-        const identity = credential?.email || credential?.label || credential?.name || id;
-        return (
-          <li className="native-binding-credential" key={id}>
-            <span>{identity}</span>
-            {!credential && (
-              <span className="muted">
-                {t(catalog.identitiesComplete === false
-                  ? "mapping.native.credentialsLoadFailed"
-                  : "mapping.native.credentialMissing")}
-              </span>
-            )}
-          </li>
-        );
-      })}
-    </ul>
+    <section className={`native-binding-account-panel${expanded ? " expanded" : ""}`}>
+      <h3 className="native-binding-account-heading">{heading}</h3>
+      <button
+        className="native-binding-account-toggle"
+        type="button"
+        aria-expanded={expanded}
+        aria-controls={contentID}
+        onClick={() => setExpanded((value) => !value)}
+      >
+        <span>{heading}</span>
+        <span className="native-binding-account-toggle-label">
+          {t(expanded ? "mapping.native.hideAccounts" : "mapping.native.showAccounts")}
+          <span className="native-binding-account-chevron" aria-hidden="true" />
+        </span>
+      </button>
+      <div className="native-binding-account-content" id={contentID}>
+        {hint ? <p className="native-binding-field-hint">{t(hint)}</p> : (
+          <ul className="native-binding-credentials" aria-label={t("mapping.native.boundCredentials")} tabIndex={0}>
+            {ids.map((id) => {
+              const credential = byID.get(id);
+              const identity = credential?.email || credential?.label || credential?.name || id;
+              const plan = credential?.provider === "codex" && credential.plan
+                ? CODEX_PLAN_LABELS.get(credential.plan.trim().toLowerCase()) : undefined;
+              return (
+                <li className="native-binding-credential" key={id}>
+                  <span className="native-binding-credential-identity">{identity}</span>
+                  {plan && <span className="native-binding-credential-plan">{plan}</span>}
+                  {!credential && (
+                    <span className="muted">
+                      {t(catalog?.identitiesComplete === false
+                        ? "mapping.native.credentialsLoadFailed"
+                        : "mapping.native.credentialMissing")}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -383,86 +415,90 @@ export default function NativeKeyBindingsTab() {
                     {t(`mapping.native.${status}`)}
                   </span>
                 </div>
-                <dl className="native-binding-meta">
-                  <div>
-                    <dt>{t("mapping.native.keyPreview")}</dt>
-                    <dd className="native-key-preview-row">
-                      <span className="mono">{row.keyPreview}</span>
-                      <NativeKeyCopyButton apiKey={row.apiKey} />
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>{t("mapping.native.restriction")}</dt>
-                    <dd>
-                      <span className={`native-binding-group mono${binding ? "" : " unrestricted"}${binding?.needs_reselection ? " needs-reselection" : ""}`}>
-                        {binding?.needs_reselection
-                          ? t("mapping.native.directReselectionSummary")
-                          : binding?.auth_ids?.length
-                          ? t("mapping.native.directSummary", { count: binding.auth_ids.length })
-                          : binding?.group || t("mapping.native.defaultScheduling")}
-                      </span>
+                <div className={`native-binding-card-body${binding && !binding.needs_reselection ? " has-accounts" : ""}`}>
+                  <div className="native-binding-details">
+                    <dl className="native-binding-meta">
+                      <div>
+                        <dt>{t("mapping.native.keyPreview")}</dt>
+                        <dd className="native-key-preview-row">
+                          <span className="mono">{row.keyPreview}</span>
+                          <NativeKeyCopyButton apiKey={row.apiKey} />
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{t("mapping.native.restriction")}</dt>
+                        <dd>
+                          <span className={`native-binding-group mono${binding ? "" : " unrestricted"}${binding?.needs_reselection ? " needs-reselection" : ""}`}>
+                            {binding?.needs_reselection
+                              ? t("mapping.native.directReselectionSummary")
+                              : binding?.auth_ids?.length
+                              ? t("mapping.native.directSummary", { count: binding.auth_ids.length })
+                              : binding?.group || t("mapping.native.defaultScheduling")}
+                          </span>
+                        </dd>
+                      </div>
                       {binding && (
-                        <BoundCredentialList
-                          binding={binding}
-                          catalog={credentialCatalog}
-                          loading={credentialCatalogLoading}
-                          failed={credentialCatalogFailed}
-                        />
+                        <div>
+                          <dt>{t("mapping.native.modelAccess")}</dt>
+                          <dd>
+                            <span className={`native-binding-group mono${binding.model_access?.mode === "allowlist" ? "" : " unrestricted"}`}>
+                              {binding.model_access?.mode === "allowlist"
+                                ? (binding.model_access.models?.length ?? 0) > 0
+                                  ? t("mapping.native.modelSummary", { count: binding.model_access.models?.length ?? 0 })
+                                  : t("mapping.native.noModelsAllowed")
+                                : t("mapping.native.allModels")}
+                            </span>
+                          </dd>
+                        </div>
                       )}
-                    </dd>
+                      {binding?.enabled && binding.round_robin && (
+                        <div>
+                          <dt>{t("mapping.native.requestRouting")}</dt>
+                          <dd>{t("mapping.native.roundRobin")}</dd>
+                        </div>
+                      )}
+                    </dl>
+                    {!row.present && (
+                      <p className="native-binding-orphan-note">{t("mapping.native.orphanHint")}</p>
+                    )}
+                    {binding?.enabled && binding.usage && (
+                      <dl className="native-binding-meta native-binding-usage">
+                        {binding.usage.rpm_limit > 0 && (
+                          <div>
+                            <dt>{t("mapping.native.rpm")}</dt>
+                            <dd className={`mono${binding.usage.rpm_used >= binding.usage.rpm_limit ? " native-quota-full" : ""}`}>
+                              {binding.usage.rpm_used}/{binding.usage.rpm_limit}
+                            </dd>
+                          </div>
+                        )}
+                        {binding.usage.daily_usd_limit > 0 && (
+                          <div>
+                            <dt>{t("mapping.native.dailyUsd")}</dt>
+                            <dd className={`mono${binding.usage.daily_usd_used >= binding.usage.daily_usd_limit ? " native-quota-full" : ""}`}>
+                              ${binding.usage.daily_usd_used.toFixed(2)}/${binding.usage.daily_usd_limit.toFixed(2)}
+                            </dd>
+                          </div>
+                        )}
+                        {(binding.usage.daily_calls > 0 || binding.usage.weekly_calls > 0) && (
+                          <div>
+                            <dt>{t("mapping.native.calls")}</dt>
+                            <dd className="mono">
+                              {binding.usage.daily_calls}/{binding.usage.weekly_calls}
+                            </dd>
+                          </div>
+                        )}
+                      </dl>
+                    )}
                   </div>
                   {binding && (
-                    <div>
-                      <dt>{t("mapping.native.modelAccess")}</dt>
-                      <dd>
-                        <span className={`native-binding-group mono${binding.model_access?.mode === "allowlist" ? "" : " unrestricted"}`}>
-                          {binding.model_access?.mode === "allowlist"
-                            ? (binding.model_access.models?.length ?? 0) > 0
-                              ? t("mapping.native.modelSummary", { count: binding.model_access.models?.length ?? 0 })
-                              : t("mapping.native.noModelsAllowed")
-                            : t("mapping.native.allModels")}
-                        </span>
-                      </dd>
-                    </div>
+                    <BoundCredentialPanel
+                      binding={binding}
+                      catalog={credentialCatalog}
+                      loading={credentialCatalogLoading}
+                      failed={credentialCatalogFailed}
+                    />
                   )}
-                  {binding?.enabled && binding.round_robin && (
-                    <div>
-                      <dt>{t("mapping.native.requestRouting")}</dt>
-                      <dd>{t("mapping.native.roundRobin")}</dd>
-                    </div>
-                  )}
-                </dl>
-                {!row.present && (
-                  <p className="native-binding-orphan-note">{t("mapping.native.orphanHint")}</p>
-                )}
-                {binding?.enabled && binding.usage && (
-                  <dl className="native-binding-meta native-binding-usage">
-                    {binding.usage.rpm_limit > 0 && (
-                      <div>
-                        <dt>{t("mapping.native.rpm")}</dt>
-                        <dd className={`mono${binding.usage.rpm_used >= binding.usage.rpm_limit ? " native-quota-full" : ""}`}>
-                          {binding.usage.rpm_used}/{binding.usage.rpm_limit}
-                        </dd>
-                      </div>
-                    )}
-                    {binding.usage.daily_usd_limit > 0 && (
-                      <div>
-                        <dt>{t("mapping.native.dailyUsd")}</dt>
-                        <dd className={`mono${binding.usage.daily_usd_used >= binding.usage.daily_usd_limit ? " native-quota-full" : ""}`}>
-                          ${binding.usage.daily_usd_used.toFixed(2)}/${binding.usage.daily_usd_limit.toFixed(2)}
-                        </dd>
-                      </div>
-                    )}
-                    {(binding.usage.daily_calls > 0 || binding.usage.weekly_calls > 0) && (
-                      <div>
-                        <dt>{t("mapping.native.calls")}</dt>
-                        <dd className="mono">
-                          {binding.usage.daily_calls}/{binding.usage.weekly_calls}
-                        </dd>
-                      </div>
-                    )}
-                  </dl>
-                )}
+                </div>
                 {binding?.enabled && binding.usage && <WeeklyQuotaRemaining usage={binding.usage} />}
                 <div className="native-binding-actions">
                   {binding ? (

@@ -289,6 +289,74 @@ describe("NativeKeyBindingsTab copy and credential identities", () => {
     expect(Array.from(rows).map((row) => row.textContent)).toEqual(["shared@example.test", "shared@example.test"]);
   });
 
+  it("shows only known Codex plan labels beside the unchanged account identities", async () => {
+    const knownPlans = [
+      ["free", "Free"], ["plus", "Plus"], ["team", "Team"],
+      ["pro", "Pro"], ["enterprise", "Enterprise"], ["edu", "Edu"],
+    ];
+    const known = knownPlans.map(([plan]) => ({
+      id: `known-${plan}`, provider: "codex", plan, email: `${plan}@example.test`,
+    }));
+    const withoutBadges = [
+      { id: "missing-plan", provider: "codex", email: "missing@example.test" },
+      { id: "unknown-plan", provider: "codex", plan: "future-tier", email: "future@example.test" },
+      { id: "object-prototype-plan", provider: "codex", plan: "__proto__", email: "prototype@example.test" },
+      { id: "constructor-plan", provider: "codex", plan: "constructor", email: "constructor@example.test" },
+      { id: "pro-five", provider: "codex", plan: "pro5x", email: "five@example.test" },
+      { id: "pro-twenty", provider: "codex", plan: "pro20x", email: "twenty@example.test" },
+      { id: "other-provider", provider: "claude", plan: "pro", email: "other@example.test" },
+    ];
+    const credentials = [...known, ...withoutBadges];
+    apiMocks.fetchNativeBindingCredentialCatalog.mockResolvedValue({
+      credentials, groups: {}, unavailableGroups: [], groupsAvailable: true,
+    });
+    await renderQuotaBinding({ ...existing, group: undefined, auth_ids: credentials.map((item) => item.id) });
+
+    const rows = container.querySelectorAll("li.native-binding-credential");
+    expect(rows).toHaveLength(credentials.length);
+    knownPlans.forEach(([, label], index) => {
+      expect(rows[index].textContent).toBe(`${known[index].email}${label}`);
+    });
+    withoutBadges.forEach((credential, index) => {
+      expect(rows[known.length + index].textContent).toBe(credential.email);
+    });
+  });
+
+  it("links an initially collapsed account toggle to its content and changes only its expanded state", async () => {
+    apiMocks.fetchNativeBindingCredentialCatalog.mockResolvedValue({
+      credentials: [
+        { id: "account-a", provider: "codex", email: "a@example.test" },
+        { id: "account-b", provider: "codex", email: "b@example.test" },
+      ],
+      groups: {}, unavailableGroups: [], groupsAvailable: true,
+    });
+    await renderQuotaBinding({ ...existing, group: undefined, auth_ids: ["account-a", "account-b"] });
+
+    const toggle = container.querySelector<HTMLButtonElement>("button[aria-expanded][aria-controls]")!;
+    expect(toggle).toBeTruthy();
+    expect(toggle.type).toBe("button");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle.textContent).toContain("绑定账号");
+    expect(toggle.textContent).toContain("2");
+    expect(toggle.textContent).toContain("展开账号");
+    const contentID = toggle.getAttribute("aria-controls")!;
+    expect(contentID).not.toBe("");
+    const content = document.getElementById(contentID)!;
+    expect(content).toBeTruthy();
+    expect(content.querySelectorAll("li.native-binding-credential")).toHaveLength(2);
+    expect(Array.from(container.querySelectorAll("h3")).some((heading) => heading.textContent?.includes("绑定账号"))).toBe(true);
+
+    await act(async () => { toggle.click(); });
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(toggle.textContent).toContain("收起账号");
+    expect(toggle.getAttribute("aria-controls")).toBe(contentID);
+    await act(async () => { toggle.click(); });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle.textContent).toContain("展开账号");
+    expect(apiMocks.updateNativeKeyBinding).not.toHaveBeenCalled();
+    expect(apiMocks.createNativeKeyBinding).not.toHaveBeenCalled();
+  });
+
   it("uses safe display fallbacks and marks a missing direct credential", async () => {
     apiMocks.fetchNativeBindingCredentialCatalog.mockResolvedValue({
       credentials: [

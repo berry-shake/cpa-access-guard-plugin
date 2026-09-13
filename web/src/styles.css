@@ -969,10 +969,11 @@ td.strong { font-weight: 600; color: var(--text); }
   border-radius: var(--r-md); font-size: 13px;
 }
 .native-binding-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr));
   align-items: start; gap: 16px;
 }
 .native-binding-card {
+  container: native-binding / inline-size;
   background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-md);
   padding: 16px; transition: border-color var(--t-fast), opacity var(--t-fast);
 }
@@ -992,6 +993,10 @@ td.strong { font-weight: 600; color: var(--text); }
 .native-binding-status.disabled { color: var(--muted); background: var(--muted-bg); border-color: var(--border); }
 .native-binding-status.unbound { color: var(--muted); background: var(--muted-bg); border-color: var(--border); }
 .native-binding-status.orphan { color: var(--danger); background: var(--danger-soft); border-color: var(--danger-border); }
+.native-binding-card-body { display: grid; gap: 14px; margin: 16px 0; }
+.native-binding-details { min-width: 0; }
+.native-binding-details > .native-binding-meta:first-child { margin-top: 0; }
+.native-binding-details > :last-child { margin-bottom: 0; }
 .native-binding-meta { display: grid; gap: 9px; margin: 16px 0; }
 .native-binding-meta > div { min-width: 0; }
 .native-binding-meta dt {
@@ -1008,15 +1013,49 @@ td.strong { font-weight: 600; color: var(--text); }
 }
 .native-key-copy-status { color: var(--ok); font-size: 11px; line-height: 1.4; }
 .native-key-copy-status[role="alert"] { color: var(--danger); }
-.native-binding-credentials {
-  display: grid; gap: 5px; margin: 7px 0 0; padding: 0; list-style: none;
+.native-binding-account-panel {
+  min-width: 0; align-self: start; border: 1px solid var(--border);
+  border-radius: var(--r-sm); background: var(--panel-2);
 }
+.native-binding-account-heading { display: none; margin: 0; padding: 10px 12px 0; font-size: 11px; color: var(--muted); }
+.native-binding-account-count {
+  display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: var(--r-sm);
+  background: var(--muted-bg); color: var(--muted); font-size: 11px; font-weight: 500;
+}
+.native-binding-account-toggle {
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  width: 100%; padding: 10px 12px; border: 0; border-radius: inherit;
+  background: transparent; color: var(--text); font: inherit; font-size: 12px; text-align: left; cursor: pointer;
+}
+.native-binding-account-toggle-label { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; }
+.native-binding-account-chevron { width: 6px; height: 6px; border-right: 1.5px solid; border-bottom: 1.5px solid; transform: rotate(45deg) translateY(-2px); }
+.native-binding-account-panel.expanded .native-binding-account-chevron { transform: rotate(225deg) translate(-2px, -1px); }
+.native-binding-account-content { display: none; padding: 8px 10px 10px; }
+.native-binding-account-panel.expanded .native-binding-account-content { display: block; }
+.native-binding-account-content > .native-binding-field-hint { margin: 0; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.native-binding-credentials {
+  display: grid; gap: 0; max-height: 240px; overflow-y: auto;
+  margin: 0; padding: 0 2px; list-style: none;
+}
+.native-binding-account-toggle:focus-visible,
+.native-binding-credentials:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .native-binding-credential {
-  display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px;
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; padding: 7px 0;
   min-width: 0; overflow-wrap: anywhere; font-size: 12px; line-height: 1.5;
 }
+.native-binding-credential + .native-binding-credential { border-top: 1px solid var(--border); }
 .native-binding-credential > span { min-width: 0; }
+.native-binding-credential-identity { flex: 1 1 130px; }
+.native-binding-credential-plan {
+  flex: none; padding: 0 5px; border: 1px solid var(--border); border-radius: var(--r-sm);
+  color: var(--muted); background: var(--panel); font-size: 10px; line-height: 17px;
+}
 .native-binding-credential > .muted { font-size: 11px; }
+@container native-binding (min-width: 400px) {
+  .native-binding-card-body.has-accounts { grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 16px; }
+  .native-binding-account-heading, .native-binding-account-content { display: block; }
+  .native-binding-account-toggle { display: none; }
+}
 .native-binding-group {
   display: inline-block; padding: 2px 8px; background: var(--panel-2);
   border: 1px solid var(--border); border-radius: var(--r-sm); font-size: 12px;
