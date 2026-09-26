@@ -1,6 +1,6 @@
 // In-memory session only. Never persisted to localStorage.
-// Rationale: the secret-key is CPA's total management credential; we don't want
-// it lying around in storage. Refreshing/closing the tab resets to the login page.
+// A refresh discards this session; an embedded panel may restore its own
+// already-persisted credential through bootstrapFromPanel().
 
 import { readPanelAuth } from "./panelAuth";
 import type { StatusResponse } from "../types";
@@ -54,7 +54,7 @@ function emit(): void {
   for (const fn of listeners) fn();
 }
 
-// Attempt to restore a session from the official panel's saved management key
+// Attempt to restore a session from the CPA or CPAMP panel's saved key
 // (only available when this UI is loaded as a same-origin iframe inside the
 // panel AND the user checked "remember password" there). On success the
 // session is set and true is returned; on any failure the session is cleared
@@ -62,9 +62,15 @@ function emit(): void {
 export async function bootstrapFromPanel(): Promise<boolean> {
   const auth = readPanelAuth();
   if (!auth) return false;
-  setSession(auth.apiBase, auth.managementKey);
+  const candidate: Session = {
+    baseUrl: normalizeBase(auth.apiBase),
+    secretKey: auth.managementKey.trim(),
+  };
   try {
-    await verifySession(fetch);
+    // Do not publish an authenticated state until verification succeeds.
+    // Otherwise a rejection toggles Shell's auth effect and retries forever.
+    await verifyCandidateSession(fetch, candidate);
+    setSession(candidate.baseUrl, candidate.secretKey);
     return true;
   } catch {
     clearSession();
@@ -79,6 +85,10 @@ export async function verifySession(
 ): Promise<Session> {
   const s = current;
   if (!s) throw new Error("no session");
+  return verifyCandidateSession(fetchImpl, s);
+}
+
+async function verifyCandidateSession(fetchImpl: typeof fetch, s: Session): Promise<Session> {
   const res = await fetchImpl(s.baseUrl + "/v0/management/plugins/access-guard/status", {
     headers: { Authorization: "Bearer " + s.secretKey },
   });

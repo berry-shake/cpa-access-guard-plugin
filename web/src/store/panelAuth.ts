@@ -1,21 +1,22 @@
-// Reuse the official CPA management panel's saved management key when this
-// web UI is loaded as a same-origin iframe inside that panel.
+// Reuse the CPA or CPAMP panel's saved management key when this web UI is
+// loaded as a same-origin iframe inside that panel.
 //
 // The panel stores its auth state (apiBase +, only when "remember password"
 // is checked, managementKey) in localStorage under key "cli-proxy-auth", run
 // through a reversible XOR+base64 obfuscation (see the panel's
 // src/utils/encryption.ts). Because the panel and this plugin resource are
 // same-origin (both served by CPA), they share the SAME localStorage and the
-// SAME obfuscation key (host + userAgent are identical), so we can decode the
-// panel's stored blob here and skip a second login.
+// SAME obfuscation key, so we can decode the panel's stored blob here and
+// skip a second login. Legacy v1 includes host + userAgent; CPAMP v2 uses
+// host only, with its own versioned salt.
 //
 // SECURITY: This only reads the panel's already-persisted key; it never writes
 // the key to storage itself. The plugin's own "key in memory only" rule stands.
-// Cross-origin iframes have a separate localStorage that does not contain
-// "cli-proxy-auth", so a malicious site embedding this plugin cannot read the
-// panel key. We additionally gate on window.self !== window.top (embedded only).
+// Reads stay within this frame's origin-scoped storage; credentials are never
+// read from or sent to a parent window. We also require an embedded page.
 
-const ENC_PREFIX = "enc::v1::";
+const ENC_PREFIX_V1 = "enc::v1::";
+const ENC_PREFIX_V2 = "enc::v2::";
 const SECRET_SALT = "cli-proxy-api-webui::secure-storage";
 const STORAGE_KEY = "cli-proxy-auth";
 
@@ -25,6 +26,7 @@ export interface PanelAuth {
 }
 
 let cachedKeyBytes: Uint8Array | null = null;
+let cachedV2KeyBytes: Uint8Array | null = null;
 
 function encodeText(text: string): Uint8Array {
   return new TextEncoder().encode(text);
@@ -45,9 +47,21 @@ function getKeyBytes(): Uint8Array {
   return cachedKeyBytes;
 }
 
+// Matches CPAMP v2: `${SECRET_SALT}|v2|${host}`, independent of userAgent.
+function getV2KeyBytes(): Uint8Array {
+  if (cachedV2KeyBytes) return cachedV2KeyBytes;
+  try {
+    cachedV2KeyBytes = encodeText(`${SECRET_SALT}|v2|${window.location.host}`);
+  } catch {
+    cachedV2KeyBytes = encodeText(`${SECRET_SALT}|v2`);
+  }
+  return cachedV2KeyBytes;
+}
+
 // Exposed for tests: clear the cached key so a changed host/userAgent is used.
 export function _resetKeyCache(): void {
   cachedKeyBytes = null;
+  cachedV2KeyBytes = null;
 }
 
 function xorBytes(data: Uint8Array, keyBytes: Uint8Array): Uint8Array {
@@ -71,22 +85,26 @@ function fromBase64(base64: string): Uint8Array {
   return bytes;
 }
 
-// Reversible obfuscation, identical to the panel's obfuscateData().
+// Legacy v1 encoder retained for compatibility fixtures; never persists data.
 export function obfuscateData(value: string): string {
   if (!value) return value;
   try {
-    return `${ENC_PREFIX}${toBase64(xorBytes(encodeText(value), getKeyBytes()))}`;
+    return `${ENC_PREFIX_V1}${toBase64(xorBytes(encodeText(value), getKeyBytes()))}`;
   } catch {
     return value;
   }
 }
 
-// Deobfuscation, identical to the panel's deobfuscateData().
+// Decode both panel formats without migrating or rewriting the saved value.
 export function deobfuscateData(payload: string): string {
-  if (!payload || !payload.startsWith(ENC_PREFIX)) return payload;
+  if (!payload) return payload;
+  const version = payload.startsWith(ENC_PREFIX_V2) ? 2 : payload.startsWith(ENC_PREFIX_V1) ? 1 : 0;
+  if (!version) return payload;
   try {
-    const encrypted = fromBase64(payload.slice(ENC_PREFIX.length));
-    return decodeText(xorBytes(encrypted, getKeyBytes()));
+    const prefix = version === 2 ? ENC_PREFIX_V2 : ENC_PREFIX_V1;
+    const keyBytes = version === 2 ? getV2KeyBytes() : getKeyBytes();
+    const encrypted = fromBase64(payload.slice(prefix.length));
+    return decodeText(xorBytes(encrypted, keyBytes));
   } catch {
     return payload;
   }

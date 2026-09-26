@@ -12,6 +12,8 @@ In plain words: you issue your own `cpa_…` keys to clients. Each key only sees
 | **Lineage** | Derived from [origin652/cpa-plugin-key-policy](https://github.com/origin652/cpa-plugin-key-policy) under the MIT license |
 | **中文说明** | [README.zh-CN.md](./README.zh-CN.md) |
 
+**v0.4.4-fork.18.1:** restores automatic login inside CPAMP panels that save credentials in `enc::v2::` format, while retaining legacy v1 support. Saved credentials are verified before the plugin publishes an authenticated session, so an expired or invalid password returns to the login screen without repeated verification. The panel must be same-origin with **Remember password** enabled; the plugin never creates another persisted copy of the credential.
+
 **v0.4.4-fork.18:** batch-bind all current native keys or a selected subset to one or more credentials, preview changes, undo the last batch, and restore earlier operations from persistent history. Existing bindings keep their round-robin setting, model permissions, limits, enabled state, and usage. Phone layouts expose all five navigation destinations inside CPA, collapse the long help text, and improve touch controls. Billing formulas and credential scheduling are unchanged. See [Batch binding and history restore](#batch-binding-and-history-restore) for restore boundaries.
 
 **v0.4.4-fork.17:** native-key cards use a separate account panel on the right for emails and recognized Codex plans. Long lists scroll within a bounded height, and narrow cards can expand or collapse the accounts. Plans come from existing CPA credential data; missing or unknown values stay hidden, and Pro is never inferred to mean Pro5x / Pro20x. Complete-key copying and classification-group display are retained.
@@ -312,7 +314,7 @@ Embedded in the plugin. After load, open:
 http://<your-cpa-host>:<api-port>/v0/resource/plugins/access-guard/index.html
 ```
 
-Login with CPA **management** secret (`remote-management.secret-key` / management password). The secret stays in memory only (not `localStorage`); refresh → re-login.
+Login with the CPA **management** secret (`remote-management.secret-key` / management password). A manual login stays in memory only. When embedded in a same-origin CPA or CPAMP panel with **Remember password** enabled, the plugin can restore the panel's saved login after re-entry or refresh; both legacy `enc::v1::` and CPAMP `enc::v2::` storage are supported. It only reads that existing value and never persists or migrates credentials itself. CPAMP's saved administrator key is used through its configured management proxy.
 
 UI areas:
 
