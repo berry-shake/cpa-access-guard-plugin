@@ -132,8 +132,7 @@ body {
 a { color: var(--accent); text-decoration: none; }
 a:hover { color: var(--accent-2); text-decoration: underline; }
 
-/* Desktop shell: top horizontal nav + centered 1200px content.
- * Mobile keeps the old .header (stacked) via the max-width block. */
+/* Shared navigation and centered content, adapted below for small screens. */
 .app { max-width: 1200px; margin: 0 auto; padding: 24px 24px 80px; }
 
 /* Desktop header: brand on the first row, navigation directly underneath and
@@ -177,6 +176,7 @@ a:hover { color: var(--accent-2); text-decoration: underline; }
 .topnav-actions .tn-link:hover { color: var(--text); text-decoration: none; }
 .topnav-actions .tn-link.active { color: var(--accent); font-weight: 600; border-bottom-color: var(--accent); }
 .topnav-actions .tn-link.danger:hover { color: var(--danger); }
+.topnav-actions .tn-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
 
 /* Legacy .header kept for mobile (max-width:640px) stacked layout. */
 .header {
@@ -884,13 +884,27 @@ td.strong { font-weight: 600; color: var(--text); }
   .tabbar, .fab, .bar-rank,
   .detail-card, .mmodels, .section-label, .sechead, .seg,
   .mobile-only, .mobile-form-header { display: none !important; }
-  /* Desktop shows the top nav; mobile keeps the legacy .header. */
+  /* The same navigation links are available at every viewport size. */
   .topnav { display: block; }
   /* KeyUsage header keeps its daily/weekly toggle on desktop. */
   .keyusage-header .seg { display: inline-flex !important; }
 }
 @media (max-width: 640px) {
-  .topnav { display: none; }
+  .topnav { display: block; position: static; margin: 0 -16px; padding: 0 16px; }
+  .topnav-inner, :root.embedded .topnav-inner { width: 100%; min-height: 0; gap: 10px; padding: 12px 0; }
+  .topnav-brand .tn-sub { display: none; }
+  .topnav-brand .tn-logo { width: 28px; height: 28px; border-radius: 8px; }
+  :root.embedded .topnav-brand { display: none; }
+  .topnav-actions { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); width: 100%; gap: 6px; }
+  .topnav-actions .tn-link {
+    grid-column: span 2; display: flex; align-items: center; justify-content: center;
+    min-height: 44px; min-width: 0; padding: 8px 6px; box-sizing: border-box;
+    border: 1px solid var(--border); border-radius: var(--r-md); background: var(--panel);
+    font-size: 13px; line-height: 1.35; text-align: center; overflow-wrap: anywhere;
+  }
+  .topnav-actions .tn-link:nth-last-child(-n+2) { grid-column: span 3; }
+  .topnav-actions .tn-link.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .topnav-actions .tn-link:active { transform: scale(.97); }
 }
 
 /* ===== Mapping page ===== */
@@ -960,13 +974,72 @@ td.strong { font-weight: 600; color: var(--text); }
   margin-top: 9px; padding-top: 9px; color: var(--danger); font-weight: 600;
   border-top: 1px solid var(--danger-border);
 }
-.native-binding-toolbar { align-items: center; gap: 8px; }
+.native-binding-help-body { min-width: 0; flex: 1; }
+.native-binding-help-toggle, .native-binding-help-summary { display: none; }
+.native-binding-toolbar { align-items: center; flex-wrap: wrap; gap: 8px; }
 .native-binding-summary { margin-right: auto; font-size: 13px; }
 .native-binding-empty {
   display: flex; flex-direction: column; align-items: center; gap: 4px;
   padding: 36px 20px; text-align: center;
   background: var(--panel); border: 1px dashed var(--border-strong);
   border-radius: var(--r-md); font-size: 13px;
+}
+.native-batch-modal { max-width: 1050px; box-sizing: border-box; }
+.native-batch-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.native-batch-header h3 { min-width: 0; overflow-wrap: anywhere; }
+.native-batch-header > button { flex: none; }
+.native-batch-intro { margin: 0 0 16px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.native-batch-feedback { outline: none; }
+.native-batch-feedback:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.native-batch-selection { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; }
+.native-batch-selection section { min-width: 0; }
+.native-batch-modal h4 { margin: 0 0 8px; font-size: 13px; }
+.native-batch-selection input[type="search"] {
+  box-sizing: border-box; width: 100%; min-width: 0; padding: 9px 11px;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--r-md);
+}
+.native-batch-selection-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0; }
+.native-batch-selection-tools > span { margin-right: auto; color: var(--muted); font-size: 11px; }
+.native-batch-options { height: 300px; overflow: auto; border: 1px solid var(--border); border-radius: var(--r-md); }
+.native-batch-options > p { margin: 18px 12px; font-size: 12px; }
+.native-batch-key, .native-batch-credential {
+  display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px;
+  min-height: 46px; border-bottom: 1px solid var(--border); cursor: pointer;
+}
+.native-batch-key:last-child, .native-batch-credential:last-child { border-bottom: 0; }
+.native-batch-key:has(input:checked), .native-batch-credential:has(input:checked) { background: var(--accent-soft); }
+.native-batch-key > input, .native-batch-credential > input { flex: none; margin: 3px 0 0; accent-color: var(--accent); }
+.native-batch-key > span, .native-batch-credential > span { display: flex; flex-direction: column; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.native-batch-key strong, .native-batch-credential strong { font-size: 12px; }
+.native-batch-key .mono, .native-batch-credential .mono { color: var(--muted); font-size: 11px; }
+.native-batch-key small, .native-batch-credential small { color: var(--muted); font-size: 10px; }
+.native-batch-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+.native-batch-change { margin: 10px 0; padding: 12px; border: 1px solid var(--border); border-radius: var(--r-md); min-width: 0; }
+.native-batch-change-title { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; margin-bottom: 10px; font-size: 12px; overflow-wrap: anywhere; }
+.native-batch-change-title > .mono { color: var(--muted); }
+.native-batch-diff { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; font-size: 12px; }
+.native-batch-diff > div { min-width: 0; overflow-wrap: anywhere; }
+.native-batch-diff h4 { color: var(--muted); font-size: 11px; }
+.native-batch-identities { padding: 0; margin: 0; list-style: none; display: grid; gap: 4px; }
+.native-batch-new { font-size: 12px; line-height: 1.55; color: var(--muted); margin: 10px 0 0; }
+.native-batch-history { display: grid; grid-template-columns: minmax(170px, .65fr) minmax(0, 1.6fr); gap: 18px; }
+.native-batch-operation-list { display: flex; flex-direction: column; gap: 8px; max-height: 440px; overflow: auto; }
+.native-batch-operation {
+  display: flex; flex-direction: column; gap: 5px; text-align: left; padding: 12px;
+  color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-md); cursor: pointer;
+}
+.native-batch-operation.active { border-color: var(--accent); background: var(--accent-soft); }
+.native-batch-operation time, .native-batch-operation > span, .native-batch-operation small { color: var(--muted); font-size: 11px; }
+.native-batch-operation-detail { min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
+.native-batch-modal button:focus-visible, .native-batch-modal input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 640px) {
+  .native-batch-modal { padding: 18px; max-height: 94dvh; }
+  .native-batch-selection, .native-batch-history, .native-batch-diff { grid-template-columns: minmax(0, 1fr); }
+  .native-batch-options { height: 220px; }
+  .native-batch-selection input[type="search"] { font-size: 16px; min-height: 44px; }
+  .native-batch-operation-list { max-height: 200px; }
+  .native-batch-modal .btn { min-height: 40px; white-space: normal; }
+  .native-batch-header > .btn { min-height: 44px; }
 }
 .native-binding-grid {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr));
@@ -1469,6 +1542,28 @@ td.strong { font-weight: 600; color: var(--text); }
 
 @media (max-width: 640px) {
   .map-page { padding: 16px 0; }
+  .native-binding-help { gap: 8px; padding: 8px 12px 12px; font-size: 12px; }
+  .native-binding-help > .native-binding-notice-icon { padding-top: 12px; }
+  .native-binding-help-title { display: none !important; }
+  .native-binding-help-toggle {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    width: 100%; min-height: 44px; padding: 6px 0; border: 0; background: transparent;
+    color: var(--text); font: inherit; font-size: 13px; font-weight: 600; text-align: left; cursor: pointer;
+  }
+  .native-binding-help-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
+  .native-binding-help-label { color: var(--accent); font-size: 12px; flex: none; }
+  .native-binding-help .native-binding-help-summary { display: block; color: var(--danger); line-height: 1.5; }
+  .native-binding-help-details { display: none; }
+  .native-binding-help.expanded .native-binding-help-details { display: block; margin-top: 10px; }
+  .native-binding-toolbar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .native-binding-toolbar > .native-binding-summary { grid-column: 1 / -1; margin: 0 0 2px; }
+  .native-binding-toolbar > .btn, .native-binding-actions > .btn { min-height: 44px; min-width: 0; padding: 8px; white-space: normal; overflow-wrap: anywhere; }
+  .native-binding-card { padding: 14px; }
+  .native-binding-actions { gap: 6px; }
+  .native-binding-actions > .switch { min-height: 44px; flex: none; }
+  .native-binding-actions > .btn { flex: 1 1 0; font-size: 12px; }
+  .native-binding-card .native-key-copy { min-height: 44px; }
+  .native-binding-account-toggle { min-height: 44px; }
   .map-tabs { overflow-x: auto; }
   .map-tab { flex: 0 0 auto; padding: 8px 14px; }
   .pricing-source-grid { grid-template-columns: 1fr; }

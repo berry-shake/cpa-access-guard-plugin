@@ -332,7 +332,7 @@ describe("NativeKeyBindingsTab copy and credential identities", () => {
     });
     await renderQuotaBinding({ ...existing, group: undefined, auth_ids: ["account-a", "account-b"] });
 
-    const toggle = container.querySelector<HTMLButtonElement>("button[aria-expanded][aria-controls]")!;
+    const toggle = container.querySelector<HTMLButtonElement>(".native-binding-account-toggle[aria-expanded][aria-controls]")!;
     expect(toggle).toBeTruthy();
     expect(toggle.type).toBe("button");
     expect(toggle.getAttribute("aria-expanded")).toBe("false");

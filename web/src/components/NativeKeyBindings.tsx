@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { useT } from "../i18n";
 import NativeModelAccessPicker from "./NativeModelAccessPicker";
 import WeeklyQuotaRemaining from "./WeeklyQuotaRemaining";
+import NativeBindingBatch from "./NativeBindingBatch";
 import { copyTextToClipboard } from "../clipboard";
 import {
   createNativeKeyBinding,
@@ -236,6 +237,9 @@ export default function NativeKeyBindingsTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [editor, setEditor] = useState<EditorState | null>(null);
+  const [batchView, setBatchView] = useState<"select" | "history" | "undo" | null>(null);
+  const [noticeExpanded, setNoticeExpanded] = useState(false);
+  const noticeID = useId();
   const [pendingID, setPendingID] = useState("");
   const [credentialCatalog, setCredentialCatalog] = useState<NativeBindingCredentialCatalog | null>(null);
   const [credentialCatalogLoading, setCredentialCatalogLoading] = useState(true);
@@ -351,16 +355,25 @@ export default function NativeKeyBindingsTab() {
 
   return (
     <>
-      <div className="native-binding-notice" role="note">
+      <div className={`native-binding-notice native-binding-help${noticeExpanded ? " expanded" : ""}`} role="note">
         <div className="native-binding-notice-icon" aria-hidden="true">ⓘ</div>
-        <div>
-          <strong>{t("mapping.native.noticeTitle")}</strong>
-          <p>{t("mapping.native.noticeBody")}</p>
-          <p>{t("mapping.native.catalogNotice")}</p>
-          <p>{t("mapping.native.rotateNotice")}</p>
-          <p className="native-binding-unbind-warning">
-            <span aria-hidden="true">⚠ </span>{t("mapping.native.unbindNotice")}
-          </p>
+        <div className="native-binding-help-body">
+          <strong className="native-binding-help-title">{t("mapping.native.noticeTitle")}</strong>
+          <button type="button" className="native-binding-help-toggle"
+            aria-expanded={noticeExpanded} aria-controls={noticeID}
+            onClick={() => setNoticeExpanded((value) => !value)}>
+            <span>{t("mapping.native.mobileNoticeTitle")}</span>
+            <span className="native-binding-help-label">{t(noticeExpanded ? "mapping.native.hideNotice" : "mapping.native.showNotice")}</span>
+          </button>
+          <p className="native-binding-help-summary">{t("mapping.native.mobileNoticeSummary")}</p>
+          <div className="native-binding-help-details" id={noticeID}>
+            <p>{t("mapping.native.noticeBody")}</p>
+            <p>{t("mapping.native.catalogNotice")}</p>
+            <p>{t("mapping.native.rotateNotice")}</p>
+            <p className="native-binding-unbind-warning">
+              <span aria-hidden="true">⚠ </span>{t("mapping.native.unbindNotice")}
+            </p>
+          </div>
         </div>
       </div>
 
@@ -370,6 +383,15 @@ export default function NativeKeyBindingsTab() {
         </span>
         <button className="btn" type="button" disabled={loading} onClick={() => { void load(); }}>
           {t("mapping.native.refresh")}
+        </button>
+        <button className="btn" type="button" disabled={loading} onClick={() => setBatchView("select")}>
+          {t("mapping.nativeBatch.title")}
+        </button>
+        <button className="btn" type="button" disabled={loading} onClick={() => setBatchView("undo")}>
+          {t("mapping.nativeBatch.undoLast")}
+        </button>
+        <button className="btn" type="button" disabled={loading} onClick={() => setBatchView("history")}>
+          {t("mapping.nativeBatch.history")}
         </button>
       </div>
 
@@ -559,6 +581,7 @@ export default function NativeKeyBindingsTab() {
         </div>
       )}
 
+      {batchView && <NativeBindingBatch initialView={batchView} onClose={() => setBatchView(null)} onChanged={load} />}
       {editor && (
         <NativeKeyBindingEditor
           key={editor.mode === "edit" ? editor.binding.id : editor.initialID || "__new"}

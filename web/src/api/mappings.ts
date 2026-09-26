@@ -347,8 +347,8 @@ function nativeBindingGroupCatalog(
 // Missing classification data affects display only, never saved restrictions.
 export async function fetchNativeBindingCredentialCatalog(
   rules: ClassifyRule[] | null,
+  c = apiClient(),
 ): Promise<NativeBindingCredentialCatalog> {
-  const c = apiClient();
   const [authResult, aiResult] = await Promise.allSettled([
     c.get<unknown>("/v0/management/auth-files"),
     fetchAIProviderCredentials(c, false),

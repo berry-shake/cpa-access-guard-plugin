@@ -725,6 +725,11 @@ func (a *App) managementRegistration() ManagementRegistrationResponse {
 			{Method: http.MethodDelete, Path: base + "/native-key-bindings", Description: "Delete one CPA-native key binding by id."},
 			{Method: http.MethodPost, Path: base + "/native-key-bindings/catalog", Description: "Match CPA-native downstream API keys to current bindings without returning secrets."},
 			{Method: http.MethodPost, Path: base + "/native-key-bindings/reset-quota", Description: "Reset RPM and usage quota counters for one CPA-native key binding."},
+			{Method: http.MethodGet, Path: base + "/native-key-bindings/history", Description: "List redacted native-key credential batch history."},
+			{Method: http.MethodPost, Path: base + "/native-key-bindings/batch-preview", Description: "Preview an atomic native-key credential replacement."},
+			{Method: http.MethodPost, Path: base + "/native-key-bindings/batch", Description: "Apply a previewed native-key credential replacement atomically."},
+			{Method: http.MethodPost, Path: base + "/native-key-bindings/rollback-preview", Description: "Preview rollback of one native-key credential operation."},
+			{Method: http.MethodPost, Path: base + "/native-key-bindings/rollback", Description: "Apply a previewed native-key credential rollback atomically."},
 			{Method: http.MethodGet, Path: base + "/aliases", Description: "List the global alias mapping table."},
 			{Method: http.MethodPost, Path: base + "/aliases", Description: "Create or update a global alias mapping."},
 			{Method: http.MethodDelete, Path: base + "/aliases", Description: "Delete a global alias mapping by name."},
@@ -793,6 +798,16 @@ func (a *App) handleManagement(raw []byte) ([]byte, error) {
 		return OKEnvelope(a.catalogNativeKeyBindings(req.Body))
 	case req.Method == http.MethodPost && path == base+"/native-key-bindings/reset-quota":
 		return OKEnvelope(a.resetNativeKeyQuota(idFromRequest(req.Query, req.Body)))
+	case req.Method == http.MethodGet && path == base+"/native-key-bindings/history":
+		return OKEnvelope(a.listNativeBindingHistory())
+	case req.Method == http.MethodPost && path == base+"/native-key-bindings/batch-preview":
+		return OKEnvelope(a.batchNativeBindings(req.Body, true))
+	case req.Method == http.MethodPost && path == base+"/native-key-bindings/batch":
+		return OKEnvelope(a.batchNativeBindings(req.Body, false))
+	case req.Method == http.MethodPost && path == base+"/native-key-bindings/rollback-preview":
+		return OKEnvelope(a.rollbackNativeBindings(req.Body, true))
+	case req.Method == http.MethodPost && path == base+"/native-key-bindings/rollback":
+		return OKEnvelope(a.rollbackNativeBindings(req.Body, false))
 	case req.Method == http.MethodGet && path == base+"/aliases":
 		return OKEnvelope(jsonResponse(http.StatusOK, map[string]any{"aliases": a.store.AliasesSnapshot()}))
 	case req.Method == http.MethodPost && path == base+"/aliases":

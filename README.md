@@ -12,7 +12,9 @@ In plain words: you issue your own `cpa_…` keys to clients. Each key only sees
 | **Lineage** | Derived from [origin652/cpa-plugin-key-policy](https://github.com/origin652/cpa-plugin-key-policy) under the MIT license |
 | **中文说明** | [README.zh-CN.md](./README.zh-CN.md) |
 
-**v0.4.4-fork.17:** native-key cards use a separate account panel on the right for emails and recognized Codex plans. Long lists scroll within a bounded height, and narrow cards can expand or collapse the accounts. Plans come from existing CPA credential data; missing or unknown values stay hidden, and Pro is never inferred to mean Pro5x / Pro20x. Complete-key copying and classification-group display are retained. This update changes the plugin management UI only; CPA and credential scheduling remain unchanged.
+**v0.4.4-fork.18:** batch-bind all current native keys or a selected subset to one or more credentials, preview changes, undo the last batch, and restore earlier operations from persistent history. Existing bindings keep their round-robin setting, model permissions, limits, enabled state, and usage. Phone layouts expose all five navigation destinations inside CPA, collapse the long help text, and improve touch controls. Billing formulas and credential scheduling are unchanged. See [Batch binding and history restore](#batch-binding-and-history-restore) for restore boundaries.
+
+**v0.4.4-fork.17:** native-key cards use a separate account panel on the right for emails and recognized Codex plans. Long lists scroll within a bounded height, and narrow cards can expand or collapse the accounts. Plans come from existing CPA credential data; missing or unknown values stay hidden, and Pro is never inferred to mean Pro5x / Pro20x. Complete-key copying and classification-group display are retained.
 
 **Routing inherited from v0.4.4-fork.15:** per-native-key Concurrent round robin, off by default. Session-affinity changes and single-credential optimizations are deferred. With the switch off, multi-credential bindings retain highest-priority selection and use the lowest Auth ID to break ties; they do not gain CPA session affinity. Single-credential bindings retain their existing path. Unbound native keys keep CPA's native scheduling and affinity. No CPA SDK dependency or request interceptor/lifecycle hooks are added.
 
@@ -170,6 +172,7 @@ Requirements and behavior:
 - Selecting an unbound row avoids manual copy/paste. Cards remain redacted; **Copy full key** copies the complete current host key. Orphan bindings cannot recover plaintext and cannot be copied. Plaintext stays in page memory and user-initiated copy operations; it is never placed in URLs, browser storage, or plugin state, or returned by plugin APIs. The HTTP clipboard fallback clears and removes its temporary input immediately.
 - Wide cards list bound credential emails in a separate account panel on the right, falling back to a name or exact Auth ID when email is absent. Lists scroll above a 240px height limit; narrow cards start collapsed and support keyboard expansion and scrolling. Group bindings reuse the plugin's classification rules to list matching credentials and report when a reliable preview is unavailable. These are binding/group members; actual requests remain subject to model, status, and priority constraints.
 - Codex plan badges use existing CPA credential data and recognize Free, Plus, Team, Pro, Enterprise, and Edu; they are not a live subscription lookup. Missing, unknown, or non-Codex plans have no badge. Pro is not guessed to mean Pro5x / Pro20x without a reliable multiplier field.
+- Phone layouts display all five navigation destinations at the top, including inside the CPA iframe. The native-key explanation starts collapsed with its essential disable-binding notice still visible; batch actions and card controls use touch-sized layouts.
 - The key must remain in CPA's top-level `api-keys`; a binding is authorization metadata, not authentication.
 - A bound, enabled key with no usable candidate in its group or direct allow-list fails closed with `auth_not_found` (503). It never falls back outside the restriction.
 - `model_access.mode: all` permits current and future models. `allowlist` permits only the exact, case-insensitive `provider` + base-model pairs in `models`; the same model name under another provider remains denied. A terminal CPA thinking suffix such as `(high)` inherits the base model permission.
@@ -207,6 +210,19 @@ The picker never guesses identity from a display filename, array position, or ma
 Direct mode also persists a lowercase-safe redundant encoding of the exact IDs inside an internal reserved group. A legacy plugin that ignores and removes the additive `auth_ids` field still fails closed, while a fixed release can reconstruct the selection after the legacy state is rewritten. The dedicated Management API and Web UI hide that internal value. A state already reduced to the older unencoded marker cannot reveal which credentials were selected; the UI explicitly asks the operator to reselect them once and the binding remains fail-closed until repaired. Still back up `state_file` and preferably convert direct bindings to group mode before downgrading; the general default-scheduling risk when the plugin is disabled, unloaded, or fails to load remains unchanged.
 
 The model picker collapses credential-tier duplicates into one provider/model checkbox. **Select all** saves a snapshot of the current catalog; models added later remain denied until selected. Saved models missing from the current catalog stay visible and removable. CPA's plugin ABI cannot filter `/v1/models` per native key, so that endpoint may still show the global catalog; actual execution is enforced at `scheduler.pick`.
+
+#### Batch binding and history restore
+
+The native-key page provides batch binding, undo for the last batch, and binding history. Select all current host keys or a subset, choose one or more exact credential IDs, preview each change, and replace their credential restrictions in one operation.
+
+- Existing bindings retain their names, enabled state, model policies, round-robin settings, limits, and live usage. Disabled bindings stay disabled.
+- Previously unbound keys receive enabled bindings with all models, round robin off, and no additional limits, as explained in the preview. Orphan bindings are excluded.
+- Up to 50 recent batch and restore records (also bounded by a 4 MiB history size limit) persist in the plugin `state_file` together with each binding transaction. History contains no plaintext keys. Keep the same persistent file across restarts; an older plugin that rewrites state may discard history it does not understand.
+- Restore previews return the selected operation's targets to their previous credential restrictions. Restores also create reversible history. Later recorded batch changes can be crossed; conflicting manual edits, key rotation or deletion, and missing credentials block the entire restore.
+- A key that was previously unbound can return to unbound, unless later edits to its new binding's model policy, limits, or other settings would be lost. Keys added after an operation are not included in its restore.
+- Restoring a classification group restores its selector under current classification rules, not a past membership snapshot. Data changes after preview require another preview.
+
+The UI refreshes CPA's key and credential catalogs before committing. Each plugin transaction is atomic; host configuration and plugin state remain separate systems, so avoid concurrent host key or credential rotation/deletion during a batch operation.
 
 ### OpenAI-compatibility providers
 
@@ -355,6 +371,9 @@ Exact paths (no path templates). Auth: CPA management bearer token.
 
 - `GET/POST/PATCH/DELETE …/native-key-bindings`
 - `POST …/native-key-bindings/catalog` — Management-UI helper: accepts the current `api_keys` array in a JSON body, matches bindings by exact `caller_scope`, and returns only redacted entries plus orphan bindings. It never returns the supplied keys or caller scopes.
+- `GET …/native-key-bindings/history` — Recent batch and restore operations, newest first, with redacted changes only.
+- `POST …/native-key-bindings/batch-preview` / `batch` — Preview or atomically commit replacement restrictions using current `api_keys`, `selected_indices`, target `auth_ids`, complete `available_auth_ids`, and `catalog_complete`. A commit also requires the preview's `expected_revision`.
+- `POST …/native-key-bindings/rollback-preview` / `rollback` — Preview or commit a restore selected by `operation_id`, with current host keys and credential inventory. Commits require `expected_revision`; conflicts return 409 without partially applying the operation.
 
 Create a binding (the plaintext key appears only in this request; neither it nor the full caller scope is returned):
 

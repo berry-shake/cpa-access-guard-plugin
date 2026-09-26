@@ -16,11 +16,8 @@ function useAuthTick() {
   return isAuthed();
 }
 
-// Desktop top horizontal nav, styled after the Model Limiter page header:
-// left = logo mark + product name + one-line tagline, right = nav links.
-// Mobile keeps the legacy .header (hidden on desktop via CSS) and bottom tab
-// bar instead.
-function TopNav() {
+// One navigation serves desktop, mobile, and the embedded plugin page.
+export function TopNav() {
   const t = useT();
   const loc = useLocation();
   const s = getSession();
@@ -50,13 +47,13 @@ function TopNav() {
             <span className="tn-sub">{t("header.tagline")}</span>
           </span>
         </div>
-        <div className="topnav-actions">
-          <Link to="/native-keys" className={"tn-link" + (onNativeKeys ? " active" : "")}>{t("header.nativeKeys")}</Link>
-          <Link to="/keys" className={"tn-link" + (onKeys ? " active" : "")}>{t("header.downstreamKeys")}</Link>
-          <Link to="/classify" className={"tn-link" + (onClassify ? " active" : "")}>{t("header.classify")}</Link>
-          <Link to="/mapping" className={"tn-link" + (onMapping ? " active" : "")}>{t("header.aliasMapping")}</Link>
-          <Link to="/pricing" className={"tn-link" + (onPricing ? " active" : "")}>{t("header.modelPricing")}</Link>
-        </div>
+        <nav className="topnav-actions" aria-label={t("header.navigation")}>
+          <Link to="/native-keys" className={"tn-link" + (onNativeKeys ? " active" : "")} aria-current={onNativeKeys ? "page" : undefined}>{t("header.nativeKeys")}</Link>
+          <Link to="/keys" className={"tn-link" + (onKeys ? " active" : "")} aria-current={onKeys ? "page" : undefined}>{t("header.downstreamKeys")}</Link>
+          <Link to="/classify" className={"tn-link" + (onClassify ? " active" : "")} aria-current={onClassify ? "page" : undefined}>{t("header.classify")}</Link>
+          <Link to="/mapping" className={"tn-link" + (onMapping ? " active" : "")} aria-current={onMapping ? "page" : undefined}>{t("header.aliasMapping")}</Link>
+          <Link to="/pricing" className={"tn-link" + (onPricing ? " active" : "")} aria-current={onPricing ? "page" : undefined}>{t("header.modelPricing")}</Link>
+        </nav>
       </div>
     </div>
   );

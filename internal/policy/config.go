@@ -318,6 +318,9 @@ type State struct {
 	// and lets Configure bootstrap bindings from config.yaml once, while an
 	// explicit [] records that all bindings were deliberately deleted.
 	NativeKeyBindings []NativeKeyBinding `json:"native_key_bindings"`
+	// NativeBindingHistory records bounded credential-policy changes without
+	// restoring usage accounting or unrelated key settings.
+	NativeBindingHistory []nativeBindingHistoryRecord `json:"native_binding_history,omitempty"`
 	// Aliases is the global alias mapping table, persisted so that key alias
 	// references survive restarts even when config.yaml is not re-read. On
 	// Configure, the config.yaml Aliases take precedence; state Aliases are a
@@ -758,6 +761,9 @@ func LoadState(path string) (*State, error) {
 	if err := json.Unmarshal(raw, &state); err != nil {
 		return nil, err
 	}
+	if err := validateNativeBindingHistory(state.NativeBindingHistory); err != nil {
+		return nil, fmt.Errorf("invalid native binding history: %w", err)
+	}
 	if state.Version == 0 {
 		state.Version = 1
 	}
@@ -767,13 +773,33 @@ func LoadState(path string) (*State, error) {
 	return &state, nil
 }
 
-// SaveState atomically writes the key list plus usage ledger to the state file.
+// SaveState atomically writes the key list plus usage ledger to the state file,
+// preserving native binding history already on disk.
 func SaveState(path string, keys []KeyConfig, usage map[string]*UsageState, aliases []AliasMapping, rules []ClassifyRule, nativeBindings ...[]NativeKeyBinding) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
 	if len(nativeBindings) > 1 {
 		return errors.New("SaveState accepts at most one native key binding list")
+	}
+	var history []nativeBindingHistoryRecord
+	if current, err := LoadState(path); err == nil {
+		history = current.NativeBindingHistory
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	var bindings []NativeKeyBinding
+	if len(nativeBindings) == 1 {
+		bindings = nativeBindings[0]
+	}
+	return saveStateWithNativeHistory(path, keys, usage, aliases, rules, bindings, history)
+}
+
+// saveStateWithNativeHistory writes an explicit policy and history snapshot in
+// one atomic replacement. The caller serializes concurrent state mutations.
+func saveStateWithNativeHistory(path string, keys []KeyConfig, usage map[string]*UsageState, aliases []AliasMapping, rules []ClassifyRule, nativeBindings []NativeKeyBinding, history []nativeBindingHistoryRecord) error {
+	if err := validateNativeBindingHistory(history); err != nil {
+		return fmt.Errorf("invalid native binding history: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
 	}
 	// Models is a DERIVED field (resolved from Aliases × global table via
 	// resolveAliasRefsToModels); the canonical source is Aliases. Persisting
@@ -791,10 +817,8 @@ func SaveState(path string, keys []KeyConfig, usage map[string]*UsageState, alia
 	// distinction between an old state file with no native_key_bindings field
 	// and a new state in which the user deliberately deleted every binding.
 	cleanBindings := make([]NativeKeyBinding, 0)
-	if len(nativeBindings) == 1 {
-		cleanBindings = append(cleanBindings, nativeBindings[0]...)
-	}
-	state := State{Version: 1, Keys: cleanKeys, Usage: usage, UpdatedAt: time.Now().UTC(), NativeKeyBindings: cleanBindings, Aliases: aliases, ClassifyRules: rules}
+	cleanBindings = append(cleanBindings, nativeBindings...)
+	state := State{Version: 1, Keys: cleanKeys, Usage: usage, UpdatedAt: time.Now().UTC(), NativeKeyBindings: cleanBindings, NativeBindingHistory: history, Aliases: aliases, ClassifyRules: rules}
 	raw, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
@@ -818,6 +842,7 @@ func SaveUsageOnly(path string, usage map[string]*UsageState) error {
 	var keys []KeyConfig
 	var aliases []AliasMapping
 	var rules []ClassifyRule
+	var history []nativeBindingHistoryRecord
 	// A brand-new state gets an explicit [], while a legacy state that exists
 	// but omits the field keeps nil so Configure can detect and migrate it.
 	nativeBindings := make([]NativeKeyBinding, 0)
@@ -826,6 +851,7 @@ func SaveUsageOnly(path string, usage map[string]*UsageState) error {
 		aliases = cur.Aliases
 		rules = cur.ClassifyRules
 		nativeBindings = cur.NativeKeyBindings
+		history = cur.NativeBindingHistory
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -835,7 +861,7 @@ func SaveUsageOnly(path string, usage map[string]*UsageState) error {
 	for i := range keys {
 		keys[i].Models = nil
 	}
-	state := State{Version: 1, Keys: keys, Usage: usage, UpdatedAt: time.Now().UTC(), NativeKeyBindings: nativeBindings, Aliases: aliases, ClassifyRules: rules}
+	state := State{Version: 1, Keys: keys, Usage: usage, UpdatedAt: time.Now().UTC(), NativeKeyBindings: nativeBindings, NativeBindingHistory: history, Aliases: aliases, ClassifyRules: rules}
 	raw, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err

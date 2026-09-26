@@ -24,6 +24,7 @@ type Store struct {
 	// not participate in frontend authentication.
 	nativeKeyBindings        map[string]*NativeKeyBinding
 	nativeKeyBindingsByScope map[string]*NativeKeyBinding
+	nativeBindingHistory     []nativeBindingHistoryRecord
 	limiter                  *RateLimiter
 	usage                    *usageLedger
 	// flusher for periodically persisting the usage ledger to the state file.
@@ -140,6 +141,7 @@ func (s *Store) Configure(cfg Config) error {
 	keys := cfg.Keys
 	nativeBindings := cfg.NativeKeyBindings
 	var loadedUsage map[string]*UsageState
+	var loadedNativeBindingHistory []nativeBindingHistoryRecord
 	firstBoot := false
 	legacyNativeBindings := false
 	recoveredNativeBindings := false
@@ -147,6 +149,7 @@ func (s *Store) Configure(cfg Config) error {
 	if state, errLoad := LoadState(statePath); errLoad == nil {
 		keys = state.Keys
 		loadedUsage = state.Usage
+		loadedNativeBindingHistory = cloneNativeBindingHistory(state.NativeBindingHistory)
 		if state.NativeKeyBindings != nil {
 			nativeBindings = state.NativeKeyBindings
 		} else {
@@ -265,6 +268,7 @@ func (s *Store) Configure(cfg Config) error {
 	s.keys = next
 	s.nativeKeyBindings = nextNative
 	s.nativeKeyBindingsByScope = nextNativeByScope
+	s.nativeBindingHistory = loadedNativeBindingHistory
 	s.rebuildKeysByHashLocked()
 	s.rrCounters = make(map[string]int)
 	s.pendingPicks = make(map[string][]pendingPick)
@@ -1439,7 +1443,22 @@ func (s *Store) saveState(path string, keys []KeyConfig, usage map[string]*Usage
 func (s *Store) saveStateWithNativeBindings(path string, keys []KeyConfig, usage map[string]*UsageState, aliases []AliasMapping, rules []ClassifyRule, nativeBindings []NativeKeyBinding) error {
 	s.persistMu.Lock()
 	defer s.persistMu.Unlock()
-	return SaveState(path, keys, usage, aliases, rules, nativeBindings)
+	// Capture history after acquiring persistMu so an ordinary state save
+	// cannot publish a history snapshot taken before a completed batch save.
+	// Callers must release s.mu before entering this method.
+	s.mu.RLock()
+	history := cloneNativeBindingHistory(s.nativeBindingHistory)
+	s.mu.RUnlock()
+	return saveStateWithNativeHistory(path, keys, usage, aliases, rules, nativeBindings, history)
+}
+
+// saveStateWithNativeBindingHistory commits proposed bindings and their
+// matching history together before either snapshot is published in memory.
+// Callers must release s.mu before entering this method.
+func (s *Store) saveStateWithNativeBindingHistory(path string, keys []KeyConfig, usage map[string]*UsageState, aliases []AliasMapping, rules []ClassifyRule, nativeBindings []NativeKeyBinding, history []nativeBindingHistoryRecord) error {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+	return saveStateWithNativeHistory(path, keys, usage, aliases, rules, nativeBindings, history)
 }
 
 func (s *Store) saveUsageOnly(path string, usage map[string]*UsageState) error {
