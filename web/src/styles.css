@@ -1032,11 +1032,18 @@ td.strong { font-weight: 600; color: var(--text); }
 .native-batch-operation time, .native-batch-operation > span, .native-batch-operation small { color: var(--muted); font-size: 11px; }
 .native-batch-operation-detail { min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
 .native-batch-modal button:focus-visible, .native-batch-modal input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.native-quota-reset { max-width: 680px; }
+.native-quota-reset > input[type="search"] { width: 100%; min-width: 0; box-sizing: border-box; }
+.native-quota-reset-warning {
+  margin: 12px 0; padding: 12px; border: 1px solid var(--danger-border); border-radius: var(--r-md);
+  color: var(--danger); background: var(--danger-soft); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere;
+}
 @media (max-width: 640px) {
   .native-batch-modal { padding: 18px; max-height: 94dvh; }
   .native-batch-selection, .native-batch-history, .native-batch-diff { grid-template-columns: minmax(0, 1fr); }
   .native-batch-options { height: 220px; }
   .native-batch-selection input[type="search"] { font-size: 16px; min-height: 44px; }
+  .native-quota-reset > input[type="search"] { font-size: 16px; min-height: 44px; }
   .native-batch-operation-list { max-height: 200px; }
   .native-batch-modal .btn { min-height: 40px; white-space: normal; }
   .native-batch-header > .btn { min-height: 44px; }

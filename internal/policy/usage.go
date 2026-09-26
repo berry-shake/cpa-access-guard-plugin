@@ -50,12 +50,24 @@ func (l *usageLedger) loadFromState(usage map[string]*UsageState) {
 func (l *usageLedger) snapshot() map[string]*UsageState {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	return l.snapshotLocked()
+}
+
+// snapshotLocked also copies per-model maps so concurrent recording cannot
+// mutate a snapshot while it is being serialized. Caller must hold l.mu.
+func (l *usageLedger) snapshotLocked() map[string]*UsageState {
 	out := make(map[string]*UsageState, len(l.entries))
 	for id, st := range l.entries {
 		if st == nil {
 			continue
 		}
 		cp := *st
+		if st.ByAlias != nil {
+			cp.ByAlias = make(map[string]AliasUsageWindows, len(st.ByAlias))
+			for alias, windows := range st.ByAlias {
+				cp.ByAlias[alias] = windows
+			}
+		}
 		out[id] = &cp
 	}
 	return out

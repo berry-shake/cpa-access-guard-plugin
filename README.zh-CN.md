@@ -12,6 +12,8 @@
 | **沿袭** | 基于 MIT 协议的 [origin652/cpa-plugin-key-policy](https://github.com/origin652/cpa-plugin-key-policy) 演进而来 |
 | **English** | [README.md](./README.md) |
 
+**v0.4.4-fork.19：** 新增“批量重置额度”，支持默认全选当前已绑定的原生 Key，或只重置选中的部分 Key。重置范围与卡片上的原有按钮一致：RPM、日/周消费、调用次数、Token 和模型用量；保留设定限额、凭据绑定、模型权限、启用状态、轮询开关及绑定历史。
+
 **v0.4.4-fork.18.1：** 修复新版 CPAMP 使用 `enc::v2::` 保存登录信息时，进入插件仍需重复输入密码的问题，兼容旧版 v1。已保存的凭据验证成功后才建立插件登录状态，密码过期或错误时稳定回到登录页，不再循环验证。需同域嵌入且面板已勾选“记住密码”；插件不会另存一份凭据。
 
 **v0.4.4-fork.18：** 支持给当前全部或选中的原生 Key 批量绑定一个或多个凭据，先预览再应用，并可撤销上次批量操作或从持久化历史中恢复。已有绑定的轮询并发开关、模型权限、限额、启用状态和用量保持不变。手机在 CPA 内也能看到全部五个导航入口，长说明默认折叠，按钮适配触屏。本版不修改计费公式和凭据调度逻辑；回滚范围和冲突处理见下方“批量绑定与历史恢复”。
@@ -225,6 +227,14 @@ CPA 原生鉴权成功后会产生稳定、不可逆的 `caller_scope`。插件�
 
 网页会在提交前刷新 CPA 的 Key 和凭据目录。插件内的整批保存是原子的；CPA 配置与插件状态属于两个独立系统，仍应避免同时在其它页面轮换或删除宿主 Key、凭据。
 
+#### 批量重置额度
+
+原生 Key 页顶部新增“批量重置额度”。默认选中当前仍在 CPA 中且已配置插件绑定的全部 Key，也可搜索或取消个别 Key，确认一次即可重置。停用的绑定也可重置；未绑定 Key 和孤立绑定不参与。提交前会刷新宿主目录，选中的 Key 身份已变化时要求重新选择，不会把新出现的 Key 静默加入。
+
+只清除选中绑定在插件中的 RPM 和用量计数，包括日/周消费金额、调用次数、Token 及模型明细，保留配置的限额和策略。不会重置上游账号额度，也不会删除 CPA/CPAMP 的请求历史。用量清零无法通过“绑定历史”撤销；重置之后完成的请求会重新累计用量。
+
+后端先检查全部选中绑定，再统一保存；保存成功后才清除内存计数。包含不存在的 ID 或保存失败时整批不变。重启时继续沿用原持久化 `state_file`。
+
 ### openai-compatibility 通道
 
 CPA 里配置的兼容通道，映射时 `provider` 填通道 **name**。插件路由时会对应到主机内部的 `openai-compatible-<name>`。通道配置里的 **models 列表要写全**，否则主机会报「该模型无可用 auth」。
@@ -355,6 +365,8 @@ VITE_CPA_BASE=http://127.0.0.1:8317 npm run dev
 
 - `GET/POST/PATCH/DELETE …/native-key-bindings`
 - `POST …/native-key-bindings/catalog` — 管理网页辅助接口：通过 JSON 请求体接收当前 `api_keys` 数组，按精确 `caller_scope` 关联绑定，只返回脱敏条目与孤立绑定；绝不返回传入的 Key 或 caller scope。
+- `POST …/native-key-bindings/reset-quota` — 传入 `{ "id": "binding-id" }`，重置一个绑定在插件内的额度计数。
+- `POST …/native-key-bindings/reset-quota-batch` — 传入非空 `{ "ids": ["binding-a", "binding-b"] }`（最多 4096 项），统一重置并返回 `{ "reset": true, "ids": [...], "count": N }`；ID 会规范化并去重。省略 ID 不代表重置全部。
 - `GET …/native-key-bindings/history` — 最近的批量绑定与恢复记录，按新到旧排列，只返回脱敏变更。
 - `POST …/native-key-bindings/batch-preview` / `batch` — 预览或原子提交批量替换；输入当前 `api_keys`、`selected_indices`、目标 `auth_ids`、完整目录 `available_auth_ids` 和 `catalog_complete`。提交还需预览返回的 `expected_revision`。
 - `POST …/native-key-bindings/rollback-preview` / `rollback` — 预览或提交历史恢复；以 `operation_id` 指定记录，并提交当前宿主 Key、凭据目录及提交所需的 `expected_revision`。版本冲突返回 409，整批不写入。

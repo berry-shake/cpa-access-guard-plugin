@@ -1414,10 +1414,15 @@ func (s *Store) usageSnapshotLocked() map[string]*UsageState {
 // current key list. Called by the background flusher and at lifecycle points
 // (reconfigure / shutdown).
 func (s *Store) FlushUsage() error {
-	s.mu.Lock()
+	// Acquire the persistence lock before sampling usage. Otherwise a flush
+	// queued before a quota reset could later restore the cleared counters.
+	// Do not acquire updateMu: Configure holds it while stopping the flusher.
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+	s.mu.RLock()
 	usage := s.usageSnapshotLocked()
 	path := s.statePath
-	s.mu.Unlock()
+	s.mu.RUnlock()
 	if path == "" {
 		return nil
 	}
@@ -1426,7 +1431,7 @@ func (s *Store) FlushUsage() error {
 	// API (UpsertKey/DeleteKey/RotateKey), so the periodic flush must not
 	// overwrite them with an in-memory snapshot that could be stale or
 	// truncated.
-	return s.saveUsageOnly(path, usage)
+	return SaveUsageOnly(path, usage)
 }
 
 func (s *Store) saveState(path string, keys []KeyConfig, usage map[string]*UsageState, aliases []AliasMapping, rules []ClassifyRule) error {
@@ -1459,12 +1464,6 @@ func (s *Store) saveStateWithNativeBindingHistory(path string, keys []KeyConfig,
 	s.persistMu.Lock()
 	defer s.persistMu.Unlock()
 	return saveStateWithNativeHistory(path, keys, usage, aliases, rules, nativeBindings, history)
-}
-
-func (s *Store) saveUsageOnly(path string, usage map[string]*UsageState) error {
-	s.persistMu.Lock()
-	defer s.persistMu.Unlock()
-	return SaveUsageOnly(path, usage)
 }
 
 // StartUsageFlusher launches a goroutine that periodically persists the usage

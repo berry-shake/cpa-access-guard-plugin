@@ -12,6 +12,8 @@ In plain words: you issue your own `cpa_…` keys to clients. Each key only sees
 | **Lineage** | Derived from [origin652/cpa-plugin-key-policy](https://github.com/origin652/cpa-plugin-key-policy) under the MIT license |
 | **中文说明** | [README.zh-CN.md](./README.zh-CN.md) |
 
+**v0.4.4-fork.19:** reset quotas for all current native-key bindings or a selected subset from one dialog. The reset has the same scope as each card's existing action: RPM, daily/weekly spend, calls, tokens, and model usage. Configured limits, credential restrictions, model permissions, enabled state, round-robin settings, and binding history remain unchanged.
+
 **v0.4.4-fork.18.1:** restores automatic login inside CPAMP panels that save credentials in `enc::v2::` format, while retaining legacy v1 support. Saved credentials are verified before the plugin publishes an authenticated session, so an expired or invalid password returns to the login screen without repeated verification. The panel must be same-origin with **Remember password** enabled; the plugin never creates another persisted copy of the credential.
 
 **v0.4.4-fork.18:** batch-bind all current native keys or a selected subset to one or more credentials, preview changes, undo the last batch, and restore earlier operations from persistent history. Existing bindings keep their round-robin setting, model permissions, limits, enabled state, and usage. Phone layouts expose all five navigation destinations inside CPA, collapse the long help text, and improve touch controls. Billing formulas and credential scheduling are unchanged. See [Batch binding and history restore](#batch-binding-and-history-restore) for restore boundaries.
@@ -226,6 +228,14 @@ The native-key page provides batch binding, undo for the last batch, and binding
 
 The UI refreshes CPA's key and credential catalogs before committing. Each plugin transaction is atomic; host configuration and plugin state remain separate systems, so avoid concurrent host key or credential rotation/deletion during a batch operation.
 
+#### Batch quota reset
+
+The native-key toolbar's **Batch reset quotas** action selects all current host keys with plugin bindings by default. Search or deselect keys before confirming once. Disabled bindings are included; unbound host keys and orphan bindings are excluded. The dialog refreshes the host catalog before submission and rejects stale selected identities instead of silently adding new keys.
+
+This clears only the selected bindings' plugin RPM and usage counters, including daily/weekly dollars, calls, token totals, and model breakdowns. The saved limits and policies are preserved. It does not reset upstream account quotas or delete CPA/CPAMP request history. The reset cannot be undone through binding history. Requests completed after the reset start accumulating usage again.
+
+The backend validates every selected binding before applying changes and persists the batch before publishing the cleared counters. Missing IDs or a persistence failure leave the entire batch unchanged. Continue using the same persistent `state_file` across restarts.
+
 ### OpenAI-compatibility providers
 
 Channels under CPA `openai-compatibility` (e.g. a named proxy) use the **channel name** as `provider`. The plugin maps it to CPA’s internal key `openai-compatible-<name>` when routing. Models must be listed on that channel in CPA config, or the host reports no auth for that model.
@@ -373,6 +383,8 @@ Exact paths (no path templates). Auth: CPA management bearer token.
 
 - `GET/POST/PATCH/DELETE …/native-key-bindings`
 - `POST …/native-key-bindings/catalog` — Management-UI helper: accepts the current `api_keys` array in a JSON body, matches bindings by exact `caller_scope`, and returns only redacted entries plus orphan bindings. It never returns the supplied keys or caller scopes.
+- `POST …/native-key-bindings/reset-quota` — Reset one binding's plugin quota counters using `{ "id": "binding-id" }`.
+- `POST …/native-key-bindings/reset-quota-batch` — Reset selected bindings using a nonempty `{ "ids": ["binding-a", "binding-b"] }` array (maximum 4096 entries). Returns `{ "reset": true, "ids": [...], "count": N }`; IDs are normalized and deduplicated. Omitting IDs never means reset all.
 - `GET …/native-key-bindings/history` — Recent batch and restore operations, newest first, with redacted changes only.
 - `POST …/native-key-bindings/batch-preview` / `batch` — Preview or atomically commit replacement restrictions using current `api_keys`, `selected_indices`, target `auth_ids`, complete `available_auth_ids`, and `catalog_complete`. A commit also requires the preview's `expected_revision`.
 - `POST …/native-key-bindings/rollback-preview` / `rollback` — Preview or commit a restore selected by `operation_id`, with current host keys and credential inventory. Commits require `expected_revision`; conflicts return 409 without partially applying the operation.

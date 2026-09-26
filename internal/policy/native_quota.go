@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -224,37 +225,98 @@ func (s *Store) NativeBindingUsage(binding NativeKeyBinding) NativeBindingUsageS
 // binding: RPM, daily/weekly spend, calls, tokens, and per-model breakdowns.
 // The binding and its configured limits are left unchanged.
 func (s *Store) ResetNativeKeyQuota(id string) error {
-	s.updateMu.Lock()
-	defer s.updateMu.Unlock()
-	id = strings.ToLower(strings.TrimSpace(id))
-	if id == "" {
+	if strings.TrimSpace(id) == "" {
 		return ErrUnknownNativeKeyBinding
 	}
-	s.mu.RLock()
-	var binding *NativeKeyBinding
-	for _, candidate := range s.nativeKeyBindings {
-		if candidate != nil && strings.EqualFold(candidate.ID, id) {
-			cp := *candidate
-			binding = &cp
-			break
+	_, err := s.ResetNativeKeyQuotas([]string{id})
+	return err
+}
+
+var ErrInvalidNativeQuotaReset = errors.New("native quota reset requires 1 to 4096 valid binding ids")
+
+// ResetNativeKeyQuotas resets only the explicitly selected native bindings.
+// The entire selection is validated before any counter changes. The result
+// contains normalized, unique IDs in their first-occurrence order.
+func (s *Store) ResetNativeKeyQuotas(ids []string) ([]string, error) {
+	if len(ids) == 0 || len(ids) > 4096 {
+		return nil, ErrInvalidNativeQuotaReset
+	}
+	normalized := make([]string, 0, len(ids))
+	seen := make(map[string]bool, len(ids))
+	inputBytes := 0
+	for _, raw := range ids {
+		inputBytes += len(raw)
+		id := strings.ToLower(strings.TrimSpace(raw))
+		if id == "" || len(raw) > 4096 || strings.ContainsRune(id, '\x00') || inputBytes > 2<<20 {
+			return nil, ErrInvalidNativeQuotaReset
+		}
+		if !seen[id] {
+			seen[id] = true
+			normalized = append(normalized, id)
 		}
 	}
+	s.updateMu.Lock()
+	defer s.updateMu.Unlock()
+	s.mu.RLock()
+	accounts := make([]string, 0, len(normalized))
+	for _, id := range normalized {
+		binding := s.nativeKeyBindings[id]
+		if binding == nil {
+			s.mu.RUnlock()
+			return nil, ErrUnknownNativeKeyBinding
+		}
+		accounts = append(accounts, nativeUsageLedgerID(binding.CallerScope))
+	}
+	path, usage, limiter := s.statePath, s.usage, s.limiter
 	s.mu.RUnlock()
-	if binding == nil {
-		return ErrUnknownNativeKeyBinding
+
+	// Management mutations share updateMu. Usage flushing shares persistMu
+	// and samples only after acquiring it, so no old snapshot can write back
+	// after this transaction. No store lock is held while locking the ledger.
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+	if err := resetNativeQuotaAccounts(accounts, usage, limiter, func(snapshot map[string]*UsageState) error {
+		// Match FlushUsage for an unconfigured, memory-only Store.
+		if path == "" {
+			return nil
+		}
+		return SaveUsageOnly(path, snapshot)
+	}); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrNativeKeyBindingPersistence, err)
 	}
-	account := nativeUsageLedgerID(binding.CallerScope)
-	limiter, usage := s.runtimeComponents()
-	if limiter != nil {
-		limiter.Reset(account)
-	}
+	return normalized, nil
+}
+
+// resetNativeQuotaAccounts holds both runtime locks through persistence and
+// publication. Records and RPM acquisitions waiting on this transaction land
+// after the reset; persistence failure leaves every live counter unchanged.
+// The caller must serialize persistence and configuration changes separately.
+func resetNativeQuotaAccounts(accounts []string, usage *usageLedger, limiter *RateLimiter, persist func(map[string]*UsageState) error) error {
 	if usage != nil {
-		usage.resetUsage(account)
+		usage.mu.Lock()
+		defer usage.mu.Unlock()
 	}
-	// Persist immediately so a process restart cannot resurrect the quota that
-	// the operator just cleared from the management UI.
-	if err := s.FlushUsage(); err != nil {
-		return fmt.Errorf("%w: %v", ErrNativeKeyBindingPersistence, err)
+	if limiter != nil {
+		limiter.mu.Lock()
+		defer limiter.mu.Unlock()
+	}
+	var snapshot map[string]*UsageState
+	if usage != nil {
+		snapshot = usage.snapshotLocked()
+		for _, account := range accounts {
+			delete(snapshot, account)
+		}
+	}
+	if err := persist(snapshot); err != nil {
+		return err
+	}
+	for _, account := range accounts {
+		if usage != nil {
+			delete(usage.entries, account)
+		}
+		if limiter != nil {
+			delete(limiter.buckets, account)
+		}
 	}
 	return nil
 }

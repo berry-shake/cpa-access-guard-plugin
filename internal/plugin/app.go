@@ -725,6 +725,7 @@ func (a *App) managementRegistration() ManagementRegistrationResponse {
 			{Method: http.MethodDelete, Path: base + "/native-key-bindings", Description: "Delete one CPA-native key binding by id."},
 			{Method: http.MethodPost, Path: base + "/native-key-bindings/catalog", Description: "Match CPA-native downstream API keys to current bindings without returning secrets."},
 			{Method: http.MethodPost, Path: base + "/native-key-bindings/reset-quota", Description: "Reset RPM and usage quota counters for one CPA-native key binding."},
+			{Method: http.MethodPost, Path: base + "/native-key-bindings/reset-quota-batch", Description: "Reset RPM and usage quota counters for an explicit list of CPA-native key bindings."},
 			{Method: http.MethodGet, Path: base + "/native-key-bindings/history", Description: "List redacted native-key credential batch history."},
 			{Method: http.MethodPost, Path: base + "/native-key-bindings/batch-preview", Description: "Preview an atomic native-key credential replacement."},
 			{Method: http.MethodPost, Path: base + "/native-key-bindings/batch", Description: "Apply a previewed native-key credential replacement atomically."},
@@ -798,6 +799,8 @@ func (a *App) handleManagement(raw []byte) ([]byte, error) {
 		return OKEnvelope(a.catalogNativeKeyBindings(req.Body))
 	case req.Method == http.MethodPost && path == base+"/native-key-bindings/reset-quota":
 		return OKEnvelope(a.resetNativeKeyQuota(idFromRequest(req.Query, req.Body)))
+	case req.Method == http.MethodPost && path == base+"/native-key-bindings/reset-quota-batch":
+		return OKEnvelope(a.resetNativeKeyQuotaBatch(req.Body))
 	case req.Method == http.MethodGet && path == base+"/native-key-bindings/history":
 		return OKEnvelope(a.listNativeBindingHistory())
 	case req.Method == http.MethodPost && path == base+"/native-key-bindings/batch-preview":

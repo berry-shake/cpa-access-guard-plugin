@@ -4,6 +4,7 @@ import { useT } from "../i18n";
 import NativeModelAccessPicker from "./NativeModelAccessPicker";
 import WeeklyQuotaRemaining from "./WeeklyQuotaRemaining";
 import NativeBindingBatch from "./NativeBindingBatch";
+import NativeQuotaReset from "./NativeQuotaReset";
 import { copyTextToClipboard } from "../clipboard";
 import {
   createNativeKeyBinding,
@@ -238,6 +239,7 @@ export default function NativeKeyBindingsTab() {
   const [error, setError] = useState("");
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [batchView, setBatchView] = useState<"select" | "history" | "undo" | null>(null);
+  const [quotaResetOpen, setQuotaResetOpen] = useState(false);
   const [noticeExpanded, setNoticeExpanded] = useState(false);
   const noticeID = useId();
   const [pendingID, setPendingID] = useState("");
@@ -392,6 +394,9 @@ export default function NativeKeyBindingsTab() {
         </button>
         <button className="btn" type="button" disabled={loading} onClick={() => setBatchView("history")}>
           {t("mapping.nativeBatch.history")}
+        </button>
+        <button className="btn" type="button" disabled={loading} onClick={() => setQuotaResetOpen(true)}>
+          {t("mapping.nativeQuotaReset.title")}
         </button>
       </div>
 
@@ -582,6 +587,7 @@ export default function NativeKeyBindingsTab() {
       )}
 
       {batchView && <NativeBindingBatch initialView={batchView} onClose={() => setBatchView(null)} onChanged={load} />}
+      {quotaResetOpen && <NativeQuotaReset onClose={() => setQuotaResetOpen(false)} onReset={load} />}
       {editor && (
         <NativeKeyBindingEditor
           key={editor.mode === "edit" ? editor.binding.id : editor.initialID || "__new"}

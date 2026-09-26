@@ -18,9 +18,11 @@ const apiMocks = vi.hoisted(() => ({
   resetNativeKeyBindingQuota: vi.fn(),
 }));
 const modelMocks = vi.hoisted(() => ({ fetchCatalog: vi.fn() }));
+const quotaResetClient = vi.hoisted(() => ({ loadBindings: vi.fn(), reset: vi.fn() }));
 
 vi.mock("../api/mappings", () => apiMocks);
 vi.mock("../api/models", () => modelMocks);
+vi.mock("../api/nativeQuotaReset", () => ({ createNativeQuotaResetClient: () => quotaResetClient }));
 
 import NativeKeyBindingsTab, { buildNativeBindingGroupOptions } from "./NativeKeyBindings";
 
@@ -626,8 +628,8 @@ describe("NativeKeyBindingsTab weekly quota", () => {
       ...existing,
       usage: { ...weeklyUsage, weekly_usd_used: 0, daily_calls: 0, weekly_calls: 0, weekly_reset_at: "2099-09-21T10:29:00" },
     }));
-    const resetButton = Array.from(container.querySelectorAll("button"))
-      .find((button) => button.textContent?.includes("重置额度"));
+    const resetButton = Array.from(container.querySelectorAll(".native-binding-card button"))
+      .find((button) => button.textContent?.trim() === "重置额度") as HTMLButtonElement | undefined;
     await act(async () => {
       resetButton!.click();
       await tick();
@@ -652,8 +654,8 @@ describe("NativeKeyBindingsTab", () => {
       await tick();
     });
 
-    const resetButton = Array.from(container.querySelectorAll("button"))
-      .find((button) => button.textContent?.includes("重置额度"));
+    const resetButton = Array.from(container.querySelectorAll(".native-binding-card button"))
+      .find((button) => button.textContent?.trim() === "重置额度") as HTMLButtonElement | undefined;
     expect(resetButton).toBeTruthy();
     await act(async () => {
       resetButton!.click();
@@ -663,6 +665,34 @@ describe("NativeKeyBindingsTab", () => {
     expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("全部用量记录"));
     expect(apiMocks.resetNativeKeyBindingQuota).toHaveBeenCalledWith("client-a");
     expect(apiMocks.fetchNativeKeyBindingCatalog).toHaveBeenCalledTimes(2);
+  });
+
+  it("opens the batch quota toolbar action and refreshes cards after one confirmed batch reset", async () => {
+    quotaResetClient.loadBindings.mockResolvedValue([{
+      id: existing.id, name: existing.name, keyPreview: existing.key_preview,
+      enabled: existing.enabled, createdAt: "", key: existingSecret,
+    }]);
+    quotaResetClient.reset.mockResolvedValue({ reset: true, ids: [existing.id], count: 1 });
+    await renderQuotaBinding(existing);
+    const open = Array.from(container.querySelectorAll<HTMLButtonElement>(".native-binding-toolbar button"))
+      .find((button) => button.textContent?.trim() === "批量重置额度")!;
+    expect(open).toBeTruthy();
+    await act(async () => { open.click(); await tick(); });
+    const dialog = container.querySelector<HTMLElement>('.native-quota-reset[role="dialog"]')!;
+    expect(dialog).toBeTruthy();
+    expect(quotaResetClient.reset).not.toHaveBeenCalled();
+    expect(container.innerHTML).not.toContain(existingSecret);
+    const confirm = dialog.querySelector<HTMLButtonElement>(".native-batch-actions .danger-outline")!;
+    expect(confirm.textContent).toBe("重置 1 个 Key");
+    await act(async () => { confirm.click(); await tick(); });
+    expect(quotaResetClient.loadBindings).toHaveBeenCalledTimes(2);
+    expect(quotaResetClient.reset).toHaveBeenCalledWith([existing.id]);
+    expect(apiMocks.fetchNativeKeyBindingCatalog).toHaveBeenCalledTimes(2);
+    expect(apiMocks.resetNativeKeyBindingQuota).not.toHaveBeenCalled();
+    expect(apiMocks.updateNativeKeyBinding).not.toHaveBeenCalled();
+    expect(dialog.textContent).toContain("已重置 1 个 Key");
+    await act(async () => { dialog.querySelector<HTMLButtonElement>(".native-batch-actions button")!.click(); await tick(); });
+    expect(container.querySelector(".native-quota-reset")).toBeNull();
   });
 
   it("warns before disabling because the top-level key remains valid", async () => {
