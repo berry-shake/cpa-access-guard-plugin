@@ -515,7 +515,7 @@
       "weeklyRemaining": "Остаток недельной квоты",
       "weeklyRemainingAmount": "Осталось {{remaining}} / {{limit}}",
       "quotaExhausted": "Исчерпана",
-      "quotaStartsOnUse": "Отсчёт с первого использования",
+      "quotaResetUnavailable": "Время сброса пока неизвестно",
       "quotaResetsAt": "Сброс",
       "resetQuota": "Сбросить квоту",
       "resetQuotaConfirm": "Сбросить RPM, дневное/недельное использование и все записи использования для привязки {{id}}? Это действие нельзя отменить."

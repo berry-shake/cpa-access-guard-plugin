@@ -2,6 +2,7 @@ package policy
 
 import (
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -41,8 +42,7 @@ func (l *usageLedger) loadFromState(usage map[string]*UsageState) {
 		if st == nil {
 			continue
 		}
-		cp := *st
-		l.entries[id] = &cp
+		l.entries[id] = cloneUsageState(st)
 	}
 }
 
@@ -61,16 +61,52 @@ func (l *usageLedger) snapshotLocked() map[string]*UsageState {
 		if st == nil {
 			continue
 		}
-		cp := *st
-		if st.ByAlias != nil {
-			cp.ByAlias = make(map[string]AliasUsageWindows, len(st.ByAlias))
-			for alias, windows := range st.ByAlias {
-				cp.ByAlias[alias] = windows
-			}
-		}
-		out[id] = &cp
+		out[id] = cloneUsageState(st)
 	}
 	return out
+}
+
+func cloneUsageState(st *UsageState) *UsageState {
+	cp := *st
+	if st.WeeklyResetAnchor != nil {
+		anchor := *st.WeeklyResetAnchor
+		cp.WeeklyResetAnchor = &anchor
+	}
+	if st.ByAlias != nil {
+		cp.ByAlias = make(map[string]AliasUsageWindows, len(st.ByAlias))
+		for alias, windows := range st.ByAlias {
+			cp.ByAlias[alias] = windows
+		}
+	}
+	return &cp
+}
+
+// nativeWeeklyResetAnchor deliberately excludes plugin-owned and legacy
+// accounts. Reading or billing those accounts must retain their old windows.
+func nativeWeeklyResetAnchor(id string, st *UsageState) time.Time {
+	if isNativeUsageLedgerID(id) && st.WeeklyResetAnchor != nil {
+		return *st.WeeklyResetAnchor
+	}
+	return time.Time{}
+}
+
+func isNativeUsageLedgerID(id string) bool {
+	scope, found := strings.CutPrefix(id, nativeUsageLedgerPrefix)
+	return found && validateNativeCallerScope(scope) == nil
+}
+
+func fixedWeeklyWindowStart(anchor, now time.Time) time.Time {
+	if now.Before(anchor) {
+		return anchor.UTC()
+	}
+	return anchor.Add((now.Sub(anchor) / weekWindow) * weekWindow).UTC()
+}
+
+// advanceFixedWeeklyWindow never rewinds on a backwards clock adjustment.
+func advanceFixedWeeklyWindow(w *UsageWindow, start time.Time) {
+	if w.WindowStart.IsZero() || w.WindowStart.Before(start) {
+		*w = UsageWindow{WindowStart: start}
+	}
 }
 
 func (l *usageLedger) entryLocked(id string) *UsageState {
@@ -94,7 +130,11 @@ func (l *usageLedger) ensureDailyWindowLocked(st *UsageState, now time.Time) {
 	}
 }
 
-func (l *usageLedger) ensureWeeklyWindowLocked(st *UsageState, now time.Time) {
+func (l *usageLedger) ensureWeeklyWindowLocked(st *UsageState, now, anchor time.Time) {
+	if !anchor.IsZero() {
+		advanceFixedWeeklyWindow(&st.Weekly, fixedWeeklyWindowStart(anchor, now))
+		return
+	}
 	// Rolling window: if the recorded start is older than 7 days, slide it
 	// forward so only the trailing 7 days count. We drop the accumulated total
 	// and reset the window to now (conservative — losing usage that aged out
@@ -143,12 +183,14 @@ func (l *usageLedger) RecordCost(id, alias string, amount, cacheCost float64, ca
 	if id == "" {
 		return
 	}
-	now := l.now()
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	// Sample after locking so records queued behind a reset use the new period.
+	now := l.now()
 	st := l.entryLocked(id)
+	anchor := nativeWeeklyResetAnchor(id, st)
 	l.ensureDailyWindowLocked(st, now)
-	l.ensureWeeklyWindowLocked(st, now)
+	l.ensureWeeklyWindowLocked(st, now, anchor)
 	st.Daily.TotalUSD += amount
 	st.Weekly.TotalUSD += amount
 	st.Daily.CallCount += callCount
@@ -180,7 +222,11 @@ func (l *usageLedger) RecordCost(id, alias string, amount, cacheCost float64, ca
 
 	aliasEntry := st.ByAlias[alias]
 	l.ensureAliasWindowLocked(&aliasEntry.Daily, true, now)
-	l.ensureAliasWindowLocked(&aliasEntry.Weekly, false, now)
+	if anchor.IsZero() {
+		l.ensureAliasWindowLocked(&aliasEntry.Weekly, false, now)
+	} else {
+		advanceFixedWeeklyWindow(&aliasEntry.Weekly, st.Weekly.WindowStart)
+	}
 	aliasEntry.Daily.TotalUSD += amount
 	aliasEntry.Weekly.TotalUSD += amount
 	aliasEntry.Daily.CallCount += callCount
@@ -232,9 +278,9 @@ type UsageSummary struct {
 // KeyConfig; usage from the ledger. daily_reset_at = next UTC midnight;
 // weekly_reset_at = window start + 7 days.
 func (l *usageLedger) Summary(key KeyConfig) UsageSummary {
-	now := l.now()
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	now := l.now()
 	st := l.entries[key.ID]
 	summary := UsageSummary{
 		DailyLimitUSD:  key.DailyLimitUSD,
@@ -251,7 +297,8 @@ func (l *usageLedger) Summary(key KeyConfig) UsageSummary {
 		ensureSt.ByAlias = make(map[string]AliasUsageWindows)
 	}
 	l.ensureDailyWindowLocked(&ensureSt, now)
-	l.ensureWeeklyWindowLocked(&ensureSt, now)
+	anchor := nativeWeeklyResetAnchor(key.ID, st)
+	l.ensureWeeklyWindowLocked(&ensureSt, now, anchor)
 	summary.DailyUSD = ensureSt.Daily.TotalUSD
 	summary.WeeklyUSD = ensureSt.Weekly.TotalUSD
 	summary.DailyCacheCostUSD = ensureSt.Daily.CacheCostUSD
@@ -266,7 +313,11 @@ func (l *usageLedger) Summary(key KeyConfig) UsageSummary {
 	summary.WeeklyInputTokens = ensureSt.Weekly.InputTokens
 	summary.DailyCallCount = ensureSt.Daily.CallCount
 	summary.WeeklyCallCount = ensureSt.Weekly.CallCount
-	if !ensureSt.Weekly.WindowStart.IsZero() {
+	// A legacy native account has no fixed schedule until a real record starts
+	// its next period. Do not expose a read-time projection as a real deadline.
+	legacyNativeWithoutPeriod := isNativeUsageLedgerID(key.ID) && anchor.IsZero() &&
+		(st.Weekly.WindowStart.IsZero() || now.Sub(st.Weekly.WindowStart) >= weekWindow)
+	if !ensureSt.Weekly.WindowStart.IsZero() && !legacyNativeWithoutPeriod {
 		summary.WeeklyResetAt = ensureSt.Weekly.WindowStart.Add(weekWindow)
 	}
 	return summary
@@ -319,9 +370,9 @@ type AliasUsageEntry struct {
 // display (the read does not mutate the ledger; the next write commits the
 // reset, mirroring Summary). Rows are sorted by alias for stable display.
 func (l *usageLedger) AliasUsage(key KeyConfig) []AliasUsageEntry {
-	now := l.now()
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	now := l.now()
 
 	byAlias := make(map[string]AliasUsageEntry, len(key.Models))
 	for _, rule := range key.Models {
@@ -336,11 +387,18 @@ func (l *usageLedger) AliasUsage(key KeyConfig) []AliasUsageEntry {
 	}
 
 	if st := l.entries[key.ID]; st != nil {
+		anchor := nativeWeeklyResetAnchor(key.ID, st)
+		current := *st
+		l.ensureWeeklyWindowLocked(&current, now, anchor)
 		for alias, w := range st.ByAlias {
 			// Re-evaluate windows on a local copy so a stale weekly total resets
 			// for display without mutating the ledger.
 			l.ensureAliasWindowLocked(&w.Daily, true, now)
-			l.ensureAliasWindowLocked(&w.Weekly, false, now)
+			if anchor.IsZero() {
+				l.ensureAliasWindowLocked(&w.Weekly, false, now)
+			} else {
+				advanceFixedWeeklyWindow(&w.Weekly, current.Weekly.WindowStart)
+			}
 			entry, ok := byAlias[alias]
 			if !ok {
 				entry = AliasUsageEntry{Alias: alias, InConfig: false}

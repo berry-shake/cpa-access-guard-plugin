@@ -302,9 +302,16 @@ func resetNativeQuotaAccounts(accounts []string, usage *usageLedger, limiter *Ra
 	}
 	var snapshot map[string]*UsageState
 	if usage != nil {
+		resetAt := usage.now().UTC()
 		snapshot = usage.snapshotLocked()
 		for _, account := range accounts {
-			delete(snapshot, account)
+			anchor := resetAt
+			snapshot[account] = &UsageState{
+				Daily:             UsageWindow{WindowStart: resetAt.Truncate(dayWindow)},
+				Weekly:            UsageWindow{WindowStart: resetAt},
+				WeeklyResetAnchor: &anchor,
+				ByAlias:           make(map[string]AliasUsageWindows),
+			}
 		}
 	}
 	if err := persist(snapshot); err != nil {
@@ -312,7 +319,7 @@ func resetNativeQuotaAccounts(accounts []string, usage *usageLedger, limiter *Ra
 	}
 	for _, account := range accounts {
 		if usage != nil {
-			delete(usage.entries, account)
+			usage.entries[account] = cloneUsageState(snapshot[account])
 		}
 		if limiter != nil {
 			delete(limiter.buckets, account)

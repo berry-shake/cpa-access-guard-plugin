@@ -210,6 +210,9 @@ type UsageState struct {
 	Daily   UsageWindow                  `json:"daily"`
 	Weekly  UsageWindow                  `json:"weekly"`
 	ByAlias map[string]AliasUsageWindows `json:"by_alias,omitempty"`
+	// WeeklyResetAnchor fixes native-key weekly periods to the last successful
+	// manual reset. Missing anchors retain the legacy first-use window behavior.
+	WeeklyResetAnchor *time.Time `json:"weekly_reset_anchor,omitempty"`
 }
 
 // AliasUsageWindows holds the daily and rolling-weekly usage windows for a
@@ -228,15 +231,17 @@ type AliasUsageWindows struct {
 // skipped rather than failing the whole load.
 func (s *UsageState) UnmarshalJSON(raw []byte) error {
 	var p struct {
-		Daily   UsageWindow     `json:"daily"`
-		Weekly  UsageWindow     `json:"weekly"`
-		ByAlias json.RawMessage `json:"by_alias,omitempty"`
+		Daily             UsageWindow     `json:"daily"`
+		Weekly            UsageWindow     `json:"weekly"`
+		ByAlias           json.RawMessage `json:"by_alias,omitempty"`
+		WeeklyResetAnchor *time.Time      `json:"weekly_reset_anchor,omitempty"`
 	}
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return err
 	}
 	s.Daily = p.Daily
 	s.Weekly = p.Weekly
+	s.WeeklyResetAnchor = p.WeeklyResetAnchor
 	s.ByAlias = make(map[string]AliasUsageWindows)
 	if len(p.ByAlias) == 0 || string(p.ByAlias) == "null" {
 		return nil

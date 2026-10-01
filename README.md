@@ -12,6 +12,8 @@ In plain words: you issue your own `cpa_…` keys to clients. Each key only sees
 | **Lineage** | Derived from [origin652/cpa-plugin-key-policy](https://github.com/origin652/cpa-plugin-key-policy) under the MIT license |
 | **中文说明** | [README.zh-CN.md](./README.zh-CN.md) |
 
+**v0.4.4-fork.20:** native-key weekly quotas start their seven-day period when a single or batch quota reset succeeds. The reset time is persisted and displayed immediately, even with zero requests. Refreshing, restarting, or delaying the first request does not move the deadline; idle periods advance in exact seven-day intervals. Older releases did not retain manual reset timestamps, so reset once after upgrading to establish the new schedule.
+
 **v0.4.4-fork.19:** reset quotas for all current native-key bindings or a selected subset from one dialog. The reset has the same scope as each card's existing action: RPM, daily/weekly spend, calls, tokens, and model usage. Configured limits, credential restrictions, model permissions, enabled state, round-robin settings, and binding history remain unchanged.
 
 **v0.4.4-fork.18.1:** restores automatic login inside CPAMP panels that save credentials in `enc::v2::` format, while retaining legacy v1 support. Saved credentials are verified before the plugin publishes an authenticated session, so an expired or invalid password returns to the login screen without repeated verification. The panel must be same-origin with **Remember password** enabled; the plugin never creates another persisted copy of the credential.
@@ -234,6 +236,8 @@ The native-key toolbar's **Batch reset quotas** action selects all current host 
 
 This clears only the selected bindings' plugin RPM and usage counters, including daily/weekly dollars, calls, token totals, and model breakdowns. The saved limits and policies are preserved. It does not reset upstream account quotas or delete CPA/CPAMP request history. The reset cannot be undone through binding history. Requests completed after the reset start accumulating usage again.
 
+From fork.20, each successful manual reset also starts a new seven-day quota period immediately. All bindings in one batch share the same reset time. The next reset is seven days later, even if no request has been made; subsequent periods retain that schedule through idle weeks and restarts. Resetting manually again starts a new schedule. Daily usage still resets at UTC midnight. A failed save changes neither counters nor the schedule. Existing usage is preserved on upgrade; historical manual reset timestamps discarded by older versions cannot be recovered.
+
 The backend validates every selected binding before applying changes and persists the batch before publishing the cleared counters. Missing IDs or a persistence failure leave the entire batch unchanged. Continue using the same persistent `state_file` across restarts.
 
 ### OpenAI-compatibility providers
@@ -337,7 +341,7 @@ UI areas:
 | Model Pricing | LiteLLM primary and models.dev fallback status; search, manual overrides, deletion tombstones, and automatic restore |
 | Model picker | Catalog of providers; tier / **Custom · …** subgroups |
 
-Enabled native-key cards show a 7D remaining-quota bar only when a weekly USD cap is configured; an empty or zero weekly cap hides the entire block. The balance uses the plugin's billed USD usage. Green indicates more than 20% remaining, amber 5–20%, and red less than 5%; exhausted quotas show 0%. The reset time is displayed in your browser's local timezone for an active seven-day usage window. Before use, after a manual quota reset, or after an idle window expires, the card shows "Starts on next use" instead of a provisional reset date. The display updates when you refresh the list, save a binding, or reset its quota.
+Enabled native-key cards show a 7D remaining-quota bar only when a weekly USD cap is configured; an empty or zero weekly cap hides the entire block. The balance uses the plugin's billed USD usage. Green indicates more than 20% remaining, amber 5–20%, and red less than 5%; exhausted quotas show 0%. The next reset time is displayed in your browser's local timezone, including immediately after a manual reset with zero requests. If no actual reset time is available, the card shows a neutral placeholder rather than inventing a deadline. The display updates when you refresh the list, save a binding, or reset its quota.
 
 Dev UI without rebuilding the `.so`:
 

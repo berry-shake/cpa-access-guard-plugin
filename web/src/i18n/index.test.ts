@@ -66,6 +66,7 @@ describe("translate", () => {
         "mapping.native.roundRobin",
         "mapping.native.roundRobinHint",
         "mapping.native.roundRobinScope",
+        "mapping.native.quotaResetUnavailable",
       ]) {
         expect(translate(key)).not.toBe(key);
       }

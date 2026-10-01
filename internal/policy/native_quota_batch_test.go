@@ -14,11 +14,25 @@ import (
 
 const quotaBatchOwnedID = "plugin-owned-quota-fixture"
 
+func quotaBatchClock() time.Time {
+	return time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
+}
+
+func quotaBatchResetState(resetAt time.Time) *UsageState {
+	anchor := resetAt.UTC()
+	return &UsageState{
+		Daily:             UsageWindow{WindowStart: anchor.Truncate(dayWindow)},
+		Weekly:            UsageWindow{WindowStart: anchor},
+		WeeklyResetAnchor: &anchor,
+		ByAlias:           make(map[string]AliasUsageWindows),
+	}
+}
+
 func quotaBatchFixture(t *testing.T) (*Store, string, []NativeKeyBinding) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "state.json")
 	store := newNativeQuotaStore(t, path)
-	store.SetClock(func() time.Time { return time.Date(2026, 9, 27, 10, 0, 0, 0, time.UTC) })
+	store.SetClock(quotaBatchClock)
 	keys := []string{"sk-quota-batch-alpha-fixture", "sk-quota-batch-bravo-fixture", "sk-quota-batch-disabled-fixture"}
 	for i, id := range []string{"alpha", "bravo", "disabled"} {
 		createTestBindingWithKey(t, store, id, keys[i], func(in *CreateNativeKeyBindingInput) {
@@ -112,6 +126,8 @@ func TestResetNativeKeyQuotasSelectionAndPersistence(t *testing.T) {
 			diskBefore := quotaBatchReadState(t, path)
 			limiter, usage := store.runtimeComponents()
 			wantUsage, wantRPM := usage.snapshot(), limiter.Snapshot()
+			resetAt := quotaBatchClock().Add(3 * time.Hour)
+			usage.now = func() time.Time { return resetAt }
 			selected := make(map[string]bool, len(tc.want))
 			for _, id := range tc.want {
 				selected[id] = true
@@ -119,7 +135,7 @@ func TestResetNativeKeyQuotasSelectionAndPersistence(t *testing.T) {
 			for _, binding := range bindings {
 				if selected[binding.ID] {
 					account := nativeUsageLedgerID(binding.CallerScope)
-					delete(wantUsage, account)
+					wantUsage[account] = quotaBatchResetState(resetAt)
 					delete(wantRPM, account)
 				}
 			}
@@ -134,7 +150,11 @@ func TestResetNativeKeyQuotasSelectionAndPersistence(t *testing.T) {
 				t.Fatal("durable usage differs from the selected reset, including plugin-owned usage")
 			}
 			quotaBatchAssertPolicy(t, store, path, bindings, history, diskBefore)
-			restarted := newNativeQuotaStore(t, path)
+			restarted := NewStore()
+			restarted.SetClock(func() time.Time { return resetAt.Add(48 * time.Hour) })
+			if err := restarted.Configure(Config{Enabled: true, StateFile: path}); err != nil {
+				t.Fatal(err)
+			}
 			_, recovered := restarted.runtimeComponents()
 			if !reflect.DeepEqual(recovered.snapshot(), wantUsage) {
 				t.Fatal("restart resurrected selected daily/weekly amounts, calls, tokens, cache, or model breakdowns")
@@ -151,6 +171,9 @@ func TestResetNativeKeyQuotasSelectionAndPersistence(t *testing.T) {
 					}
 					if summary.RPMLimit != binding.RPM || summary.DailyUSDLimit != binding.DailyUSD || summary.WeeklyUSDLimit != binding.WeeklyUSD {
 						t.Fatalf("configured limits changed: %+v", summary)
+					}
+					if want := resetAt.Add(weekWindow).Format(time.RFC3339); summary.WeeklyResetAt != want {
+						t.Fatalf("weekly deadline changed after reset or restart: got %s, want %s", summary.WeeklyResetAt, want)
 					}
 				}
 			}
@@ -223,6 +246,7 @@ func TestResetNativeKeyQuotasAcceptsInputBoundaries(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newNativeQuotaStore(t, filepath.Join(t.TempDir(), "state.json"))
+			store.SetClock(quotaBatchClock)
 			binding := createTestBinding(t, store, "alpha", nil)
 			_, usage := store.runtimeComponents()
 			account := nativeUsageLedgerID(binding.CallerScope)
@@ -235,8 +259,8 @@ func TestResetNativeKeyQuotasAcceptsInputBoundaries(t *testing.T) {
 			if err != nil || !reflect.DeepEqual(got, []string{"alpha"}) {
 				t.Fatalf("boundary rejected: ids=%v err=%v", got, err)
 			}
-			if len(usage.snapshot()) != 0 {
-				t.Fatal("accepted boundary did not reset usage")
+			if want := map[string]*UsageState{account: quotaBatchResetState(quotaBatchClock())}; !reflect.DeepEqual(usage.snapshot(), want) {
+				t.Fatal("accepted boundary did not retain only a zeroed usage entry with the reset anchor")
 			}
 		})
 	}
@@ -244,16 +268,23 @@ func TestResetNativeKeyQuotasAcceptsInputBoundaries(t *testing.T) {
 
 func TestResetNativeKeyQuotasEmptyUsageAndRepeatedReset(t *testing.T) {
 	store := newNativeQuotaStore(t, filepath.Join(t.TempDir(), "state.json"))
-	createTestBinding(t, store, "fresh", nil)
+	store.SetClock(quotaBatchClock)
+	binding := createTestBinding(t, store, "fresh", nil)
 	before := store.NativeKeyBindingsSnapshot()
+	limiter, usage := store.runtimeComponents()
 	for i := 0; i < 2; i++ {
+		resetAt := quotaBatchClock().Add(time.Duration(i) * time.Hour)
+		usage.now = func() time.Time { return resetAt }
 		got, err := store.ResetNativeKeyQuotas([]string{"fresh", " FRESH "})
 		if err != nil || !reflect.DeepEqual(got, []string{"fresh"}) {
 			t.Fatalf("empty-usage reset %d = %v, %v", i, got, err)
 		}
-		limiter, usage := store.runtimeComponents()
-		if len(usage.snapshot()) != 0 || len(limiter.Snapshot()) != 0 {
-			t.Fatal("reset created usage or RPM counters")
+		want := map[string]*UsageState{nativeUsageLedgerID(binding.CallerScope): quotaBatchResetState(resetAt)}
+		if !reflect.DeepEqual(usage.snapshot(), want) || len(limiter.Snapshot()) != 0 {
+			t.Fatal("empty-usage reset did not retain the latest reset anchor with zero counters")
+		}
+		if !reflect.DeepEqual(quotaBatchReadState(t, store.StatePath()).Usage, want) {
+			t.Fatal("empty-usage reset did not persist the latest reset anchor")
 		}
 		if !reflect.DeepEqual(store.NativeKeyBindingsSnapshot(), before) || len(store.NativeBindingHistorySnapshot()) != 0 {
 			t.Fatal("empty-usage reset changed policy or created history")
@@ -328,6 +359,7 @@ func TestResetNativeKeyQuotas4096DistinctBindings(t *testing.T) {
 		bindings[i] = NativeKeyBinding{ID: ids[i], Enabled: i%2 == 0, RoundRobin: true, Group: "team", CallerScope: NativeCallerScope("synthetic-" + ids[i]), RPM: 5}
 	}
 	store := NewStore()
+	store.SetClock(quotaBatchClock)
 	if err := store.Configure(Config{Enabled: true, StateFile: path, NativeKeyBindings: bindings}); err != nil {
 		t.Fatal(err)
 	}
@@ -343,34 +375,52 @@ func TestResetNativeKeyQuotas4096DistinctBindings(t *testing.T) {
 	if err := store.FlushUsage(); err != nil {
 		t.Fatal(err)
 	}
+	resetAt := quotaBatchClock().Add(3 * time.Hour)
+	usage.now = func() time.Time { return resetAt }
+	wantUsage := make(map[string]*UsageState, len(before))
+	for _, binding := range before {
+		wantUsage[nativeUsageLedgerID(binding.CallerScope)] = quotaBatchResetState(resetAt)
+	}
 	got, err := store.ResetNativeKeyQuotas(ids)
 	if err != nil || !reflect.DeepEqual(got, ids) {
 		t.Fatalf("4096 distinct binding reset returned %d ids, err=%v", len(got), err)
 	}
-	if len(usage.snapshot()) != 0 || len(limiter.Snapshot()) != 0 || len(quotaBatchReadState(t, path).Usage) != 0 {
-		t.Fatal("large reset left live or durable counters")
+	if !reflect.DeepEqual(usage.snapshot(), wantUsage) || len(limiter.Snapshot()) != 0 || !reflect.DeepEqual(quotaBatchReadState(t, path).Usage, wantUsage) {
+		t.Fatal("large reset did not retain zeroed live and durable entries sharing one reset anchor")
 	}
 	if !reflect.DeepEqual(store.NativeKeyBindingsSnapshot(), before) {
 		t.Fatal("large reset changed binding settings")
 	}
-	restarted := newNativeQuotaStore(t, path)
+	restarted := NewStore()
+	restarted.SetClock(func() time.Time { return resetAt.Add(48 * time.Hour) })
+	if err := restarted.Configure(Config{Enabled: true, StateFile: path}); err != nil {
+		t.Fatal(err)
+	}
 	_, recovered := restarted.runtimeComponents()
-	if len(recovered.snapshot()) != 0 || !reflect.DeepEqual(restarted.NativeKeyBindingsSnapshot(), before) {
+	if !reflect.DeepEqual(recovered.snapshot(), wantUsage) || !reflect.DeepEqual(restarted.NativeKeyBindingsSnapshot(), before) {
 		t.Fatal("large reset did not survive restart with all policies intact")
+	}
+	for _, binding := range before {
+		if summary := restarted.NativeBindingUsage(binding); summary.WeeklyResetAt != resetAt.Add(weekWindow).Format(time.RFC3339) {
+			t.Fatalf("large reset deadline changed after restart for %s: %s", binding.ID, summary.WeeklyResetAt)
+		}
 	}
 }
 
 func TestResetNativeKeyQuotaSingleUsesBatchPersistence(t *testing.T) {
 	store, path, bindings := quotaBatchFixture(t)
+	wantUsage := quotaBatchReadState(t, path).Usage
 	if err := store.ResetNativeKeyQuota(" ALPHA "); err != nil {
 		t.Fatal(err)
 	}
 	state := quotaBatchReadState(t, path)
 	for _, binding := range bindings {
-		_, exists := state.Usage[nativeUsageLedgerID(binding.CallerScope)]
-		if exists == (binding.ID == "alpha") {
-			t.Fatalf("single reset durable selection is incorrect for %s", binding.ID)
+		if binding.ID == "alpha" {
+			wantUsage[nativeUsageLedgerID(binding.CallerScope)] = quotaBatchResetState(quotaBatchClock())
 		}
+	}
+	if !reflect.DeepEqual(state.Usage, wantUsage) {
+		t.Fatal("single reset did not persist the selected zeroed entry and preserve other accounts")
 	}
 	if err := store.ResetNativeKeyQuota("  "); !errors.Is(err, ErrUnknownNativeKeyBinding) {
 		t.Fatalf("single empty-ID compatibility changed: %v", err)
@@ -381,6 +431,7 @@ func TestResetNativeKeyQuotasMemoryOnlyStore(t *testing.T) {
 	for _, single := range []bool{false, true} {
 		t.Run(fmt.Sprintf("single_%t", single), func(t *testing.T) {
 			store := NewStore()
+			store.SetClock(quotaBatchClock)
 			binding := NativeKeyBinding{ID: "memory-only", Enabled: true, Group: "team", CallerScope: NativeCallerScope("sk-memory-only-fixture"), RPM: 5}
 			store.nativeKeyBindings[binding.ID] = &binding
 			store.nativeKeyBindingsByScope[binding.CallerScope] = &binding
@@ -400,7 +451,8 @@ func TestResetNativeKeyQuotasMemoryOnlyStore(t *testing.T) {
 					t.Fatalf("memory-only reset returned %v", got)
 				}
 			}
-			if err != nil || len(usage.snapshot()) != 0 || len(limiter.Snapshot()) != 0 {
+			wantUsage := map[string]*UsageState{account: quotaBatchResetState(quotaBatchClock())}
+			if err != nil || !reflect.DeepEqual(usage.snapshot(), wantUsage) || len(limiter.Snapshot()) != 0 {
 				t.Fatalf("memory-only reset failed: %v", err)
 			}
 			if store.StatePath() != "" || store.nativeKeyBindings[binding.ID] != &binding {

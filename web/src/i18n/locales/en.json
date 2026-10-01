@@ -515,7 +515,7 @@
       "weeklyRemaining": "Weekly quota remaining",
       "weeklyRemainingAmount": "Remaining {{remaining}} / {{limit}}",
       "quotaExhausted": "Exhausted",
-      "quotaStartsOnUse": "Starts on next use",
+      "quotaResetUnavailable": "Reset time not available",
       "quotaResetsAt": "Resets",
       "resetQuota": "Reset quota",
       "resetQuotaConfirm": "Reset RPM, daily/weekly usage, and all usage records for native key binding {{id}}? This cannot be undone."

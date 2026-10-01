@@ -141,6 +141,7 @@ afterEach(() => {
   if (root) act(() => root?.unmount());
   root = null;
   container.remove();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.clearAllMocks();
   vi.unstubAllGlobals();
@@ -572,11 +573,11 @@ describe("NativeKeyBindingsTab weekly quota", () => {
     expect(quota.textContent).not.toContain("已用尽");
   });
 
-  it("shows the backend reset time in local time for an active weekly window", async () => {
+  it.each([0, 3932])("shows a valid backend reset time regardless of the weekly call count (%s)", async (calls) => {
     const resetAt = "2099-09-14T10:29:00";
     await renderQuotaBinding({
       ...existing,
-      usage: { ...weeklyUsage, weekly_reset_at: resetAt },
+      usage: { ...weeklyUsage, weekly_calls: calls, weekly_usd_used: calls ? 17 : 0, weekly_reset_at: resetAt },
     });
 
     const quota = weeklyMeter()!.closest(".native-weekly-quota")!;
@@ -585,48 +586,43 @@ describe("NativeKeyBindingsTab weekly quota", () => {
     expect(resetTime?.textContent).toContain("09/14");
     expect(resetTime?.textContent).toContain("10:29");
     expect(quota.textContent).toContain("重置");
+    expect(quota.textContent).not.toContain("尚无重置时间");
     expect(quota.textContent).not.toContain("使用后开始计时");
+    expect(weeklyMeter()!.getAttribute("aria-valuenow")).toBe(calls ? "83" : "100");
   });
 
-  it.each([undefined, "2099-09-14T10:29:00", "invalid-date"])(
-    "shows the start-on-use state without a moving date when no weekly calls exist (%s)",
-    async (resetAt) => {
+  it.each([0, 3932].flatMap((calls) => [undefined, "", "invalid-date"].map((resetAt) => ({ calls, resetAt }))))(
+    "shows an unavailable deadline without inventing a date for $calls calls and $resetAt",
+    async ({ calls, resetAt }) => {
       await renderQuotaBinding({
         ...existing,
-        usage: { ...weeklyUsage, weekly_usd_used: 0, daily_calls: 0, weekly_calls: 0, weekly_reset_at: resetAt },
+        usage: { ...weeklyUsage, weekly_calls: calls, weekly_usd_used: calls ? 17 : 0, weekly_reset_at: resetAt },
       });
 
       const quota = weeklyMeter()!.closest(".native-weekly-quota")!;
-      expect(quota.textContent).toContain("使用后开始计时");
-      expect(quota.querySelector("time")).toBeNull();
-      expect(quota.textContent).not.toContain("Invalid Date");
-    },
-  );
-
-  it.each([undefined, "", "invalid-date"])(
-    "omits unavailable or invalid reset dates for an active weekly window (%s)",
-    async (resetAt) => {
-      await renderQuotaBinding({ ...existing, usage: { ...weeklyUsage, weekly_reset_at: resetAt } });
-
-      const quota = weeklyMeter()!.closest(".native-weekly-quota")!;
+      expect(quota.textContent).toContain("尚无重置时间");
       expect(quota.querySelector("time")).toBeNull();
       expect(quota.textContent).not.toContain("使用后开始计时");
       expect(quota.textContent).not.toContain("Invalid Date");
-      expect(quota.textContent).toContain("83%");
+      expect(quota.textContent).toContain(calls ? "83%" : "100%");
     },
   );
 
-  it("refreshes the meter and clears the old reset date after resetting quota", async () => {
+  it("refreshes the balance and replaces the deadline after a single reset without drifting on refresh", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2099-09-14T10:29:00"));
+    const oldResetAt = "2099-09-14T10:29:00";
+    const newResetAt = "2099-09-21T10:29:00";
     await renderQuotaBinding({
       ...existing,
-      usage: { ...weeklyUsage, weekly_reset_at: "2099-09-14T10:29:00" },
+      usage: { ...weeklyUsage, weekly_reset_at: oldResetAt },
     });
     expect(weeklyMeter()!.getAttribute("aria-valuenow")).toBe("83");
-    expect(weeklyMeter()!.closest(".native-weekly-quota")!.querySelector("time")).toBeTruthy();
+    expect(weeklyMeter()!.closest(".native-weekly-quota")!.querySelector("time")?.getAttribute("datetime")).toBe(oldResetAt);
 
     apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValue(quotaCatalog({
       ...existing,
-      usage: { ...weeklyUsage, weekly_usd_used: 0, daily_calls: 0, weekly_calls: 0, weekly_reset_at: "2099-09-21T10:29:00" },
+      usage: { ...weeklyUsage, weekly_usd_used: 0, daily_calls: 0, weekly_calls: 0, weekly_reset_at: newResetAt },
     }));
     const resetButton = Array.from(container.querySelectorAll(".native-binding-card button"))
       .find((button) => button.textContent?.trim() === "重置额度") as HTMLButtonElement | undefined;
@@ -641,8 +637,18 @@ describe("NativeKeyBindingsTab weekly quota", () => {
     const quota = meter.closest(".native-weekly-quota")!;
     expect(meter.getAttribute("aria-valuenow")).toBe("100");
     expect(quota.textContent).toContain("剩余 $100.00 / $100.00");
-    expect(quota.textContent).toContain("使用后开始计时");
-    expect(quota.querySelector("time")).toBeNull();
+    expect(quota.querySelector("time")?.getAttribute("datetime")).toBe(newResetAt);
+    expect(quota.querySelector("time")?.textContent).toBe("09/21 10:29");
+    expect(quota.innerHTML).not.toContain(oldResetAt);
+    expect(quota.textContent).not.toContain("尚无重置时间");
+
+    const displayedDeadline = quota.querySelector("time")!.outerHTML;
+    vi.setSystemTime(new Date("2099-09-16T15:45:00"));
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".native-binding-toolbar button")!.click();
+      await tick();
+    });
+    expect(weeklyMeter()!.closest(".native-weekly-quota")!.querySelector("time")?.outerHTML).toBe(displayedDeadline);
   });
 });
 
@@ -668,12 +674,16 @@ describe("NativeKeyBindingsTab", () => {
   });
 
   it("opens the batch quota toolbar action and refreshes cards after one confirmed batch reset", async () => {
+    const oldResetAt = "2099-09-14T10:29:00";
+    const newResetAt = "2099-09-21T10:29:00";
     quotaResetClient.loadBindings.mockResolvedValue([{
       id: existing.id, name: existing.name, keyPreview: existing.key_preview,
       enabled: existing.enabled, createdAt: "", key: existingSecret,
     }]);
     quotaResetClient.reset.mockResolvedValue({ reset: true, ids: [existing.id], count: 1 });
-    await renderQuotaBinding(existing);
+    await renderQuotaBinding({ ...existing, usage: { ...weeklyUsage, weekly_reset_at: oldResetAt } });
+    expect(weeklyMeter()!.getAttribute("aria-valuenow")).toBe("83");
+    expect(weeklyMeter()!.closest(".native-weekly-quota")!.querySelector("time")?.getAttribute("datetime")).toBe(oldResetAt);
     const open = Array.from(container.querySelectorAll<HTMLButtonElement>(".native-binding-toolbar button"))
       .find((button) => button.textContent?.trim() === "批量重置额度")!;
     expect(open).toBeTruthy();
@@ -684,6 +694,10 @@ describe("NativeKeyBindingsTab", () => {
     expect(container.innerHTML).not.toContain(existingSecret);
     const confirm = dialog.querySelector<HTMLButtonElement>(".native-batch-actions .danger-outline")!;
     expect(confirm.textContent).toBe("重置 1 个 Key");
+    apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValue(quotaCatalog({
+      ...existing,
+      usage: { ...weeklyUsage, weekly_usd_used: 0, daily_calls: 0, weekly_calls: 0, weekly_reset_at: newResetAt },
+    }));
     await act(async () => { confirm.click(); await tick(); });
     expect(quotaResetClient.loadBindings).toHaveBeenCalledTimes(2);
     expect(quotaResetClient.reset).toHaveBeenCalledWith([existing.id]);
@@ -691,6 +705,13 @@ describe("NativeKeyBindingsTab", () => {
     expect(apiMocks.resetNativeKeyBindingQuota).not.toHaveBeenCalled();
     expect(apiMocks.updateNativeKeyBinding).not.toHaveBeenCalled();
     expect(dialog.textContent).toContain("已重置 1 个 Key");
+    const quota = weeklyMeter()!.closest(".native-weekly-quota")!;
+    expect(weeklyMeter()!.getAttribute("aria-valuenow")).toBe("100");
+    expect(quota.textContent).toContain("剩余 $100.00 / $100.00");
+    expect(quota.querySelector("time")?.getAttribute("datetime")).toBe(newResetAt);
+    expect(quota.querySelector("time")?.textContent).toBe("09/21 10:29");
+    expect(quota.innerHTML).not.toContain(oldResetAt);
+    expect(quota.textContent).not.toContain("尚无重置时间");
     await act(async () => { dialog.querySelector<HTMLButtonElement>(".native-batch-actions button")!.click(); await tick(); });
     expect(container.querySelector(".native-quota-reset")).toBeNull();
   });

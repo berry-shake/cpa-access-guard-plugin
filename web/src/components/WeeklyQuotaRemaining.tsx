@@ -22,10 +22,9 @@ export default function WeeklyQuotaRemaining({ usage }: { usage: NativeBindingUs
     limit: formatUSD(limit),
   });
 
-  // An idle, expired window gets a provisional reset date on every read.
-  // Only show a date once usage has actually started the new window.
-  const started = usage.weekly_calls > 0;
-  const reset = started && usage.weekly_reset_at ? new Date(usage.weekly_reset_at) : null;
+  // A manual reset starts a window even before its first request.
+  // Only the server supplies its deadline; do not infer one from usage or now.
+  const reset = usage.weekly_reset_at ? new Date(usage.weekly_reset_at) : null;
   const validReset = reset && Number.isFinite(reset.getTime()) ? reset : null;
   const pad = (value: number) => String(value).padStart(2, "0");
   const resetLabel = validReset
@@ -55,7 +54,7 @@ export default function WeeklyQuotaRemaining({ usage }: { usage: NativeBindingUs
       </div>
       <div className="native-weekly-quota-detail">
         <span>{amountLabel}</span>
-        {!started && <span>{t("mapping.native.quotaStartsOnUse")}</span>}
+        {!validReset && <span>{t("mapping.native.quotaResetUnavailable")}</span>}
         {validReset && (
           <span>
             {t("mapping.native.quotaResetsAt")}{" "}

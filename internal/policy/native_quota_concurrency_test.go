@@ -36,7 +36,7 @@ func TestNativeQuotaResetQueuesNewUsageAndRPMUntilCommit(t *testing.T) {
 				defer store.persistMu.Unlock()
 				result <- resetNativeQuotaAccounts([]string{account}, usage, limiter, func(proposed map[string]*UsageState) error {
 					persistCalls++
-					if proposed[account] != nil || proposed["other"] == nil {
+					if proposed[account] == nil || proposed[account].Weekly.CallCount != 0 || proposed[account].WeeklyResetAnchor == nil || proposed["other"] == nil {
 						return errors.New("invalid proposed snapshot")
 					}
 					// This callback runs with both locks held. Live state must still
