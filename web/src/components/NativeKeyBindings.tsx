@@ -207,7 +207,8 @@ function BoundCredentialPanel({ binding, catalog, loading, failed }: {
           <ul className="native-binding-credentials" aria-label={t("mapping.native.boundCredentials")} tabIndex={0}>
             {ids.map((id) => {
               const credential = byID.get(id);
-              const identity = credential?.email || credential?.label || credential?.name || id;
+              const identity = credential?.email || (credential?.source === "ai_provider"
+                ? credential.name || credential.label : credential?.label || credential?.name) || id;
               const plan = credential?.provider === "codex" && credential.plan
                 ? CODEX_PLAN_LABELS.get(credential.plan.trim().toLowerCase()) : undefined;
               return (
@@ -673,12 +674,13 @@ function NativeKeyBindingEditor({
     setCredentialError("");
     try {
       setCredentialOptions(await fetchNativeCredentialOptions());
-    } catch (e: unknown) {
-      setCredentialError(messageFromError(e));
+    } catch {
+      // Management failures may contain configuration values; never echo them.
+      setCredentialError(t("mapping.native.credentialLoadFailed"));
     } finally {
       setCredentialsLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (restrictionMode === "auth_ids") void loadCredentialOptions();
@@ -749,8 +751,9 @@ function NativeKeyBindingEditor({
     return [
       { source: "auth_file" as const, options: authFiles },
       { source: "ai_provider" as const, options: aiProviders },
-    ].filter((group) => group.options.length > 0);
-  }, [visibleCredentialOptions]);
+    ].filter((group) => group.options.length > 0 || (group.source === "ai_provider"
+      && !credentialQuery.trim() && !credentialsLoading && !credentialError));
+  }, [visibleCredentialOptions, credentialQuery, credentialsLoading, credentialError]);
   const selectableVisibleCredentialOptions = useMemo(
     () => visibleCredentialOptions.filter((option) => option.identityVerified !== false),
     [visibleCredentialOptions],
@@ -1041,7 +1044,7 @@ function NativeKeyBindingEditor({
                     </div>
                     {group.options.map((option) => {
                       const displayName = option.source === "ai_provider"
-                        ? option.name || option.label || option.id
+                        ? (option.name && option.name !== option.id ? option.name : option.label) || option.name || option.id
                         : option.label || option.email || option.name || option.id;
                       const normalizedStatus = (option.status ?? "").trim().toLowerCase().replace(/[ -]/g, "_");
                       const identityUnverified = option.identityVerified === false;
@@ -1092,6 +1095,9 @@ function NativeKeyBindingEditor({
                         </label>
                       );
                     })}
+                    {group.source === "ai_provider" && group.options.length === 0 && (
+                      <div className="muted native-credential-empty">{t("mapping.native.noAIProviderCredentials")}</div>
+                    )}
                   </div>
                 ))}
                 {credentialsLoading && credentialOptions.length === 0 && staleAuthIDs.length === 0 && (

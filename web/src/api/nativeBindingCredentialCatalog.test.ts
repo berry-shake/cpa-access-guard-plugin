@@ -116,6 +116,50 @@ describe("native binding credential catalog identities", () => {
     });
   });
 
+  it("keeps configured runtime identities in the AI group without overwriting live provider or availability", async () => {
+    const id = "runtime:codex:authoritative";
+    givenFiles([{
+      ...authFile(id), concurrency_config: true, runtime_only: true,
+      status: "rate-limited", disabled: true, unavailable: true, weight: 4, auth_index: "runtime-index",
+      account_id: "sentinel-account", access_token: "sentinel-access",
+      "api-key": "sentinel-runtime-key", "base-url": "https://sentinel-runtime.invalid",
+    }]);
+    mocks.fetchAIProviderCredentials.mockResolvedValue([{
+      id, provider: "config-provider", name: "Configured Codex", label: "Config label",
+      source: "ai_provider", status: "configured", disabled: false, unavailable: false,
+      authIndex: "safe-index", identityVerified: false,
+      account_id: "sentinel-config-account", "api-key": "sentinel-config-key",
+      "base-url": "https://sentinel-config.invalid",
+    }]);
+
+    const catalog = await fetchNativeBindingCredentialCatalog([]);
+    expect(catalog.identitiesComplete).toBe(true);
+    expect(catalog.credentials).toHaveLength(1);
+    expect(catalog.credentials[0]).toMatchObject({
+      id, provider: "codex", source: "ai_provider", status: "rate-limited",
+      disabled: true, unavailable: true, authIndex: "runtime-index",
+    });
+    expect(catalog.credentials[0].identityVerified).not.toBe(false);
+    expect(previewDescriptors()).toEqual([{ id, provider: "codex", attributes: { plan_type: "team", weight: "4" } }]);
+    expect(JSON.stringify(catalog)).not.toContain("sentinel-");
+    expect(JSON.stringify(previewDescriptors())).not.toContain("sentinel-");
+  });
+
+  it("distinguishes configured new providers from runtime-only OAuth without config metadata", async () => {
+    givenFiles([
+      { id: "new-provider-runtime", provider: "new-provider", concurrency_config: true, runtime_only: true, name: "New runtime" },
+      { ...authFile("oauth-runtime"), runtime_only: true },
+    ]);
+    const catalog = await fetchNativeBindingCredentialCatalog([]);
+    expect(catalog.identitiesComplete).toBe(true);
+    expect(catalog.credentials.find(({ id }) => id === "new-provider-runtime")).toMatchObject({
+      provider: "new-provider", source: "ai_provider", name: "New runtime",
+    });
+    expect(catalog.credentials.find(({ id }) => id === "oauth-runtime")).toMatchObject({ source: "auth_file" });
+    expect(mocks.fetchAIProviderCredentials).toHaveBeenCalledWith(mocks, false);
+    expect(mocks.get.mock.calls.some(([url]) => url === "/v0/management/auth-files/models")).toBe(false);
+  });
+
   it("does not invent Auth IDs from filenames, emails, array positions, or malformed IDs", async () => {
     givenFiles([
       { name: "display-only.json", email: "missing@example.com", provider: "codex" },
@@ -133,6 +177,15 @@ describe("native binding credential catalog identities", () => {
     expect(catalog.groups).toEqual({});
   });
 
+  it("retains valid identity rows but marks the inventory incomplete when a null row is present", async () => {
+    givenFiles([authFile("valid-runtime"), null]);
+    const catalog = await fetchNativeBindingCredentialCatalog([]);
+    expect(catalog.credentials.map(({ id }) => id)).toEqual(["valid-runtime"]);
+    expect(catalog.identitiesComplete).toBe(false);
+    expect(catalog.groupsAvailable).toBe(false);
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+
   it("projects safe display fields and only runtime-supported classification attributes", async () => {
     givenFiles([
       {
@@ -148,6 +201,7 @@ describe("native binding credential catalog identities", () => {
         access_token: "sentinel-access-secret",
         refresh_token: "sentinel-refresh-secret",
         "api-key": "sentinel-api-secret",
+        account: "sentinel-account-field",
         account_id: "sentinel-account-secret",
         arbitrary: "sentinel-arbitrary-secret",
         note: "sentinel-note-secret",

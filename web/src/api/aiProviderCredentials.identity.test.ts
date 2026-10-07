@@ -88,23 +88,62 @@ describe("AI provider identity-only inventory", () => {
     expect(result).toHaveLength(missingPath.endsWith("/codex-api-key") ? 0 : 1);
   });
 
-  it.each([429, 500, 502])("rejects HTTP %i instead of reporting an incomplete identity inventory", async (status) => {
+  it.each([429, 500, 502])("rejects HTTP %i in both modes instead of reporting a missing provider", async (status) => {
     const failure = failureWithStatus(status);
     const get = vi.fn((url: string) => url.endsWith("/claude-api-key")
       ? Promise.reject(failure)
       : Promise.resolve(credentialResponse(url, "incomplete")));
 
-    await expect(fetchAIProviderCredentials(clientWith(get), false)).rejects.toBe(failure);
-    expect(get).toHaveBeenCalledTimes(7);
+    const client = clientWith(get);
+    await expect(fetchAIProviderCredentials(client, false)).rejects.toBe(failure);
+    await expect(fetchAIProviderCredentials(client, true)).rejects.toBe(failure);
+    expect(get).toHaveBeenCalledTimes(14);
   });
 
-  it("rejects transport failures in identity-only mode", async () => {
+  it("rejects transport failures in both inventory modes", async () => {
     const failure = new Error("connection reset");
     const get = vi.fn((url: string) => url.endsWith("/xai-api-key")
       ? Promise.reject(failure)
       : Promise.resolve(credentialResponse(url, "offline")));
 
-    await expect(fetchAIProviderCredentials(clientWith(get), false)).rejects.toBe(failure);
+    const client = clientWith(get);
+    await expect(fetchAIProviderCredentials(client, false)).rejects.toBe(failure);
+    await expect(fetchAIProviderCredentials(client, true)).rejects.toBe(failure);
+  });
+
+  it.each([
+    { label: "missing root", data: {} },
+    { label: "null response", data: null },
+    { label: "object root", data: { "codex-api-key": {} } },
+    { label: "string root", data: { "codex-api-key": "invalid" } },
+    { label: "numeric root", data: { "codex-api-key": 42 } },
+    { label: "malformed credential entry", data: { "codex-api-key": [null] } },
+  ])("rejects HTTP 200 with a $label in both modes", async ({ data }) => {
+    const get = vi.fn((url: string) => Promise.resolve(url.endsWith("/codex-api-key")
+      ? { data }
+      : credentialResponse(url, "malformed")));
+    const client = clientWith(get);
+    await expect(fetchAIProviderCredentials(client, false)).rejects.toThrow();
+    await expect(fetchAIProviderCredentials(client, true)).rejects.toThrow();
+    expect(get.mock.calls.some(([url]) => url === modelsPath)).toBe(false);
+  });
+
+  it("accepts a null provider array as an explicitly empty configuration in both modes", async () => {
+    const get = vi.fn((url: string) => Promise.resolve({ data: { [url.slice("/v0/management/".length)]: null } }));
+    const client = clientWith(get);
+    await expect(fetchAIProviderCredentials(client, false)).resolves.toEqual([]);
+    await expect(fetchAIProviderCredentials(client, true)).resolves.toEqual([]);
+    expect(get).toHaveBeenCalledTimes(14);
+  });
+
+  it.each([{}, [null]])("rejects malformed compatibility key entries instead of inventing a keyless provider (%j)", async (entries) => {
+    const get = vi.fn((url: string) => Promise.resolve(url.endsWith("/openai-compatibility")
+      ? { data: { "openai-compatibility": [{ name: "compat", "base-url": "https://sentinel-base.invalid", "api-key-entries": entries }] } }
+      : credentialResponse(url, "compatibility")));
+    const client = clientWith(get);
+    await expect(fetchAIProviderCredentials(client, false)).rejects.toThrow();
+    await expect(fetchAIProviderCredentials(client, true)).rejects.toThrow();
+    expect(get.mock.calls.some(([url]) => url === modelsPath)).toBe(false);
   });
 
   it.each([401, 403])("preserves HTTP %i authentication failures in both modes", async (status) => {

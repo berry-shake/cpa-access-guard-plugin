@@ -137,6 +137,13 @@ function authFileRows(payload: unknown): Record<string, unknown>[] | null {
     row !== null && typeof row === "object" && !Array.isArray(row));
 }
 
+function authFileInventoryShapeValid(payload: unknown, rows: Record<string, unknown>[] | null): rows is Record<string, unknown>[] {
+  if (rows === null) return false;
+  const root = payload as Record<string, unknown>;
+  const raw = root["files"] ?? root["auth-files"];
+  return Array.isArray(raw) && raw.length === rows.length;
+}
+
 function authFileDescriptor(entry: Record<string, unknown>, allowNameFallback: boolean): CredentialDescriptor | undefined {
   const id = optionalString(entry["id"]) ?? (allowNameFallback ? optionalString(entry["name"]) : undefined);
   if (!id) return undefined;
@@ -169,8 +176,49 @@ function authFileIdentity(entry: Record<string, unknown>): NativeCredentialOptio
     plan: plan || undefined,
     disabled: entry["disabled"] === true,
     unavailable: entry["unavailable"] === true,
-    source: "auth_file",
+    // Runtime-only OAuth/virtual credentials are not config providers.
+    source: entry["concurrency_config"] === true ? "ai_provider" : "auth_file",
+    authIndex: optionalString(entry["auth_index"]),
   };
+}
+
+// A runtime identity is authoritative. Config metadata may improve its display
+// name, but may never replace its ID, provider, status, or runtime model list.
+// Older hosts omit config identities from /auth-files and still need the
+// existing derived-ID fallback. Both native-key views use this same merge.
+function mergeNativeCredentialSources(
+  runtime: Map<string, NativeCredentialOption>,
+  configured: NativeCredentialOption[],
+  includeModels = false,
+): Map<string, NativeCredentialOption> {
+  const merged = new Map(runtime);
+  for (const credential of configured) {
+    const id = optionalString(credential.id);
+    if (!id) continue;
+    const current = merged.get(id);
+    if (current) {
+      if (current.source === "ai_provider" && current.provider === credential.provider) {
+        merged.set(id, {
+          ...current,
+          name: optionalString(credential.name) ?? current.name,
+          authIndex: current.authIndex ?? optionalString(credential.authIndex),
+        });
+      }
+      continue;
+    }
+    merged.set(id, {
+      id, provider: (optionalString(credential.provider) ?? "").toLowerCase(),
+      email: optionalString(credential.email), label: optionalString(credential.label),
+      name: optionalString(credential.name), status: optionalString(credential.status),
+      disabled: credential.disabled === true, unavailable: credential.unavailable === true,
+      source: "ai_provider", authIndex: optionalString(credential.authIndex),
+      ...(includeModels ? {
+        models: credential.models, identityVerified: credential.identityVerified,
+        configIndex: credential.configIndex,
+      } : {}),
+    });
+  }
+  return merged;
 }
 
 // fetchCredentialDescriptors pulls the auth-file list from CPA and builds
@@ -215,8 +263,10 @@ export async function fetchNativeCredentialOptions(): Promise<NativeCredentialOp
     c.get<unknown>("/v0/management/auth-files"),
     fetchAIProviderCredentials(c),
   ]);
+  const rows = authFileRows(data);
+  if (!authFileInventoryShapeValid(data, rows)) throw new Error("credential_inventory_unavailable");
   const byID = new Map<string, NativeCredentialOption>();
-  for (const entry of authFileRows(data) ?? []) {
+  for (const entry of rows) {
     const identity = authFileIdentity(entry);
     if (identity && !byID.has(identity.id)) byID.set(identity.id, identity);
   }
@@ -240,12 +290,8 @@ export async function fetchNativeCredentialOptions(): Promise<NativeCredentialOp
     }
   }));
 
-  for (const credential of aiProviderCredentials) {
-    if (!credential.id || byID.has(credential.id)) continue;
-    byID.set(credential.id, credential);
-  }
-
-  return Array.from(byID.values()).sort((a, b) => {
+  const merged = mergeNativeCredentialSources(byID, aiProviderCredentials, true);
+  return Array.from(merged.values()).sort((a, b) => {
     const sourceA = a.source === "ai_provider" ? 1 : 0;
     const sourceB = b.source === "ai_provider" ? 1 : 0;
     if (sourceA !== sourceB) return sourceA - sourceB;
@@ -364,34 +410,23 @@ export async function fetchNativeBindingCredentialCatalog(
     descriptors.set(identity.id, descriptor);
   }
   const missingFields = new Set<string>();
-  if (aiResult.status === "fulfilled") {
-    for (const credential of aiResult.value) {
-      const id = optionalString(credential.id);
-      if (!id || byID.has(id)) continue;
-      const provider = (optionalString(credential.provider) ?? "").toLowerCase();
-      byID.set(id, {
-        id, provider,
-        email: optionalString(credential.email),
-        label: optionalString(credential.label),
-        name: optionalString(credential.name),
-        status: optionalString(credential.status),
-        disabled: credential.disabled === true,
-        unavailable: credential.unavailable === true,
-        source: "ai_provider",
-      });
+  const merged = mergeNativeCredentialSources(byID, aiResult.status === "fulfilled" ? aiResult.value : []);
+  for (const credential of merged.values()) {
+    if (!descriptors.has(credential.id)) {
       // Configured API providers expose exact derived IDs and provider names,
       // but their safe weight attribute is not part of this identity adapter.
       // Do not treat that unknown value as a proven non-match for weight rules.
-      descriptors.set(id, { id, provider, attributes: {} });
+      descriptors.set(credential.id, { id: credential.id, provider: credential.provider, attributes: {} });
       missingFields.add("weight");
     }
   }
-  const credentials = Array.from(byID.values()).sort((left, right) => {
+  const credentials = Array.from(merged.values()).sort((left, right) => {
     const a = left.email ?? left.label ?? left.name ?? left.id;
     const b = right.email ?? right.label ?? right.name ?? right.id;
     return a.localeCompare(b) || left.id.localeCompare(right.id);
   });
-  const identitiesComplete = rows !== null && aiResult.status === "fulfilled"
+  const identitiesComplete = authResult.status === "fulfilled"
+    && authFileInventoryShapeValid(authResult.value.data, rows) && aiResult.status === "fulfilled"
     && rows.every((row) => optionalString(row["id"]) !== undefined);
   const unavailable: NativeBindingCredentialCatalog = {
     credentials, identitiesComplete, groups: {}, unavailableGroups: [], groupsAvailable: false,

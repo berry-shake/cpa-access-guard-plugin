@@ -34,7 +34,12 @@ const binding = {
 };
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
+  mocks.get.mockImplementation((url: string) => {
+    if (url === "/v0/management/auth-files/models") return Promise.reject(new Error("No model fixture"));
+    const root = url.slice("/v0/management/".length);
+    return Promise.resolve({ data: { [root]: [] } });
+  });
 });
 
 describe("native key binding API", () => {
@@ -91,6 +96,92 @@ describe("native key binding API", () => {
       },
     ]);
     expect(mocks.get).toHaveBeenCalledWith("/v0/management/auth-files");
+  });
+
+  it.each([
+    { label: "invalid root", data: { files: "not-an-array" } },
+    { label: "invalid row", data: { files: [{ id: "valid-runtime", provider: "codex" }, null] } },
+  ])("rejects an auth-file inventory with an $label instead of returning an empty or partial editor list", async ({ data }) => {
+    mocks.get.mockResolvedValueOnce({ data });
+    await expect(fetchNativeCredentialOptions()).rejects.toThrow();
+  });
+
+  it.each([true, false])("keeps the authoritative configured runtime identity and state with model discovery success=%s", async (modelsAvailable) => {
+    const runtimeID = "codex:apikey:36f5c62aaa48";
+    mocks.get.mockImplementation((url: string, options?: { params?: { name?: string } }) => {
+      if (url === "/v0/management/auth-files") return Promise.resolve({ data: { files: [{
+        id: runtimeID, provider: "codex", name: "Runtime Codex", concurrency_config: true, runtime_only: true,
+        status: "cooldown", disabled: true, unavailable: true,
+        account: "sentinel-account-field", account_id: "sentinel-account-secret", access_token: "sentinel-token-secret",
+        "api-key": "sentinel-runtime-secret", "base-url": "https://sentinel-runtime.invalid",
+      }] } });
+      if (url === "/v0/management/codex-api-key") return Promise.resolve({ data: { "codex-api-key": [{
+        "api-key": "demo-key", "base-url": "http://127.0.0.1:9/v1", "auth-index": "safe-config-index",
+        models: [{ alias: "config-only-model" }],
+      }] } });
+      if (url === "/v0/management/auth-files/models") {
+        expect(options?.params?.name).toBe(runtimeID);
+        if (!modelsAvailable) return Promise.reject(new Error("Runtime models temporarily unavailable"));
+        return Promise.resolve({ data: { models: [{ id: "runtime-spark" }] } });
+      }
+      const root = url.slice("/v0/management/".length);
+      return Promise.resolve({ data: { [root]: [] } });
+    });
+
+    const result = await fetchNativeCredentialOptions();
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      id: runtimeID, provider: "codex", source: "ai_provider", status: "cooldown",
+      disabled: true, unavailable: true, authIndex: "safe-config-index",
+    });
+    if (modelsAvailable) expect(result[0].models).toEqual(["runtime-spark"]);
+    else expect(result[0].models ?? []).not.toContain("config-only-model");
+    expect(result[0].identityVerified).not.toBe(false);
+    expect(JSON.stringify(result)).not.toMatch(/sentinel-|demo-key|127\.0\.0\.1|config-only-model/);
+  });
+
+  it("keeps an exact configured runtime ID selectable when models fail and no known config endpoint supplies it", async () => {
+    const runtimeID = "new-provider:runtime:exact-id";
+    mocks.get.mockImplementation((url: string) => {
+      if (url === "/v0/management/auth-files") return Promise.resolve({ data: { files: [{
+        id: runtimeID, provider: "new-provider", name: "New provider", concurrency_config: true,
+        runtime_only: true, status: "active", disabled: false, unavailable: false,
+      }] } });
+      if (url === "/v0/management/auth-files/models") return Promise.reject(new Error("Model catalog unavailable"));
+      const root = url.slice("/v0/management/".length);
+      return Promise.resolve({ data: { [root]: [] } });
+    });
+
+    const result = await fetchNativeCredentialOptions();
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ id: runtimeID, provider: "new-provider", source: "ai_provider", status: "active" });
+    expect(result[0].identityVerified).not.toBe(false);
+    expect(mocks.get).toHaveBeenCalledWith("/v0/management/auth-files/models", { params: { name: runtimeID } });
+  });
+
+  it("does not classify runtime-only OAuth credentials as AI-provider configuration", async () => {
+    mocks.get.mockResolvedValueOnce({ data: { files: [{
+      id: "oauth-runtime-id", provider: "codex", runtime_only: true, concurrency_config: false,
+      email: "oauth@example.test", status: "active",
+    }] } });
+    const result = await fetchNativeCredentialOptions();
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ id: "oauth-runtime-id", source: "auth_file", email: "oauth@example.test" });
+  });
+
+  it("retains config-derived IDs and failed verification for older hosts without configured runtime rows", async () => {
+    mocks.get.mockImplementation((url: string) => {
+      if (url === "/v0/management/auth-files") return Promise.resolve({ data: { files: [] } });
+      if (url === "/v0/management/codex-api-key") return Promise.resolve({ data: { "codex-api-key": [{
+        "api-key": "demo-key", "base-url": "http://127.0.0.1:9/v1", models: [{ alias: "legacy-spark" }],
+      }] } });
+      if (url === "/v0/management/auth-files/models") return Promise.reject(new Error("Unknown runtime ID"));
+      const root = url.slice("/v0/management/".length);
+      return Promise.resolve({ data: { [root]: [] } });
+    });
+    await expect(fetchNativeCredentialOptions()).resolves.toMatchObject([{
+      id: "codex:apikey:36f5c62aaa48", source: "ai_provider", models: ["legacy-spark"], identityVerified: false,
+    }]);
   });
 
   it("lists normalized top-level keys through CPA Management", async () => {

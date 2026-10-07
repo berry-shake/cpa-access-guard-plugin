@@ -116,8 +116,23 @@ describe("AI provider credential adapter", () => {
       "openai-compatible-demo",
     ]);
     expect(result[4].id).toBe(result[3].id + "-1");
+    expect(result.filter((entry) => entry.provider === "codex").every((entry) => entry.identityVerified === false)).toBe(true);
     expect(result.find((entry) => entry.provider === "openai-compatible-demo")?.models).toEqual(["compat"]);
     expect(JSON.stringify(result)).not.toMatch(/\"api-key\"|compat\.invalid|\"same\"/);
+  });
+
+  it("keeps an empty runtime model response unverified even when configured aliases exist", async () => {
+    const get = vi.fn((url: string) => {
+      if (url === "/v0/management/codex-api-key") return Promise.resolve({ data: { "codex-api-key": [{
+        "api-key": "demo-key", "base-url": "http://127.0.0.1:9/v1", models: [{ alias: "fallback-spark" }],
+      }] } });
+      if (url === "/v0/management/auth-files/models") return Promise.resolve({ data: { models: [] } });
+      return Promise.resolve({ data: { [url.slice("/v0/management/".length)]: [] } });
+    });
+    const result = await fetchAIProviderCredentials(clientWith(get));
+    expect(result).toMatchObject([{
+      id: "codex:apikey:36f5c62aaa48", models: ["fallback-spark"], identityVerified: false,
+    }]);
   });
 
   it("propagates management authentication failures", async () => {

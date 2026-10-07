@@ -250,18 +250,26 @@ function isAuthFailure(reason: unknown): boolean {
   return status === 401 || status === 403;
 }
 
-async function optionalGet(client: AxiosInstance, path: string, requireComplete = false): Promise<unknown> {
+async function optionalGet(client: AxiosInstance, path: string, root: string): Promise<unknown> {
+  let payload: unknown;
   try {
     const { data } = await client.get(path);
-    return data;
+    payload = data;
   } catch (reason) {
-    if (isAuthFailure(reason)) throw reason;
     const status = (reason as { response?: { status?: number } } | null)?.response?.status;
-    // Identity-only group previews need a complete inventory. Unsupported
-    // endpoints are absent providers; transient failures are not empty lists.
-    if (requireComplete && status !== 404) throw reason;
-    return undefined;
+    // Unsupported endpoints are absent providers. A failed inventory must not
+    // look like an empty provider list in either the editor or the card catalog.
+    if (status === 404) return undefined;
+    throw reason;
   }
+  const object = asObject(payload);
+  const entries = object[root];
+  if (!Object.prototype.hasOwnProperty.call(object, root)
+    || (entries !== null && (!Array.isArray(entries)
+      || entries.some((entry) => !entry || typeof entry !== "object" || Array.isArray(entry))))) {
+    throw new Error("ai_provider_inventory_unavailable");
+  }
+  return payload;
 }
 
 async function addChannelCredentials(
@@ -315,7 +323,12 @@ async function addOpenAICompatibleCredentials(
     const baseURL = text(compat["base-url"]);
     const prefix = text(compat["prefix"]);
     const fallbackModels = fallbackModelIDs(compat, prefix);
-    const keyEntries = asArray(compat["api-key-entries"]);
+    const rawKeyEntries = compat["api-key-entries"];
+    if (rawKeyEntries != null && (!Array.isArray(rawKeyEntries)
+      || rawKeyEntries.some((entry) => !entry || typeof entry !== "object" || Array.isArray(entry)))) {
+      throw new Error("ai_provider_inventory_unavailable");
+    }
+    const keyEntries = asArray(rawKeyEntries);
     if (keyEntries.length === 0) {
       out.push({
         id: await generator.next(idKind, [baseURL]),
@@ -382,9 +395,8 @@ async function populateRuntimeModels(client: AxiosInstance, credentials: Pending
 }
 
 async function loadAIProviderCredentials(client: AxiosInstance, includeModels: boolean): Promise<NativeCredentialOption[]> {
-  const paths = CHANNELS.map((spec) => "/v0/management/" + spec.endpoint);
-  paths.push("/v0/management/openai-compatibility");
-  const payloads = await Promise.all(paths.map((path) => optionalGet(client, path, !includeModels)));
+  const sources = [...CHANNELS, { endpoint: "openai-compatibility", root: "openai-compatibility" }];
+  const payloads = await Promise.all(sources.map((spec) => optionalGet(client, "/v0/management/" + spec.endpoint, spec.root)));
   const generator = new RuntimeIDGenerator();
   const pending: PendingCredential[] = [];
   for (let index = 0; index < CHANNELS.length; index++) {

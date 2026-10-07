@@ -75,6 +75,15 @@ async function renderQuotaBinding(binding: NativeKeyBinding) {
   });
 }
 
+async function openDirectBindingEditor(binding: NativeKeyBinding = existing) {
+  await renderQuotaBinding(binding);
+  const edit = Array.from(container.querySelectorAll<HTMLButtonElement>(".native-binding-card button"))
+    .find((button) => button.textContent?.includes("编辑 / 轮换"))!;
+  await act(async () => { edit.click(); await tick(); });
+  const direct = container.querySelector<HTMLInputElement>('input[name="native-restriction-mode"][value="auth_ids"]')!;
+  if (!direct.checked) await act(async () => { direct.click(); await tick(); });
+}
+
 function weeklyMeter() {
   return container.querySelector('[role="meter"][aria-label="周额度剩余"]');
 }
@@ -1199,8 +1208,8 @@ describe("NativeKeyBindingsTab", () => {
       container.querySelectorAll<HTMLInputElement>(".native-credential-option input[type=checkbox]"),
     );
     expect(credentialCheckboxes).toHaveLength(2);
-    expect(container.textContent).toContain("Auth 目录凭证");
-    expect(container.textContent).toContain("AI 提供商凭证");
+    expect(container.textContent).toContain("认证文件");
+    expect(container.textContent).toContain("AI 提供商供应");
     expect(container.textContent).toContain("2 个模型");
     const selectAll = Array.from(container.querySelectorAll("button"))
       .find((button) => button.textContent?.includes("全选当前结果"));
@@ -1228,6 +1237,93 @@ describe("NativeKeyBindingsTab", () => {
     }));
     const payload = apiMocks.createNativeKeyBinding.mock.calls[0][0];
     expect(payload).not.toHaveProperty("group");
+  });
+
+  it("groups configured runtime credentials as AI providers and saves their exact live ID", async () => {
+    const runtimeID = "codex:runtime:new-cpa-authoritative-id";
+    apiMocks.fetchNativeCredentialOptions.mockResolvedValue([
+      { id: "oauth-runtime", provider: "codex", email: "oauth@example.test", source: "auth_file" },
+      {
+        id: runtimeID, provider: "codex", name: "Runtime Codex", source: "ai_provider",
+        status: "active", models: ["runtime-spark"], identityVerified: true, authIndex: "safe-index-12345678",
+        account_id: "sentinel-account", "api-key": "sentinel-api-key", "base-url": "https://sentinel-base.invalid",
+      },
+    ]);
+    const storageWrites = vi.spyOn(Storage.prototype, "setItem");
+    await openDirectBindingEditor();
+    const groups = Array.from(container.querySelectorAll(".native-credential-source-group"));
+    const aiGroup = groups.find((group) => group.querySelector(".native-credential-source-head")?.textContent?.includes("AI 提供商供应"))!;
+    const authGroup = groups.find((group) => group.querySelector(".native-credential-source-head")?.textContent?.includes("认证文件"))!;
+    expect(aiGroup.textContent).toContain(runtimeID);
+    expect(aiGroup.textContent).toContain("Runtime Codex");
+    expect(authGroup.textContent).toContain("oauth-runtime");
+    expect(authGroup.textContent).not.toContain(runtimeID);
+    await act(async () => { aiGroup.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click(); });
+    await act(async () => {
+      container.querySelector<HTMLFormElement>(".native-binding-editor form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await tick();
+    });
+    expect(apiMocks.updateNativeKeyBinding).toHaveBeenCalledWith(expect.objectContaining({ auth_ids: [runtimeID] }));
+    expect(container.innerHTML).not.toContain("sentinel-");
+    expect(JSON.stringify(storageWrites.mock.calls)).not.toContain("sentinel-");
+    expect(container.innerHTML).not.toContain(existingSecret);
+  });
+
+  it("prevents selecting a legacy config-derived ID that runtime model discovery could not verify", async () => {
+    apiMocks.fetchNativeCredentialOptions.mockResolvedValue([{
+      id: "codex:apikey:unverified", provider: "codex", name: "Unverified Codex", source: "ai_provider",
+      models: ["fallback-spark"], identityVerified: false,
+    }]);
+    await openDirectBindingEditor();
+    const credential = container.querySelector<HTMLInputElement>(".native-credential-option input")!;
+    expect(credential.disabled).toBe(true);
+    const selectAll = container.querySelector<HTMLButtonElement>(".native-credential-actions button")!;
+    expect(selectAll.disabled).toBe(true);
+    await act(async () => { credential.click(); selectAll.click(); });
+    expect(container.textContent).toContain("已选择 0 个凭证");
+    expect(container.querySelector<HTMLButtonElement>('.map-form-foot button[type="submit"]')!.disabled).toBe(true);
+    expect(apiMocks.updateNativeKeyBinding).not.toHaveBeenCalled();
+  });
+
+  it("explains an empty AI-provider group only after a successful unfiltered inventory", async () => {
+    apiMocks.fetchNativeCredentialOptions.mockResolvedValue([{
+      id: "oauth-only", provider: "codex", email: "oauth@example.test", source: "auth_file",
+    }]);
+    await openDirectBindingEditor();
+    expect(container.textContent).toContain("尚未配置 AI 提供商供应。请先在 CPA 的“AI 提供商”中添加，保存后刷新凭据列表。");
+    await act(async () => {
+      change(container.querySelector<HTMLInputElement>("#native-credential-search")!, "no-match");
+      await tick();
+    });
+    expect(container.textContent).not.toContain("尚未配置 AI 提供商供应");
+  });
+
+  it("does not claim AI providers are absent while their inventory is loading", async () => {
+    let finish!: (rows: unknown[]) => void;
+    apiMocks.fetchNativeCredentialOptions.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    await openDirectBindingEditor();
+    expect(container.textContent).not.toContain("尚未配置 AI 提供商供应");
+    await act(async () => { finish([]); await tick(); });
+    expect(container.textContent).toContain("尚未配置 AI 提供商供应");
+  });
+
+  it("preserves saved runtime bindings when the identity sources fail instead of reporting no configured supply", async () => {
+    const runtimeID = "codex:runtime:stored-live-id";
+    apiMocks.fetchNativeBindingCredentialCatalog.mockRejectedValue(new Error("Identity sources unavailable"));
+    apiMocks.fetchNativeCredentialOptions.mockRejectedValue(new Error(`Credential inventory failed ${existingSecret}`));
+    await openDirectBindingEditor({ ...existing, group: undefined, auth_ids: [runtimeID], round_robin: true });
+    expect(container.querySelector(".native-binding-editor")?.textContent).toContain("凭据列表加载失败");
+    expect(container.innerHTML).not.toContain(existingSecret);
+    expect(container.textContent).not.toContain("Credential inventory failed");
+    expect(container.textContent).not.toContain("尚未配置 AI 提供商供应");
+    const stored = container.querySelector<HTMLInputElement>(".native-credential-option input")!;
+    expect(stored.checked).toBe(true);
+    await act(async () => {
+      container.querySelector<HTMLFormElement>(".native-binding-editor form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await tick();
+    });
+    expect(apiMocks.updateNativeKeyBinding).toHaveBeenCalledWith(expect.objectContaining({ auth_ids: [runtimeID], round_robin: true }));
+    expect(apiMocks.deleteNativeKeyBinding).not.toHaveBeenCalled();
   });
 
   it("preserves selected Auth IDs that are no longer returned by the host", async () => {
@@ -1303,7 +1399,7 @@ describe("NativeKeyBindingsTab", () => {
       await tick();
     });
 
-    expect(container.textContent).toContain("AI 提供商凭证");
+    expect(container.textContent).toContain("AI 提供商供应");
     expect(container.textContent).toContain("tenant/missing.json");
     expect(container.textContent).toContain("retired-model");
 

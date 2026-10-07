@@ -61,6 +61,8 @@ describe("translate", () => {
         "mapping.native.credentialHint",
         "mapping.native.authFileCredentials",
         "mapping.native.aiProviderCredentials",
+        "mapping.native.noAIProviderCredentials",
+        "mapping.native.credentialLoadFailed",
         "mapping.native.selectAllCredentials",
         "mapping.native.requestRouting",
         "mapping.native.roundRobin",
