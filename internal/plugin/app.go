@@ -140,6 +140,7 @@ func (a *App) registration() Registration {
 			},
 		},
 		Capabilities: Capabilities{
+			SchedulerAcrossPriorities:     true,
 			FrontendAuthProvider:          true,
 			FrontendAuthProviderExclusive: false,
 			ModelRouter:                   true,

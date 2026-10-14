@@ -101,6 +101,8 @@ type ConfigField struct {
 }
 
 type Capabilities struct {
+	// Receiving all available tiers lets authorization run before priority.
+	SchedulerAcrossPriorities     bool `json:"scheduler_across_priorities,omitempty"`
 	FrontendAuthProvider          bool `json:"frontend_auth_provider"`
 	FrontendAuthProviderExclusive bool `json:"frontend_auth_provider_exclusive,omitempty"`
 	ModelRouter                   bool `json:"model_router"`
