@@ -7,8 +7,9 @@
 // src/utils/encryption.ts). Because the panel and this plugin resource are
 // same-origin (both served by CPA), they share the SAME localStorage and the
 // SAME obfuscation key, so we can decode the panel's stored blob here and
-// skip a second login. Legacy v1 includes host + userAgent; CPAMP v2 uses
-// host only, with its own versioned salt.
+// skip a second login. Legacy v1 includes host + userAgent. Both panels now
+// write "enc::v2::" with a host-only key, but CPAMP adds a "|v2|" segment that
+// the official panel omits, so v2 payloads are tried with both keys.
 //
 // SECURITY: This only reads the panel's already-persisted key; it never writes
 // the key to storage itself. The plugin's own "key in memory only" rule stands.
@@ -27,6 +28,7 @@ export interface PanelAuth {
 
 let cachedKeyBytes: Uint8Array | null = null;
 let cachedV2KeyBytes: Uint8Array | null = null;
+let cachedOfficialV2KeyBytes: Uint8Array | null = null;
 
 function encodeText(text: string): Uint8Array {
   return new TextEncoder().encode(text);
@@ -58,10 +60,22 @@ function getV2KeyBytes(): Uint8Array {
   return cachedV2KeyBytes;
 }
 
+// Matches the official CPA panel v2: `${SECRET_SALT}|${host}`, also UA-free.
+function getOfficialV2KeyBytes(): Uint8Array {
+  if (cachedOfficialV2KeyBytes) return cachedOfficialV2KeyBytes;
+  try {
+    cachedOfficialV2KeyBytes = encodeText(`${SECRET_SALT}|${window.location.host}`);
+  } catch {
+    cachedOfficialV2KeyBytes = encodeText(SECRET_SALT);
+  }
+  return cachedOfficialV2KeyBytes;
+}
+
 // Exposed for tests: clear the cached key so a changed host/userAgent is used.
 export function _resetKeyCache(): void {
   cachedKeyBytes = null;
   cachedV2KeyBytes = null;
+  cachedOfficialV2KeyBytes = null;
 }
 
 function xorBytes(data: Uint8Array, keyBytes: Uint8Array): Uint8Array {
@@ -95,19 +109,25 @@ export function obfuscateData(value: string): string {
   }
 }
 
-// Decode both panel formats without migrating or rewriting the saved value.
-export function deobfuscateData(payload: string): string {
-  if (!payload) return payload;
+// Every plausible plaintext of a saved value, without migrating or rewriting
+// it. v2 yields one candidate per panel because the prefix alone cannot tell
+// CPAMP and the official panel apart; callers keep the one that parses.
+function deobfuscateCandidates(payload: string): string[] {
+  if (!payload) return [payload];
   const version = payload.startsWith(ENC_PREFIX_V2) ? 2 : payload.startsWith(ENC_PREFIX_V1) ? 1 : 0;
-  if (!version) return payload;
+  if (!version) return [payload];
   try {
     const prefix = version === 2 ? ENC_PREFIX_V2 : ENC_PREFIX_V1;
-    const keyBytes = version === 2 ? getV2KeyBytes() : getKeyBytes();
+    const keys = version === 2 ? [getV2KeyBytes(), getOfficialV2KeyBytes()] : [getKeyBytes()];
     const encrypted = fromBase64(payload.slice(prefix.length));
-    return decodeText(xorBytes(encrypted, keyBytes));
+    return keys.map((keyBytes) => decodeText(xorBytes(encrypted, keyBytes)));
   } catch {
-    return payload;
+    return [payload];
   }
+}
+
+export function deobfuscateData(payload: string): string {
+  return deobfuscateCandidates(payload)[0];
 }
 
 // True when this page is running inside an iframe (the panel embeds us here).
@@ -147,15 +167,13 @@ export function readPanelAuth(): PanelAuth | null {
     return null;
   }
   if (!raw) return null;
-  let decoded: string;
-  try {
-    decoded = deobfuscateData(raw);
-  } catch {
-    return null;
+  for (const decoded of deobfuscateCandidates(raw)) {
+    try {
+      const auth = extractAuth(JSON.parse(decoded));
+      if (auth) return auth;
+    } catch {
+      // Wrong panel key for this payload; try the next candidate.
+    }
   }
-  try {
-    return extractAuth(JSON.parse(decoded));
-  } catch {
-    return null;
-  }
+  return null;
 }

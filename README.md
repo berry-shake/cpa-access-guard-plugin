@@ -12,6 +12,8 @@ In plain words: you issue your own `cpa_…` keys to clients. Each key only sees
 | **Lineage** | Derived from [origin652/cpa-plugin-key-policy](https://github.com/origin652/cpa-plugin-key-policy) under the MIT license |
 | **中文说明** | [README.zh-CN.md](./README.zh-CN.md) |
 
+**v0.4.4-fork.23:** fixes the plugin page asking for the management password on every refresh after the official CPA panel switched to `enc::v2::` storage. The official panel and CPAMP share the `enc::v2::` prefix but use different obfuscation keys; the plugin now recognizes both, and legacy v1 remains supported. The official panel discards old-format logins when it upgrades, so if the password is still requested, log in to the panel once more with **Remember password** enabled.
+
 **v0.4.4-fork.22:** fixes `503 no auth available` when an unrelated higher-priority credential hides a bound supply before plugin selection. On compatible CPA hosts, Access Guard requests available candidates across priority tiers, applies credential restrictions first, and then chooses the highest priority within the allowed pool. Ordinary unbound keys retain CPA scheduling and session affinity.
 
 **v0.4.4-fork.21:** correctly separates configured AI-provider supplies from authentication files on newer CPA versions. Native-key pickers and cards display recognizable names such as Codex #1 / #2 while preserving runtime IDs, models, and status. Empty configuration and failed loading are distinguished, and saved bindings survive refresh failures. Existing provider routing, OAuth isolation, billing, and quota timing are unchanged.
@@ -336,7 +338,7 @@ Embedded in the plugin. After load, open:
 http://<your-cpa-host>:<api-port>/v0/resource/plugins/access-guard/index.html
 ```
 
-Login with the CPA **management** secret (`remote-management.secret-key` / management password). A manual login stays in memory only. When embedded in a same-origin CPA or CPAMP panel with **Remember password** enabled, the plugin can restore the panel's saved login after re-entry or refresh; both legacy `enc::v1::` and CPAMP `enc::v2::` storage are supported. It only reads that existing value and never persists or migrates credentials itself. CPAMP's saved administrator key is used through its configured management proxy.
+Login with the CPA **management** secret (`remote-management.secret-key` / management password). A manual login stays in memory only. When embedded in a same-origin CPA or CPAMP panel with **Remember password** enabled, the plugin can restore the panel's saved login after re-entry or refresh; legacy `enc::v1::` and both the official panel's and CPAMP's `enc::v2::` storage are supported. It only reads that existing value and never persists or migrates credentials itself. CPAMP's saved administrator key is used through its configured management proxy.
 
 UI areas:
 

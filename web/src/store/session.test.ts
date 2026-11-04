@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { _resetKeyCache } from "./panelAuth";
 import { cpampAuth, cpampV2Auth, cpampV2WithoutKey } from "./__fixtures__/cpampAuth";
+import { officialAuth, officialV2Auth } from "./__fixtures__/officialPanelAuth";
 import {
   setSession,
   clearSession,
@@ -96,6 +97,17 @@ describe("CPAMP saved-session bootstrap", () => {
     });
     expect(getSession()).toEqual({ baseUrl: cpampAuth.apiBase, secretKey: cpampAuth.managementKey });
     expect(setItem).not.toHaveBeenCalled();
+  });
+
+  it("verifies the remembered official panel key through its saved API base", async () => {
+    localStorage.setItem("cli-proxy-auth", officialV2Auth);
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ enabled: true })));
+    vi.stubGlobal("fetch", fetch);
+    expect(await bootstrapFromPanel()).toBe(true);
+    expect(fetch).toHaveBeenCalledWith(officialAuth.apiBase + "/v0/management/plugins/access-guard/status", {
+      headers: { Authorization: "Bearer " + officialAuth.managementKey },
+    });
+    expect(getSession()).toEqual({ baseUrl: officialAuth.apiBase, secretKey: officialAuth.managementKey });
   });
 
   it("keeps authentication false while the remembered key is being verified", async () => {
