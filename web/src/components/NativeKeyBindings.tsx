@@ -6,6 +6,8 @@ import WeeklyQuotaRemaining from "./WeeklyQuotaRemaining";
 import NativeBindingBatch from "./NativeBindingBatch";
 import NativeQuotaReset from "./NativeQuotaReset";
 import { copyTextToClipboard } from "../clipboard";
+import { createNativeKeyNotesClient, currentNativeKeyNotes, nativeKeyNote } from "../api/nativeKeyNotes";
+import { getSession } from "../store/session";
 import {
   createNativeKeyBinding,
   deleteNativeKeyBinding,
@@ -108,9 +110,8 @@ type EditorState =
       mode: "create";
       selectedKey?: SelectedTopLevelKey;
       initialID?: string;
-      initialName?: string;
     }
-  | { mode: "edit"; binding: NativeKeyBinding };
+  | { mode: "edit"; binding: NativeKeyBinding; currentKey?: string };
 
 function suggestedBindingID(index: number, rows: NativeKeyRow[]): string {
   const ids = new Set(rows.flatMap((row) => row.binding ? [row.binding.id.toLowerCase()] : []));
@@ -247,47 +248,76 @@ export default function NativeKeyBindingsTab() {
   const [credentialCatalog, setCredentialCatalog] = useState<NativeBindingCredentialCatalog | null>(null);
   const [credentialCatalogLoading, setCredentialCatalogLoading] = useState(true);
   const [credentialCatalogFailed, setCredentialCatalogFailed] = useState(false);
+  const [keyNotes, setKeyNotes] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const [nameSyncFailed, setNameSyncFailed] = useState(false);
   const loadVersion = useRef(0);
 
   const load = useCallback(async () => {
     const version = ++loadVersion.current;
+    const session = getSession();
+    const isCurrent = () => version === loadVersion.current && getSession() === session;
     setLoading(true);
     setError("");
+    setKeyNotes(new Map());
+    setNameSyncFailed(false);
     setCredentialCatalog(null);
     setCredentialCatalogLoading(true);
     setCredentialCatalogFailed(false);
     try {
+      const notesClient = createNativeKeyNotesClient();
+      const pendingNotes = notesClient.read();
       const [apiKeys, nextRules] = await Promise.all([
         fetchTopLevelAPIKeys(),
         fetchClassifyRules().catch(() => null),
       ]);
-      if (version !== loadVersion.current) return;
+      if (!isCurrent()) return;
       const catalog = await fetchNativeKeyBindingCatalog(apiKeys);
-      if (version !== loadVersion.current) return;
+      if (!isCurrent()) return;
       const nextRows = buildNativeKeyRows(apiKeys, catalog);
       setRows(nextRows);
       setRules(nextRules ?? []);
+      void pendingNotes.then(async (notes) => {
+        if (!isCurrent()) return;
+        const currentNotes = currentNativeKeyNotes(notes, apiKeys);
+        setKeyNotes(currentNotes);
+        const updates = nextRows.flatMap(({ apiKey, binding }) => {
+          if (!apiKey || !binding) return [];
+          const name = nativeKeyNote(currentNotes, apiKey);
+          return name && name !== binding.name
+            ? [{ id: binding.id, key: apiKey, expected_name: binding.name, name }]
+            : [];
+        });
+        if (!updates.length) return;
+        const result = await notesClient.sync(updates);
+        if (!isCurrent()) return;
+        const refreshed = await fetchNativeKeyBindingCatalog(apiKeys);
+        if (!isCurrent()) return;
+        setRows(buildNativeKeyRows(apiKeys, refreshed));
+        setNameSyncFailed(result.skipped_ids.length > 0);
+      }).catch(() => {
+        if (isCurrent()) setNameSyncFailed(true);
+      });
       if (nextRows.some((row) => row.binding)) {
         // Identity metadata is independent of key management. A failed lookup
         // must not block copying keys or editing their existing restrictions.
         void fetchNativeBindingCredentialCatalog(nextRules).then((nextCatalog) => {
-          if (version === loadVersion.current) setCredentialCatalog(nextCatalog);
+          if (isCurrent()) setCredentialCatalog(nextCatalog);
         }).catch(() => {
-          if (version === loadVersion.current) setCredentialCatalogFailed(true);
+          if (isCurrent()) setCredentialCatalogFailed(true);
         }).finally(() => {
-          if (version === loadVersion.current) setCredentialCatalogLoading(false);
+          if (isCurrent()) setCredentialCatalogLoading(false);
         });
       } else {
         setCredentialCatalogLoading(false);
       }
     } catch (e: unknown) {
-      if (version === loadVersion.current) {
+      if (isCurrent()) {
         setError(messageFromError(e));
         setCredentialCatalogLoading(false);
         setCredentialCatalogFailed(true);
       }
     } finally {
-      if (version === loadVersion.current) setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, []);
 
@@ -347,14 +377,15 @@ export default function NativeKeyBindingsTab() {
 
   const bindTopLevelKey = (row: NativeKeyRow) => {
     if (!row.present || !row.apiKey || row.topLevelIndex === undefined || row.binding) return;
-    const ordinal = row.topLevelIndex + 1;
     setEditor({
       mode: "create",
       selectedKey: { apiKey: row.apiKey, keyPreview: row.keyPreview },
       initialID: suggestedBindingID(row.topLevelIndex, rows),
-      initialName: t("mapping.native.defaultName", { index: ordinal }),
     });
   };
+  const currentEditorBinding = editor?.mode === "edit"
+    ? rows.find((row) => row.binding?.id === editor.binding.id && row.apiKey === editor.currentKey)?.binding
+    : undefined;
 
   return (
     <>
@@ -402,6 +433,7 @@ export default function NativeKeyBindingsTab() {
       </div>
 
       {error && <div className="error" role="alert">{error}</div>}
+      {nameSyncFailed && <div className="error" role="alert">{t("mapping.native.nameSyncFailed")}</div>}
       {loading ? (
         <div className="muted native-binding-empty">{t("keys.loading")}</div>
       ) : rows.length === 0 && error ? (
@@ -424,6 +456,8 @@ export default function NativeKeyBindingsTab() {
                   ? "enabled"
                   : "disabled";
             const ordinal = (row.topLevelIndex ?? 0) + 1;
+            const note = nativeKeyNote(keyNotes, row.apiKey);
+            const displayName = note || binding?.name || (!binding ? t("mapping.native.topLevelKeyName", { index: ordinal }) : "");
             return (
               <article
                 className={`native-binding-card ${status}`}
@@ -432,9 +466,7 @@ export default function NativeKeyBindingsTab() {
               >
                 <div className="native-binding-card-head">
                   <div className="native-binding-identity">
-                    <strong>
-                      {binding?.name || binding?.id || t("mapping.native.topLevelKeyName", { index: ordinal })}
-                    </strong>
+                    {displayName && <strong>{displayName}</strong>}
                     <span className="mono">
                       {binding?.id || t("mapping.native.topLevelPosition", { index: ordinal })}
                     </span>
@@ -553,7 +585,7 @@ export default function NativeKeyBindingsTab() {
                         className="btn sm"
                         type="button"
                         disabled={pending}
-                        onClick={() => setEditor({ mode: "edit", binding })}
+                        onClick={() => setEditor({ mode: "edit", binding, currentKey: row.apiKey })}
                       >
                         {t("mapping.native.editRotate")}
                       </button>
@@ -593,9 +625,11 @@ export default function NativeKeyBindingsTab() {
         <NativeKeyBindingEditor
           key={editor.mode === "edit" ? editor.binding.id : editor.initialID || "__new"}
           binding={editor.mode === "edit" ? editor.binding : undefined}
+          currentKey={editor.mode === "edit" ? editor.currentKey : undefined}
+          persistedName={currentEditorBinding?.name}
+          keyNotes={keyNotes}
           selectedKey={editor.mode === "create" ? editor.selectedKey : undefined}
           initialID={editor.mode === "create" ? editor.initialID : undefined}
-          initialName={editor.mode === "create" ? editor.initialName : undefined}
           groupOptions={groupOptions}
           onCancel={() => setEditor(null)}
           onSaved={async () => {
@@ -610,9 +644,11 @@ export default function NativeKeyBindingsTab() {
 
 interface EditorProps {
   binding?: NativeKeyBinding;
+  currentKey?: string;
+  persistedName?: string;
+  keyNotes: ReadonlyMap<string, string>;
   selectedKey?: SelectedTopLevelKey;
   initialID?: string;
-  initialName?: string;
   groupOptions: string[];
   onCancel: () => void;
   onSaved: () => Promise<void>;
@@ -620,9 +656,11 @@ interface EditorProps {
 
 function NativeKeyBindingEditor({
   binding,
+  currentKey,
+  persistedName,
+  keyNotes,
   selectedKey,
   initialID,
-  initialName,
   groupOptions,
   onCancel,
   onSaved,
@@ -630,7 +668,7 @@ function NativeKeyBindingEditor({
   const t = useT();
   const editing = !!binding;
   const [id, setID] = useState(binding?.id ?? initialID ?? "");
-  const [name, setName] = useState(binding?.name ?? initialName ?? "");
+  const [nameDraft, setNameDraft] = useState<string>();
   const [enabled, setEnabled] = useState(binding?.enabled ?? true);
   const [roundRobin, setRoundRobin] = useState(binding?.round_robin ?? false);
   const [plainKey, setPlainKey] = useState("");
@@ -775,6 +813,9 @@ function NativeKeyBindingEditor({
   };
   const clearCredentials = () => setSelectedAuthIDs(new Set());
   const createKey = selectedKey?.apiKey ?? plainKey;
+  const replacementKey = plainKey.trim();
+  const nameNote = nativeKeyNote(keyNotes, editing ? replacementKey || currentKey : createKey);
+  const name = nameNote ?? nameDraft ?? persistedName ?? binding?.name ?? "";
   const restrictionValid = restrictionMode === "group" ? group.trim() !== "" : authIDs.length > 0;
   const canSave = limitsValid && id.trim() !== "" && restrictionValid && (editing || createKey.trim() !== "");
 
@@ -792,9 +833,11 @@ function NativeKeyBindingEditor({
         ? { group: group.trim() }
         : { auth_ids: authIDs };
       if (binding) {
+        let nameUpdate = nameDraft?.trim();
+        if (nameNote) nameUpdate = replacementKey && replacementKey !== currentKey ? nameNote : undefined;
         const input = {
           id: binding.id,
-          name: name.trim(),
+          ...(nameUpdate !== undefined ? { name: nameUpdate } : {}),
           enabled,
           round_robin: roundRobin,
           ...restriction,
@@ -802,7 +845,7 @@ function NativeKeyBindingEditor({
           rpm: limitField(rpmValue),
           daily_usd: limitField(dailyValue),
           weekly_usd: limitField(weeklyValue),
-          ...(plainKey.trim() ? { key: plainKey.trim() } : {}),
+          ...(replacementKey ? { key: replacementKey } : {}),
         };
         await updateNativeKeyBinding(input);
       } else {
@@ -860,11 +903,15 @@ function NativeKeyBindingEditor({
             <input
               id="native-binding-name"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => setNameDraft(e.target.value)}
               disabled={saving}
+              readOnly={nameNote !== undefined}
+              aria-describedby={nameNote ? "native-binding-name-source" : undefined}
               autoComplete="off"
-              placeholder={id || "Client A"}
             />
+            {nameNote && (
+              <p id="native-binding-name-source" className="native-binding-field-hint">{t("mapping.native.nameFromCPA")}</p>
+            )}
           </div>
           {selectedKey && !editing ? (
             <div className="map-form-row">

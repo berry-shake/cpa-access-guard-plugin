@@ -28,6 +28,7 @@ export default defineConfig({
     proxy: {
       // Proxy management API calls to CPA during development to avoid CORS.
       "/v0/management": { target: cpaBase, changeOrigin: true },
+      "/v8/management": { target: cpaBase, changeOrigin: true },
       "/v1/models": { target: cpaBase, changeOrigin: true },
     },
   },

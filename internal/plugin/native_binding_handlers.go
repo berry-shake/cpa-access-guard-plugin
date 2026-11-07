@@ -154,9 +154,9 @@ func (a *App) createNativeKeyBinding(body []byte) ManagementResponse {
 	if group != "" && hasAuthIDs {
 		return jsonError(http.StatusBadRequest, "conflicting_restriction", "group and auth_ids are mutually exclusive")
 	}
-	name := req.ID
-	if req.Name != nil && strings.TrimSpace(*req.Name) != "" {
-		name = strings.TrimSpace(*req.Name)
+	name := ""
+	if req.Name != nil {
+		name = *req.Name
 	}
 	binding, err := a.store.CreateNativeKeyBinding(policy.CreateNativeKeyBindingInput{
 		ID:          req.ID,

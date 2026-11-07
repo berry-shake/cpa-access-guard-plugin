@@ -54,7 +54,7 @@ native_key_bindings:
 		t.Fatalf("bindings = %+v", cfg.NativeKeyBindings)
 	}
 	a := cfg.NativeKeyBindings[0]
-	if a.ID != "client-a" || a.Name != "client-a" || a.CallerScope != strings.ToLower(scopeA) || a.Group != "classify:vip" {
+	if a.ID != "client-a" || a.Name != "" || a.CallerScope != strings.ToLower(scopeA) || a.Group != "classify:vip" {
 		t.Fatalf("first binding not normalized: %+v", a)
 	}
 	b := cfg.NativeKeyBindings[1]

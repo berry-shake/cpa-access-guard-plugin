@@ -409,7 +409,7 @@ func (s *Store) planNativeBindingBatch(snapshot nativeBindingBatchSnapshot, inpu
 				plan.conflict(id, "binding_identity_changed")
 				continue
 			}
-			candidate = NativeKeyBinding{ID: id, Name: "Native key " + NativeKeyPreview(input.APIKeys[index]), Enabled: true, CallerScope: scope, KeyPreview: NativeKeyPreview(input.APIKeys[index]), ModelAccess: NativeModelAccessPolicy{Mode: NativeModelAccessAll}}
+			candidate = NativeKeyBinding{ID: id, Enabled: true, CallerScope: scope, KeyPreview: NativeKeyPreview(input.APIKeys[index]), ModelAccess: NativeModelAccessPolicy{Mode: NativeModelAccessAll}}
 		}
 		candidate.Group, candidate.AuthIDs = "", append([]string(nil), target...)
 		normalized := []NativeKeyBinding{candidate}

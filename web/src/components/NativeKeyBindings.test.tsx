@@ -1,8 +1,10 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ClassifyRule, NativeBindingUsageSummary, NativeKeyBinding } from "../types";
+import type { ClassifyRule, NativeBindingUsageSummary, NativeKeyBinding, NativeKeyBindingCatalog } from "../types";
 import { _resetLocale } from "../i18n";
+import { sha256Hex } from "../sha256";
+import { clearSession, setSession } from "../store/session";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -18,9 +20,14 @@ const apiMocks = vi.hoisted(() => ({
   resetNativeKeyBindingQuota: vi.fn(),
 }));
 const modelMocks = vi.hoisted(() => ({ fetchCatalog: vi.fn() }));
+const noteMocks = vi.hoisted(() => ({ read: vi.fn(), sync: vi.fn() }));
 const quotaResetClient = vi.hoisted(() => ({ loadBindings: vi.fn(), reset: vi.fn() }));
 
 vi.mock("../api/mappings", () => apiMocks);
+vi.mock("../api/nativeKeyNotes", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../api/nativeKeyNotes")>(),
+  createNativeKeyNotesClient: () => noteMocks,
+}));
 vi.mock("../api/models", () => modelMocks);
 vi.mock("../api/nativeQuotaReset", () => ({ createNativeQuotaResetClient: () => quotaResetClient }));
 
@@ -59,7 +66,7 @@ const weeklyUsage: NativeBindingUsageSummary = {
   weekly_calls: 3932,
 };
 
-function quotaCatalog(binding: NativeKeyBinding) {
+function quotaCatalog(binding: NativeKeyBinding): NativeKeyBindingCatalog {
   return {
     entries: [{ key_index: 0, key_preview: binding.key_preview, binding }],
     orphan_bindings: [],
@@ -68,6 +75,10 @@ function quotaCatalog(binding: NativeKeyBinding) {
 
 async function renderQuotaBinding(binding: NativeKeyBinding) {
   apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValue(quotaCatalog(binding));
+  await renderQuotaBindingWithCatalog();
+}
+
+async function renderQuotaBindingWithCatalog() {
   await act(async () => {
     root = createRoot(container);
     root.render(<NativeKeyBindingsTab />);
@@ -104,6 +115,8 @@ function changeSelect(select: HTMLSelectElement, value: string) {
 
 beforeEach(() => {
   _resetLocale("zh-CN");
+  noteMocks.read.mockResolvedValue(new Map());
+  noteMocks.sync.mockResolvedValue({ skipped_ids: [] });
   vi.spyOn(window, "confirm").mockReturnValue(true);
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -166,6 +179,172 @@ describe("buildNativeBindingGroupOptions", () => {
       { name: "c", field: "filename", pattern: "c", group: "off", enabled: false },
     ]);
     expect(options).toEqual(["free", "team", "plus", "supported", "classify:vip"]);
+  });
+});
+
+describe("CPA notes on native key bindings", () => {
+  const openEdit = async () => {
+    const edit = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent === "编辑 / 轮换")!;
+    await act(async () => { edit.click(); });
+    return container.querySelector<HTMLInputElement>("#native-binding-name")!;
+  };
+
+  const submitEditor = () => act(async () => {
+    container.querySelector(".native-binding-editor form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await tick();
+  });
+
+  it("synchronizes only changed current bindings once, even when previews match", async () => {
+    const otherKey = "test-another-distinct-native-secret";
+    const unboundKey = "test-unbound-native-secret";
+    const orphan = { ...existing, id: "client-orphan", name: "Orphan local" };
+    const first = { ...existing, name: "CPA phone" };
+    const other = { ...existing, id: "client-other", name: "CPA work" };
+    const updated = {
+      entries: [
+        { key_index: 1, key_preview: existing.key_preview, binding: first },
+        { key_index: 0, key_preview: existing.key_preview, binding: other },
+        { key_index: 2, key_preview: existing.key_preview },
+      ],
+      orphan_bindings: [orphan],
+    };
+    const original = {
+      ...updated,
+      entries: [
+        { ...updated.entries[0], binding: existing },
+        { ...updated.entries[1], binding: { ...other, name: "Old work name" } },
+        updated.entries[2],
+      ],
+    };
+    apiMocks.fetchTopLevelAPIKeys.mockResolvedValue([otherKey, existingSecret, unboundKey]);
+    apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValueOnce(original).mockResolvedValue(updated);
+    noteMocks.read.mockResolvedValue(new Map([
+      [sha256Hex(existingSecret), "CPA phone"],
+      [sha256Hex(otherKey), "CPA work"],
+      [sha256Hex(unboundKey), "CPA unbound"],
+      [sha256Hex("test-orphan-secret"), "Ignored orphan note"],
+    ]));
+    await renderQuotaBindingWithCatalog();
+    expect(noteMocks.sync).toHaveBeenCalledTimes(1);
+    expect(noteMocks.sync).toHaveBeenCalledWith([
+      { id: other.id, key: otherKey, expected_name: "Old work name", name: "CPA work" },
+      { id: existing.id, key: existingSecret, expected_name: existing.name, name: "CPA phone" },
+    ]);
+    expect(apiMocks.fetchNativeKeyBindingCatalog).toHaveBeenCalledTimes(2);
+    expect(Array.from(container.querySelectorAll(".native-binding-identity strong"), (el) => el.textContent))
+      .toEqual(["CPA work", "CPA phone", "CPA unbound", "Orphan local"]);
+    expect(container.innerHTML).not.toContain(existingSecret);
+    expect(container.innerHTML).not.toContain(sha256Hex(existingSecret));
+  });
+
+  it("shows the persisted name as editable when its host note disappears", async () => {
+    const persisted = { ...existing, name: "Last synced" };
+    noteMocks.read.mockResolvedValueOnce(new Map([[sha256Hex(existingSecret), persisted.name]]));
+    await renderQuotaBinding(persisted);
+    const refresh = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent === "刷新")!;
+    await act(async () => { refresh.click(); await tick(); });
+    const name = await openEdit();
+    expect(name.value).toBe("Last synced");
+    expect(name.readOnly).toBe(false);
+    expect(noteMocks.sync).not.toHaveBeenCalled();
+    await act(async () => { change(name, ""); });
+    await submitEditor();
+    expect(apiMocks.updateNativeKeyBinding).toHaveBeenCalledWith(expect.objectContaining({ name: "" }));
+  });
+
+  it("shows the note read-only, omits it on an unrelated save and uses the replacement key's note", async () => {
+    const replacement = "test-new-native-secret";
+    const current = { ...existing, name: "CPA original" };
+    const inventory = quotaCatalog(current);
+    inventory.entries.push({ key_index: 1, key_preview: "redacted" });
+    apiMocks.fetchTopLevelAPIKeys.mockResolvedValue([existingSecret, replacement]);
+    apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValue(inventory);
+    noteMocks.read.mockResolvedValue(new Map([
+      [sha256Hex(existingSecret), current.name],
+      [sha256Hex(replacement), "CPA replacement"],
+    ]));
+    await renderQuotaBindingWithCatalog();
+
+    let name = await openEdit();
+    expect(name.value).toBe("CPA original");
+    expect(name.readOnly).toBe(true);
+    expect(container.querySelector("#native-binding-name-source")?.textContent).toContain("CPA");
+    await submitEditor();
+    expect(apiMocks.updateNativeKeyBinding.mock.lastCall?.[0]).not.toHaveProperty("name");
+
+    name = await openEdit();
+    const keyField = container.querySelector<HTMLInputElement>("#native-binding-key")!;
+    await act(async () => { change(keyField, "test-unknown-native-secret"); });
+    expect(name.value).toBe(current.name);
+    expect(name.readOnly).toBe(false);
+    await act(async () => { change(keyField, replacement); });
+    expect(name.value).toBe("CPA replacement");
+    expect(name.readOnly).toBe(true);
+    await submitEditor();
+    expect(apiMocks.updateNativeKeyBinding).toHaveBeenLastCalledWith(expect.objectContaining({
+      key: replacement, name: "CPA replacement",
+    }));
+  });
+
+  it("uses the selected key's note when creating its first binding", async () => {
+    apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValue({
+      entries: [{ key_index: 0, key_preview: existing.key_preview }],
+      orphan_bindings: [],
+    });
+    noteMocks.read.mockResolvedValue(new Map([[sha256Hex(existingSecret), "CPA first"]]));
+    await renderQuotaBindingWithCatalog();
+    const bind = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent === "配置绑定")!;
+    await act(async () => { bind.click(); });
+    const name = container.querySelector<HTMLInputElement>("#native-binding-name")!;
+    expect(name.value).toBe("CPA first");
+    expect(name.readOnly).toBe(true);
+    await act(async () => {
+      changeSelect(container.querySelector<HTMLSelectElement>("#native-binding-group")!, "team");
+    });
+    await submitEditor();
+    expect(apiMocks.createNativeKeyBinding).toHaveBeenCalledWith(expect.objectContaining({
+      key: existingSecret, name: "CPA first",
+    }));
+    expect(noteMocks.sync).not.toHaveBeenCalled();
+  });
+
+  it("does not refresh the catalog after a sync resolves in an obsolete session", async () => {
+    let finishSync!: (result: { skipped_ids: string[] }) => void;
+    noteMocks.sync.mockReturnValueOnce(new Promise((resolve) => { finishSync = resolve; }));
+    noteMocks.read.mockResolvedValue(new Map([[sha256Hex(existingSecret), "CPA phone"]]));
+    setSession("http://old.fixture.invalid", "test-old-manager");
+    try {
+      await renderQuotaBindingWithCatalog();
+      expect(noteMocks.sync).toHaveBeenCalledTimes(1);
+      setSession("http://new.fixture.invalid", "test-new-manager");
+      await act(async () => { finishSync({ skipped_ids: [] }); await tick(); });
+      expect(apiMocks.fetchNativeKeyBindingCatalog).toHaveBeenCalledTimes(1);
+    } finally {
+      clearSession();
+    }
+  });
+
+  it("ignores the older note request after refresh and keeps a failed sync actionable", async () => {
+    let finishOld!: (notes: Map<string, string>) => void;
+    noteMocks.read.mockReturnValueOnce(new Promise((resolve) => { finishOld = resolve; }));
+    noteMocks.read.mockResolvedValueOnce(new Map([[sha256Hex(existingSecret), "Newest CPA note"]]));
+    noteMocks.sync.mockRejectedValueOnce(new Error("synthetic save failure"));
+    await renderQuotaBindingWithCatalog();
+    const refresh = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent === "刷新")!;
+    await act(async () => { refresh.click(); await tick(); });
+    await act(async () => {
+      finishOld(new Map([[sha256Hex(existingSecret), "Obsolete CPA note"]]));
+      await tick();
+    });
+    expect(noteMocks.sync).toHaveBeenCalledTimes(1);
+    expect(container.querySelector(".native-binding-identity strong")?.textContent).toBe("Newest CPA note");
+    expect(container.textContent).toContain("部分 CPA Key 备注未能同步保存");
+    expect((await openEdit()).readOnly).toBe(true);
   });
 });
 
@@ -798,7 +977,6 @@ describe("NativeKeyBindingsTab", () => {
 
     expect(apiMocks.updateNativeKeyBinding).toHaveBeenCalledWith({
       id: "client-a",
-      name: "Client A",
       enabled: true,
       round_robin: false,
       group: "team",
@@ -917,7 +1095,6 @@ describe("NativeKeyBindingsTab", () => {
     });
     expect(apiMocks.updateNativeKeyBinding).toHaveBeenCalledWith({
       id: "client-a",
-      name: "Client A",
       enabled: false,
       round_robin: false,
       group: "team",
@@ -1047,7 +1224,7 @@ describe("NativeKeyBindingsTab", () => {
 
     expect(apiMocks.createNativeKeyBinding).toHaveBeenCalledWith({
       id: "client-manual",
-      name: "顶层 API Key 2",
+      name: undefined,
       enabled: true,
       round_robin: false,
       key: "sk-client-manual-secret",
@@ -1109,7 +1286,7 @@ describe("NativeKeyBindingsTab", () => {
     await act(async () => { bindButton!.click(); });
 
     expect((container.querySelector("#native-binding-id") as HTMLInputElement).value).toBe("native-key-1");
-    expect((container.querySelector("#native-binding-name") as HTMLInputElement).value).toBe("顶层 API Key 1");
+    expect((container.querySelector("#native-binding-name") as HTMLInputElement).value).toBe("");
     expect(container.textContent).toContain(preview);
     expect(container.querySelector("#native-binding-key")).toBeNull();
     expect(container.innerHTML).not.toContain(secret);
@@ -1128,7 +1305,7 @@ describe("NativeKeyBindingsTab", () => {
 
     expect(apiMocks.createNativeKeyBinding).toHaveBeenCalledWith({
       id: "native-key-1",
-      name: "顶层 API Key 1",
+      name: undefined,
       enabled: true,
       round_robin: false,
       key: secret,
@@ -1411,7 +1588,6 @@ describe("NativeKeyBindingsTab", () => {
 
     expect(apiMocks.updateNativeKeyBinding).toHaveBeenCalledWith({
       id: "client-a",
-      name: "Client A",
       enabled: true,
       round_robin: false,
       auth_ids: ["tenant/codex-a.json", "tenant/missing.json"],
@@ -1502,7 +1678,6 @@ describe("NativeKeyBindingsTab", () => {
 
     expect(apiMocks.updateNativeKeyBinding).toHaveBeenCalledWith({
       id: "client-a",
-      name: "Client A",
       enabled: true,
       round_robin: false,
       group: "classify:legacy-customer",

@@ -170,9 +170,6 @@ func normalizeNativeKeyBindings(bindings []NativeKeyBinding) error {
 			return fmt.Errorf("duplicate native key binding id %q", binding.ID)
 		}
 		ids[binding.ID] = struct{}{}
-		if binding.Name == "" {
-			binding.Name = binding.ID
-		}
 		if err := validateNativeCallerScope(binding.CallerScope); err != nil {
 			return fmt.Errorf("native key binding %q: %w", binding.ID, err)
 		}

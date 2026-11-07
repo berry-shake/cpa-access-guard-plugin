@@ -12,6 +12,8 @@ In plain words: you issue your own `cpa_…` keys to clients. Each key only sees
 | **Lineage** | Derived from [origin652/cpa-plugin-key-policy](https://github.com/origin652/cpa-plugin-key-policy) under the MIT license |
 | **中文说明** | [README.zh-CN.md](./README.zh-CN.md) |
 
+**v0.4.4-fork.24** syncs server-side native API key notes from compatible CPA forks. Open or refresh the Native Keys page to use CPA notes as display names and save them over existing binding names. When a key has no CPA note, its saved name remains editable and new bindings can start blank. Stock CPA continues to support manual names.
+
 **v0.4.4-fork.23:** fixes the plugin page asking for the management password on every refresh after the official CPA panel switched to `enc::v2::` storage. The official panel and CPAMP share the `enc::v2::` prefix but use different obfuscation keys; the plugin now recognizes both, and legacy v1 remains supported. The official panel discards old-format logins when it upgrades, so if the password is still requested, log in to the panel once more with **Remember password** enabled.
 
 **v0.4.4-fork.22:** fixes `503 no auth available` when an unrelated higher-priority credential hides a bound supply before plugin selection. On compatible CPA hosts, Access Guard requests available candidates across priority tiers, applies credential restrictions first, and then chooses the highest priority within the allowed pool. Ordinary unbound keys retain CPA scheduling and session affinity.
