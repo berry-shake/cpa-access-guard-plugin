@@ -90,6 +90,7 @@ function AliasListTab() {
 function AliasCard({ alias, onDelete, onEdit }: { alias: AliasMapping; onDelete: (n: string) => void; onEdit: (n: string) => void }) {
   const t = useT();
   const [refCount] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState(false);
   // refCount would come from a separate API call or be included in the list response.
   // For now, show "unreferenced" as placeholder.
   return (
@@ -100,29 +101,37 @@ function AliasCard({ alias, onDelete, onEdit }: { alias: AliasMapping; onDelete:
           {alias.dispatch === "priority" ? t("mapping.alias.priority") : t("mapping.alias.roundRobin")}
         </span>
       </div>
-      <div className="alias-targets">
-        {alias.targets.slice(0, 3).map((tgt, i) => (
-          <div key={i} className="alias-target-row">
-            <span>{tgt.provider} · {tgt.target_model}</span>
-            {tgt.group && <span className="alias-target-group">{tgt.group}</span>}
-          </div>
-        ))}
-        {alias.targets.length > 3 && (
-          <div className="alias-target-row" style={{ opacity: 0.6 }}>
-            {t("mapping.moreTargets", { n: alias.targets.length - 3 })}
-          </div>
-        )}
-      </div>
       <div className="alias-pricing">
         {alias.billing_mode === "per_call" ? (
           <>{t("mapping.alias.perCallUnit")} ${alias.per_call_usd ?? 0}/{t("mapping.alias.perCallUnit")}</>
         ) : (
-          <>{t("mapping.alias.input")} ${alias.input_price_per_million ?? 0} / {t("mapping.alias.output")} ${alias.output_price_per_million ?? 0} / {t("mapping.alias.cache")} ${alias.cache_read_price_per_million ?? 0} {t("mapping.alias.perMillion")}</>
+          <>{t("mapping.alias.input")} ${alias.input_price_per_million ?? 0} / {t("mapping.alias.output")} ${alias.output_price_per_million ?? 0} / {t("mapping.alias.cacheRead")} ${alias.cache_read_price_per_million ?? 0} / {t("mapping.alias.cacheWrite")} ${alias.cache_write_price_per_million ?? 0} {t("mapping.alias.perMillion")}</>
         )}
       </div>
       <div className={"alias-refs" + (refCount === 0 ? " zero" : "")}>
         {refCount && refCount > 0 ? t("mapping.refs", { n: refCount }) : t("mapping.unreferenced")}
       </div>
+      {/* Targets live behind a toggle (like the classify rule card) so cards
+        * with many targets don't stretch the grid row. */}
+      <button
+        type="button"
+        className="rule-match-badge"
+        onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
+      >
+        {t("mapping.targetCount", { n: alias.targets.length })}
+        <span className="rule-match-caret" aria-hidden="true">{expanded ? "▴" : "▾"}</span>
+      </button>
+      {expanded && (
+        <div className="alias-targets">
+          {alias.targets.map((tgt, i) => (
+            <div key={i} className="alias-target-row">
+              <span>{tgt.provider} · {tgt.target_model}</span>
+              {tgt.group && <span className="alias-target-group">{tgt.group}</span>}
+            </div>
+          ))}
+        </div>
+      )}
       <div className="alias-actions">
         <button className="btn sm" onClick={() => onEdit(alias.alias)}>{t("mapping.edit")}</button>
         <button
@@ -218,6 +227,7 @@ function ClassifyTab() {
         <div className="native-binding-notice-icon" aria-hidden="true">ⓘ</div>
         <div>
           <strong>{t("mapping.rule.previewNoticeTitle")}</strong>
+          <p>{t("mapping.rule.builtinDesc")}</p>
           <p>{t("mapping.rule.previewNotice")}</p>
         </div>
       </div>
@@ -236,26 +246,11 @@ function ClassifyTab() {
         <div className="muted" style={{ padding: 20 }}>Loading...</div>
       ) : (
         <div className="rule-list">
-          {/* Built-in rules (read-only) */}
-          <div className="rule-builtin-card">
-            <h3>{t("mapping.rule.builtin")} ({t("mapping.rule.builtinReadOnly")})</h3>
-            <div className="rule-builtin-row">
-              <span className="info-icon">ⓘ</span>
-              plan_type → {`<detected>`}
-            </div>
-            <div className="rule-builtin-row">
-              <span className="info-icon">ⓘ</span>
-              tier → {`<detected>`}
-            </div>
-            <div className="rule-builtin-desc">{t("mapping.rule.builtinDesc")}</div>
-          </div>
-
-          {/* Custom rules */}
-          <div className="section-label" style={{ marginTop: 16 }}>{t("mapping.rule.custom")}</div>
           {rules.length === 0 ? (
             <div className="muted" style={{ padding: 20 }}>No custom rules</div>
           ) : (
-            rules.map((rule, idx) => (
+            <div className="rule-grid">
+            {rules.map((rule, idx) => (
               <RuleCard
                 key={rule.name}
                 rule={rule}
@@ -267,7 +262,8 @@ function ClassifyTab() {
                 onDelete={() => handleDelete(rule.name)}
                 previewData={previewData}
               />
-            ))
+            ))}
+            </div>
           )}
         </div>
       )}
@@ -315,34 +311,42 @@ function RuleCard({
   const pageFiles = matchedFiles.slice(page * pageSize, (page + 1) * pageSize);
 
   return (
-    <div className="rule-card">
+    <div className={"rule-card" + (rule.enabled ? "" : " disabled")}>
       <div className="rule-card-head">
-        <div className="rule-card-order">
-          <button onClick={onMoveUp} disabled={idx === 0} title={t("mapping.rule.moveUp")}>↑</button>
-          <button onClick={onMoveDown} disabled={idx === total - 1} title={t("mapping.rule.moveDown")}>↓</button>
-        </div>
-        <div className="rule-card-main" onClick={() => setExpanded(!expanded)} style={{ cursor: "pointer" }}>
-          <div className="rule-card-name">{rule.name}</div>
-          <div className="rule-card-sub">{rule.field}: {rule.pattern} → {rule.group}</div>
-        </div>
-        <div className="rule-card-right">
-          <span className={"rule-match-badge" + (matchCount === 0 ? " zero" : "")}>
-            {!rulePreviewAvailable
-              ? t("mapping.rule.matchUnavailable")
-              : matchCount !== null
-              ? (matchCount > 0 ? t("mapping.rule.matchCount", { n: matchCount }) : t("mapping.rule.matchCountZero"))
-              : "..."}
-          </span>
-          <label className="switch" title={t("mapping.rule.enabled")}>
-            <input type="checkbox" checked={rule.enabled} readOnly />
-            <span className="track"><span className="thumb" /></span>
-          </label>
-          <button className="btn sm" onClick={onEdit}>{t("mapping.edit")}</button>
-          <button className="btn sm danger-outline" onClick={onDelete}>{t("mapping.delete")}</button>
-        </div>
+        <span className="rule-card-index" title={t("mapping.rule.order")}>#{idx + 1}</span>
+        <div className="rule-card-name" title={rule.name}>{rule.name}</div>
+        <label className="switch" title={t("mapping.rule.enabled")}>
+          <input type="checkbox" checked={rule.enabled} readOnly />
+          <span className="track"><span className="thumb" /></span>
+        </label>
       </div>
+      <button
+        type="button"
+        className={"rule-match-badge" + (matchCount === 0 ? " zero" : "")}
+        onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
+      >
+        {!rulePreviewAvailable
+          ? t("mapping.rule.matchUnavailable")
+          : matchCount !== null
+          ? (matchCount > 0 ? t("mapping.rule.matchCount", { n: matchCount }) : t("mapping.rule.matchCountZero"))
+          : "..."}
+        <span className="rule-match-caret" aria-hidden="true">{expanded ? "▴" : "▾"}</span>
+      </button>
       {expanded && (
         <div className="rule-detail">
+          {/* The rule definition lives here (not on the card face) so long
+            * regexes don't stretch the grid; only the file list scrolls. */}
+          <div className="rule-detail-def">
+            <div className="rule-card-cond">
+              <span className="rule-card-field">{rule.field}</span>
+              <code className="rule-card-pattern">{rule.pattern}</code>
+            </div>
+            <div className="rule-card-target">
+              <span className="rule-card-arrow" aria-hidden="true">→</span>
+              <span className="rule-card-group">{rule.group}</span>
+            </div>
+          </div>
           <div className="rule-detail-files">
             {pageFiles.length === 0 ? (
               <div className="muted" style={{ padding: 8 }}>
@@ -373,6 +377,14 @@ function RuleCard({
           )}
         </div>
       )}
+      <div className="rule-card-actions">
+        <div className="rule-card-order">
+          <button type="button" onClick={onMoveUp} disabled={idx === 0} title={t("mapping.rule.moveUp")} aria-label={t("mapping.rule.moveUp")}>←</button>
+          <button type="button" onClick={onMoveDown} disabled={idx === total - 1} title={t("mapping.rule.moveDown")} aria-label={t("mapping.rule.moveDown")}>→</button>
+        </div>
+        <button className="btn sm" onClick={onEdit}>{t("mapping.edit")}</button>
+        <button className="btn sm danger-outline" onClick={onDelete}>{t("mapping.delete")}</button>
+      </div>
     </div>
   );
 }
@@ -438,6 +450,7 @@ export function AliasEditForm() {
       input_price_per_million: 0,
       output_price_per_million: 0,
       cache_read_price_per_million: 0,
+      cache_write_price_per_million: 0,
       per_call_usd: 0,
     };
   });
@@ -605,13 +618,23 @@ export function AliasEditForm() {
               />
             </div>
             <div className="map-form-row">
-              <label>{t("mapping.alias.cache")} ($/1M)</label>
+              <label>{t("mapping.alias.cacheRead")} ($/1M)</label>
               <input
                 className="mono"
                 type="number"
                 step="0.01"
                 value={alias.cache_read_price_per_million ?? 0}
                 onChange={(e) => setAlias({ ...alias, cache_read_price_per_million: parseFloat(e.target.value) || 0 })}
+              />
+            </div>
+            <div className="map-form-row">
+              <label>{t("mapping.alias.cacheWrite")} ($/1M)</label>
+              <input
+                className="mono"
+                type="number"
+                step="0.01"
+                value={alias.cache_write_price_per_million ?? 0}
+                onChange={(e) => setAlias({ ...alias, cache_write_price_per_million: parseFloat(e.target.value) || 0 })}
               />
             </div>
           </>

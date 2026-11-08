@@ -237,7 +237,7 @@ export default function KeyForm({
   };
 
   // One-click fill this row from LiteLLM community prices. Replace semantics:
-  // overwrites all three fields (even non-zero user-entered ones). Lookup is by
+  // overwrites all four token prices (even non-zero user-entered ones). Lookup is by
   // target_model (the real upstream id); the price writes back to this row's
   // (group, alias) key, so a same-alias row under a different tier is untouched.
   const recommend = (m: ModelRule) => {
@@ -250,8 +250,7 @@ export default function KeyForm({
         input_price_per_million: row.input_price_per_million,
         output_price_per_million: row.output_price_per_million,
         cache_read_price_per_million: row.cache_read_price_per_million,
-        // The LiteLLM catalog has no cache-write column: keep the user's value.
-        cache_write_price_per_million: prev[key]?.cache_write_price_per_million ?? 0,
+        cache_write_price_per_million: row.cache_write_price_per_million,
         // Recommend fills token prices; it does not change the billing mode. If
         // the row was on per_call, keep it (the recommended token prices stay
         // dormant until the user switches back to tokens).

@@ -402,8 +402,6 @@ export default function NativeKeyBindingsTab() {
           <p className="native-binding-help-summary">{t("mapping.native.mobileNoticeSummary")}</p>
           <div className="native-binding-help-details" id={noticeID}>
             <p>{t("mapping.native.noticeBody")}</p>
-            <p>{t("mapping.native.catalogNotice")}</p>
-            <p>{t("mapping.native.rotateNotice")}</p>
             <p className="native-binding-unbind-warning">
               <span aria-hidden="true">⚠ </span>{t("mapping.native.unbindNotice")}
             </p>

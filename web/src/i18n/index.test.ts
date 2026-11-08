@@ -48,7 +48,7 @@ describe("translate", () => {
     (locale) => {
       _resetLocale(locale);
       for (const key of [
-        "mapping.native.catalogNotice",
+        "mapping.native.noticeBody",
         "mapping.native.refresh",
         "mapping.native.unbound",
         "mapping.native.orphan",

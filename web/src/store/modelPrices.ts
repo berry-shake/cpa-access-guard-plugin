@@ -26,13 +26,17 @@ const LITELLM_URL =
 
 // sessionStorage key + stamped cache envelope. Persists only for the tab's
 // lifetime; window close clears it. Stale after TTL_MS.
-const CACHE_KEY = "access-guard:litellm-prices";
+// v2: rows gained cache_write_price_per_million; the version suffix makes a
+// tab's older cached table (without that column) refetch instead of
+// recommending a 0 write price.
+const CACHE_KEY = "access-guard:litellm-prices:v2";
 const TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface PriceRow {
   input_price_per_million: number;
   output_price_per_million: number;
   cache_read_price_per_million: number;
+  cache_write_price_per_million: number;
 }
 
 // Lowercased model name → per-million price row. null entries mark models that
@@ -62,6 +66,7 @@ interface LiteLLMEntry {
   input_cost_per_token?: unknown;
   output_cost_per_token?: unknown;
   cache_read_input_token_cost?: unknown;
+  cache_creation_input_token_cost?: unknown;
   mode?: unknown;
 }
 
@@ -78,12 +83,14 @@ export function parseLiteLLM(raw: Record<string, unknown>): PriceTable {
     const input = num(e.input_cost_per_token);
     const output = num(e.output_cost_per_token);
     const cacheRead = num(e.cache_read_input_token_cost);
+    const cacheWrite = num(e.cache_creation_input_token_cost);
     // An entry with no price fields at all carries no recommendation signal.
-    if (input === 0 && output === 0 && cacheRead === 0) continue;
+    if (input === 0 && output === 0 && cacheRead === 0 && cacheWrite === 0) continue;
     table.set(key.toLowerCase(), {
       input_price_per_million: perMillion(e.input_cost_per_token),
       output_price_per_million: perMillion(e.output_cost_per_token),
       cache_read_price_per_million: perMillion(e.cache_read_input_token_cost),
+      cache_write_price_per_million: perMillion(e.cache_creation_input_token_cost),
     });
   }
   return table;

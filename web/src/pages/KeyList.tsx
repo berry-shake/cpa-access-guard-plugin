@@ -76,7 +76,6 @@ export default function KeyList() {
         <div>
           <strong>{t("keys.noticeTitle")}</strong>
           <p>{t("keys.noticeBody")}</p>
-          <p>{t("keys.noticeSecret")}</p>
           <p className="native-binding-unbind-warning">
             <span aria-hidden="true">⚠ </span>{t("keys.noticeDestructive")}
           </p>
@@ -160,8 +159,6 @@ function KeyCard({
       uniqueAliases.push(m.alias);
     }
   }
-  const shownChips = uniqueAliases.slice(0, 2);
-  const moreCount = Math.max(0, uniqueAliases.length - 2);
 
   const onPointerDown = (e: React.PointerEvent) => {
     dragging.current = true; horizontal.current = false; moved.current = false;
@@ -239,15 +236,8 @@ function KeyCard({
           <span>{uniqueAliases.length} {t("keys.mobile.modelsSuffix")}</span>
         </div>
       )}
-      {shownChips.length > 0 && (
-        <div className="kc-chips">
-          {shownChips.map((a) => <span key={a} className="chip">{a}</span>)}
-          {moreCount > 0 && <span className="chip more">+{moreCount}</span>}
-        </div>
-      )}
 
-      {/* Desktop: hover/focus action row. Not an overlay — sits at the card
-       * footer and expands on hover/focus-within so card info stays visible.
+      {/* Desktop: always-visible action row pinned to the card footer.
        * Hidden on mobile (CSS .kc-actions display:none under 641px). The
        * swipe-to-revoke layer above handles mobile delete. */}
       <div className="kc-actions">

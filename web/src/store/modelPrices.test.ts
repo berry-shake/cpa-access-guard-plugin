@@ -18,6 +18,7 @@ describe("parseLiteLLM", () => {
         input_cost_per_token: 0.000003,
         output_cost_per_token: 0.000015,
         cache_read_input_token_cost: 0.0000003,
+        cache_creation_input_token_cost: 0.00000375,
       },
     });
     const row = lookupPrice(table, "claude-3-5-sonnet-20241022");
@@ -25,6 +26,7 @@ describe("parseLiteLLM", () => {
     expect(row!.input_price_per_million).toBeCloseTo(3, 5);
     expect(row!.output_price_per_million).toBeCloseTo(15, 5);
     expect(row!.cache_read_price_per_million).toBeCloseTo(0.3, 5);
+    expect(row!.cache_write_price_per_million).toBeCloseTo(3.75, 5);
   });
 
   it("matches case-insensitively", () => {
@@ -51,6 +53,7 @@ describe("parseLiteLLM", () => {
     expect(row!.input_price_per_million).toBeCloseTo(10, 5);
     expect(row!.output_price_per_million).toBeCloseTo(12, 5);
     expect(row!.cache_read_price_per_million).toBe(0);
+    expect(row!.cache_write_price_per_million).toBe(0);
   });
 
   it("skips sample_spec and non-object entries", () => {
@@ -115,7 +118,7 @@ describe("getPriceTable caching", () => {
     expect(lookupPrice(t2, "gpt-4o")).not.toBeNull();
 
     // cache written to sessionStorage as a stamped envelope
-    const raw = sessionStorage.getItem("access-guard:litellm-prices");
+    const raw = sessionStorage.getItem("access-guard:litellm-prices:v2");
     expect(raw).not.toBeNull();
     const env = JSON.parse(raw!);
     expect(typeof env.fetchedAt).toBe("number");
@@ -127,7 +130,7 @@ describe("getPriceTable caching", () => {
     const t = await getPriceTable();
     expect(t).toBeNull();
     // failed fetch must not write a cache
-    expect(sessionStorage.getItem("access-guard:litellm-prices")).toBeNull();
+    expect(sessionStorage.getItem("access-guard:litellm-prices:v2")).toBeNull();
   });
 
   it("returns null when fetch throws (network)", async () => {
@@ -142,7 +145,7 @@ describe("getPriceTable caching", () => {
       fetchedAt: Date.now() - 25 * 60 * 60 * 1000, // 25h ago
       table: [["stale-model", { input_price_per_million: 0, output_price_per_million: 0, cache_read_price_per_million: 0 }]],
     };
-    sessionStorage.setItem("access-guard:litellm-prices", JSON.stringify(expired));
+    sessionStorage.setItem("access-guard:litellm-prices:v2", JSON.stringify(expired));
 
     vi.stubGlobal(
       "fetch",

@@ -1120,7 +1120,7 @@ describe("NativeKeyBindingsTab", () => {
     expect(container.textContent).toContain("Client A");
     expect(container.textContent).toContain("sk-ab...wxyz");
     expect(container.textContent).toContain("仅用于 CPA 顶层 api-keys");
-    expect(container.textContent).toContain("停用或删除绑定不会停用或删除 CPA 顶层 API Key");
+    expect(container.textContent).toContain("请在 CPA 顶层 api-keys 中移除它");
     expect(container.textContent).toContain("该 Key 仍然有效");
     expect(container.textContent).toContain("恢复默认/自由调度");
     const bindButton = Array.from(container.querySelectorAll("button"))

@@ -132,8 +132,11 @@ body {
 a { color: var(--accent); text-decoration: none; }
 a:hover { color: var(--accent-2); text-decoration: underline; }
 
-/* Shared navigation and centered content, adapted below for small screens. */
-.app { max-width: 1200px; margin: 0 auto; padding: 24px 24px 80px; }
+/* Shared navigation and centered content, adapted below for small screens.
+ * Same width and gutters as the other plugin pages hosted in the CPA panel
+ * (Autoban, Panel Updater): up to 1400px, 24px sides, 32px from 1200px. */
+.app { --page-pad: 24px; max-width: 1400px; margin: 0 auto; padding: 24px var(--page-pad) 80px; }
+@media (min-width: 1200px) { .app { --page-pad: 32px; } }
 
 /* Desktop header: brand on the first row, navigation directly underneath and
  * left-aligned. Border stays hairline so the sticky bar reads as part of the
@@ -142,21 +145,20 @@ a:hover { color: var(--accent-2); text-decoration: underline; }
   position: sticky; top: 0; z-index: 50;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
-  margin: 0 -24px;
-  padding: 0 24px;
+  margin: 0 calc(-1 * var(--page-pad));
+  padding: 0 var(--page-pad);
 }
 .topnav-inner {
-  max-width: 1200px; margin: 0 auto;
   min-height: 96px; display: flex; flex-direction: column; align-items: flex-start;
   justify-content: center; gap: 14px; padding: 12px 0 0;
 }
 /* Embedded in the CPA panel iframe: the panel floats an action pill
  * (refresh / language / theme / logout) over the viewport's top-right,
  * ~270px wide including its edge margin. Reserve just enough right padding
- * so the nav links stay visible; on wide viewports the centered 1200px
+ * so the nav links stay visible; on wide viewports the centered 1400px
  * container already clears the pill and the calc clamps to 0. */
 :root.embedded .topnav-inner {
-  padding-right: clamp(0px, calc(270px - (100vw - 1200px) / 2), 246px);
+  padding-right: max(0px, calc(270px - var(--page-pad) - max(0px, (100vw - 1400px) / 2)));
 }
 .topnav-brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .topnav-brand .tn-logo {
@@ -557,7 +559,8 @@ td.strong { font-weight: 600; color: var(--text); }
   overflow: hidden;
 }
 .keycard:hover { border-color: var(--border-hover); }
-.keycard.disabled { opacity: 0.55; }
+/* Dim the content only; the action row stays fully opaque so it reads as clickable. */
+.keycard.disabled > :not(.kc-actions):not(.kc-revoke) { opacity: 0.55; }
 .keycard .kc-head {
   display: flex; align-items: center; gap: 8px;
   margin-bottom: 6px;
@@ -589,15 +592,6 @@ td.strong { font-weight: 600; color: var(--text); }
   display: flex; justify-content: space-between;
   font-size: 11px; color: var(--muted);
 }
-.keycard .kc-chips {
-  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px;
-}
-.keycard .kc-chips .chip {
-  font-size: 11px; padding: 2px 8px; border-radius: var(--r-sm);
-  background: var(--muted-bg); color: var(--muted);
-  border: 1px solid var(--border);
-}
-.keycard .kc-chips .chip.more { color: var(--muted); font-weight: 600; }
 /* swipe-to-revoke layer */
 .keycard .kc-revoke {
   position: absolute; top: 0; right: 0; bottom: 0;
@@ -609,30 +603,21 @@ td.strong { font-weight: 600; color: var(--text); }
 }
 .keycard .kc-revoke .revoke-icon { font-size: 18px; }
 
-/* Desktop hover action row (>= 641px). Not an overlay — it sits at the
- * card footer and expands on hover/focus-within, so card info stays visible
- * and the 5 buttons never get clipped (Stitch's inset-0 overlay clipped them
- * on short cards). */
+/* Desktop action row (>= 641px): always visible, disabled keys included
+ * (they need edit/delete too). The card is a flex column and the ::after
+ * spacer (min 12px) grows, so action rows line up at the bottom of every
+ * card in a grid row. Mobile hides it and uses swipe-to-revoke instead. */
 .keycard .kc-actions {
-  display: none; /* hidden on mobile; grid shown on desktop */
+  display: none; /* hidden on mobile; shown on desktop */
 }
 @media (min-width: 641px) {
-  .keycard { cursor: default; margin-bottom: 0; }
+  .keycard { cursor: default; margin-bottom: 0; display: flex; flex-direction: column; }
   .keycard:hover { border-color: var(--border-hover); box-shadow: 0 0 0 3px var(--accent-ring); }
+  .keycard::after { content: ""; order: 1; flex: 1 0 12px; }
   .keycard .kc-actions {
-    display: flex; flex-wrap: wrap; gap: 6px;
-    margin-top: 12px; padding-top: 12px;
-    border-top: 1px solid var(--border);
-    max-height: 0; overflow: hidden; opacity: 0;
-    margin-top: 0; padding-top: 0; border-top-width: 0;
-    transition: max-height var(--t-fast), opacity var(--t-fast), margin-top var(--t-fast), padding-top var(--t-fast), border-top-width var(--t-fast);
+    order: 2; display: flex; flex-wrap: wrap; gap: 6px;
+    padding-top: 12px; border-top: 1px solid var(--border);
   }
-  .keycard:hover .kc-actions,
-  .keycard:focus-within .kc-actions {
-    max-height: 80px; opacity: 1;
-    margin-top: 12px; padding-top: 12px; border-top-width: 1px;
-  }
-  .keycard.disabled .kc-actions { max-height: 0 !important; opacity: 0 !important; overflow: hidden; }
   .keycard .kc-actions .btn { flex: 0 0 auto; }
 }
 
@@ -908,7 +893,7 @@ td.strong { font-weight: 600; color: var(--text); }
 }
 
 /* ===== Mapping page ===== */
-.map-page { max-width: 1200px; margin: 0 auto; padding: 16px 0 24px; }
+.map-page { padding: 16px 0 24px; }
 .map-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
 .map-tab {
   padding: 8px 20px; font-size: 14px; font-weight: 500; color: var(--muted);
@@ -1388,7 +1373,8 @@ td.strong { font-weight: 600; color: var(--text); }
   display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;
 }
 .alias-card {
-  background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px;
+  display: flex; flex-direction: column; min-width: 0;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-md); padding: 16px;
   transition: border-color .15s;
 }
 .alias-card:hover { border-color: var(--border-hover); }
@@ -1396,80 +1382,116 @@ td.strong { font-weight: 600; color: var(--text); }
 .alias-card-name { font-family: var(--mono); font-size: 15px; font-weight: 600; }
 .alias-dispatch-badge {
   font-size: 11px; padding: 2px 8px; border-radius: 999px;
-  background: var(--secondary-bg); color: var(--muted);
+  background: var(--muted-bg); color: var(--muted);
 }
-.alias-targets { margin-bottom: 8px; }
+.alias-card .rule-match-badge { margin-bottom: 8px; }
+.alias-targets {
+  display: flex; flex-direction: column; gap: 4px; margin: 2px 0 8px;
+  max-height: 200px; overflow-y: auto;
+  background: var(--muted-bg); border-radius: var(--r-md); padding: 10px 12px;
+}
 .alias-target-row {
   font-family: var(--mono); font-size: 13px; color: var(--muted);
-  display: flex; align-items: center; gap: 6px; margin: 2px 0;
+  display: flex; align-items: center; gap: 6px; min-width: 0; overflow-wrap: anywhere;
 }
 .alias-target-group {
-  font-size: 10px; padding: 1px 6px; border-radius: 999px;
-  background: var(--secondary-bg); color: var(--muted);
+  flex: none; font-size: 10px; padding: 1px 6px; border-radius: 999px;
+  background: var(--panel); color: var(--muted);
 }
 .alias-pricing { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-bottom: 4px; }
 .alias-refs { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
 .alias-refs.zero { color: var(--muted); opacity: 0.6; }
-.alias-actions { display: flex; gap: 8px; opacity: 0; transition: opacity .15s; }
-.alias-card:hover .alias-actions { opacity: 1; }
+.alias-actions {
+  display: flex; gap: 8px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border);
+}
 .alias-actions .btn.sm { padding: 4px 12px; font-size: 12px; }
 .alias-actions .btn.danger-outline:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* Classify rule list */
-.rule-list { max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
-.rule-builtin-card {
-  background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px;
+.rule-list { display: flex; flex-direction: column; gap: 12px; }
+/* Custom rules use the same card grid as the alias tab. Order still matters
+ * (left→right, top→bottom), so each card shows its #position and the ← →
+ * buttons move it earlier/later. Actions sit at the bottom of every card so
+ * they line up across a row. */
+.rule-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 16px;
 }
-.rule-builtin-card h3 { font-size: 14px; font-weight: 600; margin: 0 0 8px 0; }
-.rule-builtin-row {
-  font-family: var(--mono); font-size: 13px; color: var(--muted); padding: 4px 0;
-  display: flex; align-items: center; gap: 8px;
-}
-.rule-builtin-row .info-icon { font-size: 12px; color: var(--accent); }
-.rule-builtin-desc { font-size: 12px; color: var(--muted); margin-top: 8px; }
 .rule-card {
-  background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px;
+  display: flex; flex-direction: column; gap: 10px; min-width: 0;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-md); padding: 16px;
   transition: border-color .15s;
 }
 .rule-card:hover { border-color: var(--border-hover); }
-.rule-card-head { display: flex; align-items: center; gap: 12px; }
-.rule-card-order { display: flex; flex-direction: column; gap: 2px; }
-.rule-card-order button {
-  background: none; border: 1px solid var(--border); border-radius: 4px;
-  width: 24px; height: 20px; font-size: 10px; color: var(--muted); cursor: pointer;
+.rule-card.disabled .rule-card-name,
+.rule-card.disabled .rule-card-cond,
+.rule-card.disabled .rule-card-target,
+.rule-card.disabled .rule-match-badge { opacity: .55; }
+.rule-card-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.rule-card-index {
+  flex: none; font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--muted);
+  background: var(--muted-bg); border-radius: 999px; padding: 1px 8px;
 }
-.rule-card-order button:hover { border-color: var(--border-hover); color: var(--text); }
-.rule-card-main { flex: 1; }
-.rule-card-name { font-size: 15px; font-weight: 600; }
-.rule-card-sub { font-family: var(--mono); font-size: 13px; color: var(--muted); margin-top: 2px; }
-.rule-card-right { display: flex; align-items: center; gap: 12px; }
+.rule-card-name {
+  flex: 1; min-width: 0; font-size: 15px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rule-card-head .switch { flex: none; }
+.rule-card-cond { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.rule-card-field {
+  flex: none; font-size: 11px; font-weight: 600; color: var(--muted); line-height: 18px;
+  background: var(--panel); border-radius: 4px; padding: 0 6px; margin-top: 1px;
+}
+.rule-card-pattern {
+  flex: 1; min-width: 0; font-family: var(--mono); font-size: 13px; line-height: 20px;
+  color: var(--text); background: none; padding: 0; overflow-wrap: anywhere;
+}
+.rule-card-target { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); min-width: 0; }
+.rule-card-group { font-family: var(--mono); font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
 .rule-match-badge {
-  font-size: 12px; padding: 2px 10px; border-radius: 999px;
-  background: var(--accent-soft); color: var(--accent);
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 6px;
+  font: inherit; font-size: 12px; padding: 2px 10px; border: 0; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent); cursor: pointer;
 }
 .rule-match-badge.zero { opacity: 0.5; }
+.rule-match-caret { font-size: 10px; }
 .rule-detail {
-  margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px;
-  max-height: 400px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 10px;
+  border-top: 1px solid var(--border); padding-top: 10px;
 }
-.rule-detail-files { display: flex; flex-direction: column; gap: 2px; }
+.rule-detail-def {
+  display: flex; flex-direction: column; gap: 8px;
+  background: var(--muted-bg); border-radius: var(--r-md); padding: 10px 12px;
+}
+.rule-card-actions {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border);
+}
+.rule-card-order { display: flex; gap: 4px; margin-right: auto; }
+.rule-card-order button {
+  width: 30px; height: 30px; border: 1px solid var(--border); border-radius: var(--r-sm, 6px);
+  background: none; color: var(--muted); font-size: 14px; cursor: pointer;
+}
+.rule-card-order button:hover:not(:disabled) { border-color: var(--border-hover); color: var(--text); }
+.rule-card-order button:disabled { opacity: .35; cursor: not-allowed; }
+.rule-detail-files { display: flex; flex-direction: column; gap: 2px; max-height: 200px; overflow-y: auto; }
 .rule-detail-file {
   font-family: var(--mono); font-size: 13px; color: var(--muted);
   padding: 2px 0; display: flex; align-items: center; gap: 8px;
 }
 .rule-detail-file .prov-chip {
   font-size: 10px; padding: 1px 6px; border-radius: 999px;
-  background: var(--secondary-bg); color: var(--muted);
+  background: var(--muted-bg); color: var(--muted);
 }
-.rule-pager { display: flex; justify-content: center; align-items: center; gap: 16px; margin-top: 12px; }
+.rule-pager { display: flex; justify-content: center; align-items: center; gap: 16px; }
 .rule-pager button { padding: 4px 12px; font-size: 12px; }
 .rule-pager button:disabled { opacity: 0.4; cursor: not-allowed; }
 .rule-pager .page-info { font-family: var(--mono); font-size: 12px; color: var(--muted); }
 
 /* Alias/Rule edit form */
-.map-form-page { max-width: 600px; margin: 0 auto; padding: 24px; }
+/* Full content width like the 下游 Key form; .app already supplies the side padding. */
+.map-form-page { padding: 16px 0 24px; }
 .map-form-card {
-  background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 24px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 24px;
 }
 .map-form-head { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
 .map-form-head h1 { font-size: 18px; font-weight: 700; margin: 0; }
@@ -1480,6 +1502,22 @@ td.strong { font-weight: 600; color: var(--text); }
   width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px;
   font-size: 14px; background: var(--card); color: var(--text);
 }
+/* Alias/rule forms: same metrics as the global .input so selects and text
+ * fields line up (scoped so the native binding editor keeps its own sizing). */
+.map-form-card .map-form-row input:not([type="checkbox"]), .map-form-card .map-form-row select {
+  height: 40px; padding: 0 12px; border-radius: var(--r-md); background-color: var(--bg);
+}
+/* Drop the platform chevron (it hugs the border and differs per OS) for one
+ * drawn in the theme's muted color, with room reserved on the right. */
+.map-form-card .map-form-row select {
+  appearance: none; -webkit-appearance: none; padding-right: 36px; cursor: pointer; font-family: inherit;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5l3 3 3-3' fill='none' stroke='%236b665f' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 12px center; background-size: 12px 12px;
+}
+:root[data-theme="dark"] .map-form-card .map-form-row select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5l3 3 3-3' fill='none' stroke='%23b6b1a8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+.map-form-card .map-form-row select option { background: var(--panel); color: var(--text); }
 .map-form-row input.mono { font-family: var(--mono); }
 .map-form-row input:focus, .map-form-row select:focus {
   outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring);
@@ -1537,7 +1575,7 @@ td.strong { font-weight: 600; color: var(--text); }
 .map-form-targets { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
 .map-form-target-row {
   display: flex; align-items: center; gap: 8px; padding: 6px 12px;
-  background: var(--secondary-bg); border-radius: 6px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-md);
 }
 .map-form-target-row .mono { font-family: var(--mono); font-size: 13px; flex: 1; }
 .map-form-target-row .remove-btn {
@@ -1592,8 +1630,7 @@ td.strong { font-weight: 600; color: var(--text); }
   .native-model-actions { flex-wrap: wrap; }
   .native-model-actions > span { width: 100%; }
   .native-model-options { grid-template-columns: 1fr; }
-  .rule-list { max-width: 100%; }
-  .map-form-page { padding: 16px; }
+  .map-form-page { padding: 16px 0; }
 }
 
 /* KeyForm existing-aliases quick-pick section */
