@@ -132,10 +132,10 @@ body {
 a { color: var(--accent); text-decoration: none; }
 a:hover { color: var(--accent-2); text-decoration: underline; }
 
-/* Shared navigation and centered content, adapted below for small screens.
- * Same width and gutters as the other plugin pages hosted in the CPA panel
- * (Autoban, Panel Updater): up to 1400px, 24px sides, 32px from 1200px. */
-.app { --page-pad: 24px; max-width: 1400px; margin: 0 auto; padding: 24px var(--page-pad) 80px; }
+/* Shared navigation and content, adapted below for small screens. Same
+ * gutters as the other plugin pages hosted in the CPA panel (Autoban, Panel
+ * Updater): full width, 24px sides, 32px from 1200px. */
+.app { --page-pad: 24px; padding: 24px var(--page-pad) 80px; }
 @media (min-width: 1200px) { .app { --page-pad: 32px; } }
 
 /* Desktop header: brand on the first row, navigation directly underneath and
@@ -154,11 +154,11 @@ a:hover { color: var(--accent-2); text-decoration: underline; }
 }
 /* Embedded in the CPA panel iframe: the panel floats an action pill
  * (refresh / language / theme / logout) over the viewport's top-right,
- * ~270px wide including its edge margin. Reserve just enough right padding
- * so the nav links stay visible; on wide viewports the centered 1400px
- * container already clears the pill and the calc clamps to 0. */
+ * ~270px wide including its edge margin. The page runs to the viewport edge
+ * at every width, so always reserve that much right padding to keep the nav
+ * links clear of it. */
 :root.embedded .topnav-inner {
-  padding-right: max(0px, calc(270px - var(--page-pad) - max(0px, (100vw - 1400px) / 2)));
+  padding-right: calc(270px - var(--page-pad));
 }
 .topnav-brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .topnav-brand .tn-logo {
