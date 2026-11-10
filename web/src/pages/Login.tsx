@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { setSession, verifySession } from "../store/session";
 import { isEmbedded } from "../store/panelAuth";
 import { useT } from "../i18n";
+import Footer from "../components/Footer";
 
 export default function Login() {
   const nav = useNavigate();
@@ -74,6 +75,7 @@ export default function Login() {
           <div className="lp-note">{t("login.embeddedFallback")}</div>
         )}
       </form>
+      <Footer />
     </div>
   );
 }

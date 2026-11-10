@@ -9,6 +9,7 @@ import KeyEdit from "./pages/KeyEdit";
 import KeyUsage from "./pages/KeyUsage";
 import ModelPick from "./pages/ModelPick";
 import Mapping, { AliasEditForm, RuleEditForm } from "./pages/Mapping";
+import Footer from "./components/Footer";
 
 function useAuthTick() {
   const [, setTick] = useState(0);
@@ -110,6 +111,7 @@ function Shell() {
         <Route path="/mapping/rule/:ruleName" element={<Navigate to="/classify" replace />} />
         <Route path="*" element={<Navigate to="/native-keys" replace />} />
       </Routes>
+      <Footer />
     </div>
   );
 }

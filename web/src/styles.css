@@ -135,8 +135,15 @@ a:hover { color: var(--accent-2); text-decoration: underline; }
 /* Shared navigation and content, adapted below for small screens. Same
  * gutters as the other plugin pages hosted in the CPA panel (Autoban, Panel
  * Updater): full width, 24px sides, 32px from 1200px. */
-.app { --page-pad: 24px; padding: 24px var(--page-pad) 80px; }
+.app { --page-pad: 24px; padding: 24px var(--page-pad) 20px; min-height: 100vh; display: flex; flex-direction: column; }
 @media (min-width: 1200px) { .app { --page-pad: 32px; } }
+
+/* Footer shared with the other plugin pages (Wokey, Autoban, Panel Updater):
+ * pinned to the bottom of short pages, after the content on long ones. */
+.app-footer { margin-top: auto; padding-top: 24px; text-align: center; color: var(--muted); font-size: 11px; }
+.app-footer a { color: inherit; text-decoration: none; border-bottom: 1px dashed var(--border-strong); }
+.app-footer a:hover { color: var(--text); text-decoration: none; }
+.login-page .app-footer { margin-top: 0; padding-top: 8px; }
 
 /* Desktop header: brand on the first row, navigation directly underneath and
  * left-aligned. Border stays hairline so the sticky bar reads as part of the

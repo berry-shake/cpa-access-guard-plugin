@@ -30,6 +30,10 @@
   "session": {
     "restoring": "正在從面板還原工作階段…"
   },
+  "footer": {
+    "text": "由 Access Guard 外掛驅動",
+    "source": "原始碼"
+  },
   "keys": {
     "create": "新建",
     "noticeTitle": "由 Access Guard 管理的下游 Key",

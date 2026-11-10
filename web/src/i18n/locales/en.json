@@ -30,6 +30,10 @@
   "session": {
     "restoring": "Restoring session from panel…"
   },
+  "footer": {
+    "text": "Powered by the Access Guard plugin",
+    "source": "Source"
+  },
   "keys": {
     "create": "Create",
     "noticeTitle": "Downstream keys managed by Access Guard",

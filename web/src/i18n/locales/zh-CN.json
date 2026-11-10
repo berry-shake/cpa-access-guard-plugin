@@ -30,6 +30,10 @@
   "session": {
     "restoring": "正在从面板恢复会话…"
   },
+  "footer": {
+    "text": "由 Access Guard 插件驱动",
+    "source": "源代码"
+  },
   "keys": {
     "create": "新建",
     "noticeTitle": "由 Access Guard 管理的下游 Key",

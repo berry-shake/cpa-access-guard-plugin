@@ -30,6 +30,10 @@
   "session": {
     "restoring": "Восстановление сессии из панели…"
   },
+  "footer": {
+    "text": "Работает на плагине Access Guard",
+    "source": "Исходный код"
+  },
   "keys": {
     "create": "Создать",
     "noticeTitle": "Нижестоящие ключи под управлением Access Guard",
