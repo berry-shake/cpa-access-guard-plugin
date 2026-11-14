@@ -26,13 +26,29 @@ export function TopNav() {
       <div className="topnav-inner">
         <div className="topnav-brand">
           <span className="tn-logo" aria-hidden="true">
-            <svg viewBox="0 0 256 256" width="20" height="20">
-              <path
-                d="M128 58 L182 78 V130 C182 166 160 190 128 202 C96 190 74 166 74 130 V78 Z"
-                fill="none" stroke="currentColor" strokeWidth="16" strokeLinejoin="round"
-              />
-              <circle cx="128" cy="120" r="12" fill="currentColor" />
-              <path d="M128 126 V156" stroke="currentColor" strokeWidth="14" strokeLinecap="round" />
+            {/* Same artwork as internal/plugin/web/logo.svg; ids are prefixed to stay unique in the page. */}
+            <svg viewBox="0 0 256 256" width="100%" height="100%">
+              <defs>
+                <linearGradient id="tn-logo-bg" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stopColor="#FF7B92" />
+                  <stop offset="1" stopColor="#D92E5B" />
+                </linearGradient>
+                <mask id="tn-logo-ticket">
+                  <rect x="24" y="64" width="208" height="128" rx="22" fill="#fff" />
+                  <circle cx="24" cy="128" r="20" fill="#000" />
+                  <circle cx="232" cy="128" r="20" fill="#000" />
+                </mask>
+              </defs>
+              <rect width="256" height="256" rx="70" fill="url(#tn-logo-bg)" />
+              <g transform="translate(128 128) scale(0.92) translate(-128 -128)">
+                <rect x="24" y="64" width="208" height="128" rx="22" fill="#fff" mask="url(#tn-logo-ticket)" />
+                <path d="M182 86 V170" stroke="#F4A0B2" strokeWidth="9" strokeLinecap="round" strokeDasharray="1 17" />
+                <g fill="none" stroke="#D92E5B" strokeWidth="17" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="82" cy="128" r="23" />
+                  <path d="M105 128 H160 M143 128 V152" />
+                </g>
+                <circle cx="207" cy="128" r="10" fill="#D92E5B" />
+              </g>
             </svg>
           </span>
           <span className="tn-text">

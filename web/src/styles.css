@@ -170,8 +170,7 @@ a:hover { color: var(--accent-2); text-decoration: underline; }
 .topnav-brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .topnav-brand .tn-logo {
   flex: none; display: inline-flex; align-items: center; justify-content: center;
-  width: 36px; height: 36px; border-radius: 11px;
-  background: var(--accent-soft); color: var(--accent);
+  width: 36px; height: 36px;
 }
 .topnav-brand .tn-text { display: flex; flex-direction: column; line-height: 1.3; min-width: 0; }
 .topnav-brand .tn-title { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; color: var(--text); }
@@ -345,7 +344,7 @@ th.num, td.num { text-align: right; }
   .topnav { display: block; position: static; margin: 0 -16px; padding: 0 16px; }
   .topnav-inner, :root.embedded .topnav-inner { width: 100%; min-height: 0; gap: 10px; padding: 12px 0; }
   .topnav-brand .tn-sub { display: none; }
-  .topnav-brand .tn-logo { width: 28px; height: 28px; border-radius: 8px; }
+  .topnav-brand .tn-logo { width: 28px; height: 28px; }
   :root.embedded .topnav-brand { display: none; }
   .topnav-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; gap: 6px; }
   .topnav-actions .tn-link {
