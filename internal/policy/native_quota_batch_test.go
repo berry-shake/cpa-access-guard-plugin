@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const quotaBatchOwnedID = "plugin-owned-quota-fixture"
+const quotaBatchOwnedID = "removed-downstream-key-id"
 
 func quotaBatchClock() time.Time {
 	return time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
@@ -47,16 +47,9 @@ func quotaBatchFixture(t *testing.T) (*Store, string, []NativeKeyBinding) {
 		APIKeys: keys, SelectedIndices: []int{0}, AuthIDs: []string{"quota-credential-a", "quota-credential-b"},
 		AvailableAuthIDs: []string{"quota-credential-a", "quota-credential-b"}, CatalogComplete: true,
 	})
-	hash, err := HashKey("synthetic-plugin-owned-quota-key")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := store.UpsertKey(KeyConfig{ID: quotaBatchOwnedID, Enabled: true, KeyHash: hash, RPM: 10}, true); err != nil {
-		t.Fatal(err)
-	}
 	bindings := store.NativeKeyBindingsSnapshot()
 	limiter, usage := store.runtimeComponents()
-	accounts := []string{quotaBatchOwnedID}
+	accounts := []string{}
 	for _, binding := range bindings {
 		accounts = append(accounts, nativeUsageLedgerID(binding.CallerScope))
 	}
@@ -207,7 +200,7 @@ func TestResetNativeKeyQuotasRejectsWholeInvalidSelection(t *testing.T) {
 		{name: "unknown_only", ids: []string{"unknown"}, err: ErrUnknownNativeKeyBinding},
 		{name: "valid_then_unknown", ids: []string{"alpha", "bravo", "unknown"}, err: ErrUnknownNativeKeyBinding},
 		{name: "unknown_then_valid", ids: []string{"unknown", "alpha"}, err: ErrUnknownNativeKeyBinding},
-		{name: "plugin_owned_id", ids: []string{"alpha", quotaBatchOwnedID}, err: ErrUnknownNativeKeyBinding},
+		{name: "non_binding_id", ids: []string{"alpha", quotaBatchOwnedID}, err: ErrUnknownNativeKeyBinding},
 	}
 	store, path, bindings := quotaBatchFixture(t)
 	history := store.NativeBindingHistorySnapshot()

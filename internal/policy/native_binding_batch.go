@@ -124,7 +124,6 @@ type nativeBindingHistoryMarker struct {
 type nativeBindingBatchSnapshot struct {
 	bindings []NativeKeyBinding
 	history  []nativeBindingHistoryRecord
-	rules    []ClassifyRule
 }
 
 type nativeBindingPlan struct {
@@ -234,7 +233,7 @@ func (s *Store) NativeBindingHistorySnapshot() []NativeBindingOperation {
 func (s *Store) nativeBindingBatchSnapshot() nativeBindingBatchSnapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return nativeBindingBatchSnapshot{bindings: s.nativeKeyBindingsSnapshotLocked(), history: cloneNativeBindingHistory(s.nativeBindingHistory), rules: s.classifyRulesSnapshotLocked()}
+	return nativeBindingBatchSnapshot{bindings: s.nativeKeyBindingsSnapshotLocked(), history: cloneNativeBindingHistory(s.nativeBindingHistory)}
 }
 
 func nativeBindingRestriction(binding *NativeKeyBinding) *NativeBindingRestriction {
@@ -308,12 +307,11 @@ func (plan *nativeBindingPlan) finish(snapshot nativeBindingBatchSnapshot, keys,
 	data, _ := json.Marshal(struct {
 		Bindings   []NativeKeyBinding
 		History    []nativeBindingHistoryRecord
-		Rules      []ClassifyRule
 		HostScopes []string
 		Available  []string
 		Complete   bool
 		Action     any
-	}{snapshot.bindings, snapshot.history, snapshot.rules, scopes, normalizeNativeAuthIDs(available), complete, action})
+	}{snapshot.bindings, snapshot.history, scopes, normalizeNativeAuthIDs(available), complete, action})
 	digest := sha256.Sum256(data)
 	plan.preview.Revision = hex.EncodeToString(digest[:])
 	plan.preview.Noop = len(plan.changes) == 0 && len(plan.preview.Conflicts) == 0
@@ -574,18 +572,11 @@ func (s *Store) planNativeBindingRollback(snapshot nativeBindingBatchSnapshot, i
 					validTarget = false
 				}
 			}
-			if IsClassifyGroup(target.Group) {
-				groupExists := false
-				for _, rule := range snapshot.rules {
-					if rule.Enabled && FormatClassifyGroup(rule.Group) == target.Group {
-						groupExists = true
-						break
-					}
-				}
-				if !groupExists {
-					plan.conflict(saved.BindingID, "group_unavailable")
-					validTarget = false
-				}
+			if len(target.AuthIDs) == 0 {
+				// History written by an older release may restore a credential
+				// group, which this release no longer schedules.
+				plan.conflict(saved.BindingID, "group_unsupported")
+				validTarget = false
 			}
 			if !validTarget {
 				continue
@@ -605,16 +596,13 @@ func (s *Store) planNativeBindingRollback(snapshot nativeBindingBatchSnapshot, i
 				cloned := cloneNativeKeyBinding(*current)
 				candidate = &cloned
 			}
-			candidate.Group, candidate.AuthIDs = target.Group, append([]string(nil), target.AuthIDs...)
+			candidate.Group, candidate.AuthIDs = "", append([]string(nil), target.AuthIDs...)
 			normalized := []NativeKeyBinding{*candidate}
 			if err := normalizeNativeKeyBindings(normalized); err != nil {
 				plan.conflict(saved.BindingID, "invalid_restriction")
 				continue
 			}
 			candidate = &normalized[0]
-			if target.Group != "" && len(plan.preview.Warnings) == 0 {
-				plan.preview.Warnings = append(plan.preview.Warnings, "group_uses_current_rules")
-			}
 		}
 		change := nativeBindingRecordedChange{
 			NativeBindingChange: NativeBindingChange{BindingID: saved.BindingID, Name: saved.Name, KeyPreview: saved.KeyPreview, Before: nativeBindingRestriction(current), After: nativeBindingRestriction(candidate)},
@@ -796,9 +784,9 @@ func (s *Store) commitNativeBindingPlan(snapshot nativeBindingBatchSnapshot, pla
 		return NativeBindingMutationResult{}, fmt.Errorf("%w: %v", ErrInvalidNativeBindingBatch, err)
 	}
 	s.mu.RLock()
-	keys, usage, aliases, rules, path := s.keysSnapshotLocked(), s.usageSnapshotLocked(), s.aliasesSnapshotLocked(), s.classifyRulesSnapshotLocked(), s.statePath
+	path := s.statePath
 	s.mu.RUnlock()
-	if err := s.saveStateWithNativeBindingHistory(path, keys, usage, aliases, rules, plan.bindings, history); err != nil {
+	if err := s.saveStateWithNativeBindingHistory(path, plan.bindings, history); err != nil {
 		return NativeBindingMutationResult{}, fmt.Errorf("%w: %w", ErrNativeKeyBindingPersistence, err)
 	}
 	s.mu.Lock()

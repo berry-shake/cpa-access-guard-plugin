@@ -29,7 +29,7 @@ func persistenceHistoryFixture() []nativeBindingHistoryRecord {
 func seedPersistenceHistory(t *testing.T, path string) []nativeBindingHistoryRecord {
 	t.Helper()
 	history := persistenceHistoryFixture()
-	if err := saveStateWithNativeHistory(path, nil, nil, nil, nil, nil, history); err != nil {
+	if err := saveStateWithNativeHistory(path, nil, nil, history); err != nil {
 		t.Fatal(err)
 	}
 	return history
@@ -54,10 +54,6 @@ func TestNativeBindingHistorySurvivesOrdinaryStateMutations(t *testing.T) {
 	if err := store.Configure(Config{Enabled: true, StateFile: path}); err != nil {
 		t.Fatal(err)
 	}
-	hash, err := HashKey("synthetic-history-plugin-key")
-	if err != nil {
-		t.Fatal(err)
-	}
 	run := func(name string, mutate func() error) {
 		t.Helper()
 		t.Run(name, func(t *testing.T) {
@@ -73,26 +69,12 @@ func TestNativeBindingHistorySurvivesOrdinaryStateMutations(t *testing.T) {
 			}
 		})
 	}
-	run("upsert_alias", func() error {
-		return store.UpsertAlias(AliasMapping{Alias: "history-alias", Targets: []AliasTarget{{Provider: "codex", TargetModel: "spark"}}})
-	})
-	run("upsert_key", func() error {
-		return store.UpsertKey(KeyConfig{ID: "history-key", Enabled: true, KeyHash: hash, Aliases: []KeyAliasRef{{Alias: "history-alias"}}}, true)
-	})
-	run("rotate_key", func() error { _, _, err := store.RotateKey("history-key"); return err })
-	run("delete_key", func() error { return store.DeleteKey("history-key") })
-	run("delete_alias", func() error { return store.DeleteAlias("history-alias") })
-	run("upsert_rule", func() error {
-		return store.UpsertClassifyRule(ClassifyRule{Name: "history-rule", Field: "provider", Pattern: "^codex$", Group: "translation", Enabled: true})
-	})
-	run("reorder_rules", func() error { return store.ReorderClassifyRules([]string{"history-rule"}) })
-	run("delete_rule", func() error { return store.DeleteClassifyRule("history-rule") })
 	run("create_native_binding", func() error {
-		_, err := store.CreateNativeKeyBinding(CreateNativeKeyBindingInput{ID: "ordinary-native", APIKey: "sk-ordinary-native-history", Enabled: true, Group: "team"})
+		_, err := store.CreateNativeKeyBinding(CreateNativeKeyBindingInput{ID: "ordinary-native", APIKey: "sk-ordinary-native-history", Enabled: true, AuthIDs: []string{"team.json"}})
 		return err
 	})
 	run("update_native_binding", func() error {
-		_, err := store.UpdateNativeKeyBinding("ordinary-native", UpdateNativeKeyBindingInput{Group: nativeStringPtr("plus")})
+		_, err := store.UpdateNativeKeyBinding("ordinary-native", UpdateNativeKeyBindingInput{AuthIDs: &[]string{"plus.json"}})
 		return err
 	})
 	run("rotate_native_binding", func() error {
@@ -107,12 +89,13 @@ func TestNativeBindingHistorySurvivesOrdinaryStateMutations(t *testing.T) {
 func TestNativeBindingHistorySaveStatePreservesDiskHistory(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	want := seedPersistenceHistory(t, path)
-	usage := map[string]*UsageState{"active-key": {Daily: UsageWindow{TotalUSD: 17, CallCount: 29}}}
-	if err := SaveState(path, []KeyConfig{{ID: "new-key"}}, usage, nil, nil); err != nil {
+	usage := map[string]*UsageState{"native-scope:active": {Daily: UsageWindow{TotalUSD: 17, CallCount: 29}}}
+	binding := NativeKeyBinding{ID: "new-binding", CallerScope: NativeCallerScope("sk-new-binding"), AuthIDs: []string{"a.json"}}
+	if err := SaveState(path, usage, []NativeKeyBinding{binding}); err != nil {
 		t.Fatal(err)
 	}
 	state := assertPersistenceHistory(t, path, want)
-	if len(state.Keys) != 1 || state.Keys[0].ID != "new-key" || state.Usage["active-key"].Daily.CallCount != 29 {
+	if len(state.NativeKeyBindings) != 1 || state.NativeKeyBindings[0].ID != "new-binding" || state.Usage["native-scope:active"].Daily.CallCount != 29 {
 		t.Fatal("preserving history prevented the requested state update")
 	}
 }
@@ -133,7 +116,7 @@ func TestNativeBindingHistoryUsageFlushPreservesLatestDiskHistory(t *testing.T) 
 	latest := cloneNativeBindingHistory(oldHistory)
 	latest[0].ID = "newer-history-on-disk"
 	latest[0].Changes[0].After.AuthIDs = []string{"credential-c"}
-	if err := saveStateWithNativeHistory(path, state.Keys, state.Usage, state.Aliases, state.ClassifyRules, state.NativeKeyBindings, latest); err != nil {
+	if err := saveStateWithNativeHistory(path, state.Usage, state.NativeKeyBindings, latest); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.FlushUsage(); err != nil {
@@ -171,7 +154,7 @@ func TestNativeBindingHistoryConfigureUsesOnlySelectedStatePath(t *testing.T) {
 				t.Fatal(err)
 			}
 			if existing {
-				if err := SaveState(secondPath, nil, nil, nil, nil); err != nil {
+				if err := SaveState(secondPath, nil, nil); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -266,7 +249,7 @@ func TestNativeBindingHistoryInvalidStateIsNotOverwritten(t *testing.T) {
 			if err := SaveUsageOnly(path, map[string]*UsageState{}); err == nil {
 				t.Fatal("SaveUsageOnly accepted invalid history")
 			}
-			if err := SaveState(path, nil, nil, nil, nil); err == nil {
+			if err := SaveState(path, nil, nil); err == nil {
 				t.Fatal("SaveState overwrote invalid history")
 			}
 			if err := NewStore().Configure(Config{Enabled: true, StateFile: path}); err == nil {
@@ -288,7 +271,7 @@ func TestNativeBindingHistoryExplicitSaveValidationPreservesExistingState(t *tes
 	want := seedPersistenceHistory(t, path)
 	invalid := cloneNativeBindingHistory(want)
 	invalid[0].Changes[0].CallerScope = "invalid"
-	if err := saveStateWithNativeHistory(path, nil, nil, nil, nil, nil, invalid); err == nil {
+	if err := saveStateWithNativeHistory(path, nil, nil, invalid); err == nil {
 		t.Fatal("explicit history save accepted invalid history")
 	}
 	assertPersistenceHistory(t, path, want)

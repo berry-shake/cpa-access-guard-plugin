@@ -434,54 +434,7 @@ func SaveModelPricingFile(path string, file ModelPricingFile) error {
 	return atomicWriteStateFile(path, raw)
 }
 
-func seedPricesFromAliases(aliases []AliasMapping) []ModelPrice {
-	index := make(map[string]ModelPrice)
-	for _, alias := range aliases {
-		if strings.EqualFold(alias.BillingMode, "per_call") {
-			continue
-		}
-		if !hasTokenPrices(alias.InputPricePerMillion, alias.OutputPricePerMillion, alias.CacheReadPricePerMillion, alias.CacheWritePricePerMillion) {
-			continue
-		}
-		provider := ""
-		if len(alias.Targets) > 0 {
-			provider = alias.Targets[0].Provider
-		}
-		source := PricingSourceLegacy
-		if strings.EqualFold(alias.PricingMode, "manual") {
-			source = PricingSourceAlias
-		}
-		putPrice(index, ModelPrice{
-			ID:                        alias.Alias,
-			DisplayName:               alias.Alias,
-			Provider:                  provider,
-			Source:                    source,
-			Status:                    PricingStatusPriced,
-			Mode:                      PricingModeText,
-			InputPricePerMillion:      alias.InputPricePerMillion,
-			OutputPricePerMillion:     alias.OutputPricePerMillion,
-			CacheReadPricePerMillion:  alias.CacheReadPricePerMillion,
-			CacheWritePricePerMillion: alias.CacheWritePricePerMillion,
-		}, true)
-		for _, target := range alias.Targets {
-			putPrice(index, ModelPrice{
-				ID:                        target.TargetModel,
-				DisplayName:               target.TargetModel,
-				Provider:                  target.Provider,
-				Source:                    source,
-				Status:                    PricingStatusPriced,
-				Mode:                      PricingModeText,
-				InputPricePerMillion:      alias.InputPricePerMillion,
-				OutputPricePerMillion:     alias.OutputPricePerMillion,
-				CacheReadPricePerMillion:  alias.CacheReadPricePerMillion,
-				CacheWritePricePerMillion: alias.CacheWritePricePerMillion,
-			}, true)
-		}
-	}
-	return uniquePrices(index)
-}
-
-func loadPricingState(path string, aliases []AliasMapping) (map[string]ModelPrice, PricingSyncState, []string, error) {
+func loadPricingState(path string) (map[string]ModelPrice, PricingSyncState, []string, error) {
 	file, err := LoadModelPricingFile(path)
 	if err == nil {
 		return indexPrices(file.Models), file.PricingSync, append([]string(nil), file.DeletedModelIDs...), nil
@@ -489,7 +442,7 @@ func loadPricingState(path string, aliases []AliasMapping) (map[string]ModelPric
 	if !errors.Is(err, os.ErrNotExist) {
 		return nil, PricingSyncState{}, nil, err
 	}
-	rows := seedPricesFromAliases(aliases)
+	rows := []ModelPrice{}
 	syncCfg := PricingSyncState{}
 	if err := SaveModelPricingFile(path, ModelPricingFile{
 		Version:         modelPricingFileVersion,
@@ -683,33 +636,6 @@ func (s *Store) persistPrices(path string, index map[string]ModelPrice, syncCfg 
 	})
 }
 
-func (s *Store) RecordPricingSyncResult(syncedAt *int64, syncErr string) error {
-	s.mu.Lock()
-	cfg := s.pricingSync
-	state := cfg.ModelsDev
-	now := time.Now().UnixMilli()
-	state.LastAttemptAt = &now
-	if syncedAt != nil {
-		state.LastSyncAt = syncedAt
-	}
-	if strings.TrimSpace(syncErr) == "" {
-		state.LastSyncError = nil
-	} else {
-		msg := strings.TrimSpace(syncErr)
-		state.LastSyncError = &msg
-	}
-	cfg.ModelsDev = normalizeSourceSyncState(state)
-	path := s.pricingPath
-	prices := s.prices
-	deleted := append([]string(nil), s.pricingDeleted...)
-	s.pricingSync = cfg
-	s.mu.Unlock()
-	if path == "" {
-		return nil
-	}
-	return s.persistPrices(path, prices, cfg, deleted)
-}
-
 func withoutString(values []string, drop string) []string {
 	out := make([]string, 0, len(values))
 	for _, value := range values {
@@ -798,7 +724,8 @@ func sourceAttemptState(prior PricingSourceSyncState, attemptedAt int64, result 
 
 // ApplyPricingSources atomically publishes one dual-source sync. LiteLLM is
 // authoritative. models.dev only fills IDs unknown to LiteLLM. Manual and
-// alias rows, deletion tombstones, and unmatched legacy values are preserved.
+// rows (including alias rows from older releases), deletion tombstones, and
+// unmatched legacy values are preserved.
 // A failed source never replaces its last known rows with the fallback source.
 func (s *Store) ApplyPricingSources(at time.Time, lite PricingFetchResult, liteErr error, fallback PricingFetchResult, fallbackErr error) (PricingApplyResult, error) {
 	s.updateMu.Lock()
@@ -828,12 +755,6 @@ func (s *Store) ApplyPricingSources(at time.Time, lite PricingFetchResult, liteE
 	for id, price := range s.prices {
 		next[id] = price
 	}
-	autoAliases := make([]AliasMapping, 0, len(s.aliases))
-	for _, alias := range s.aliases {
-		if alias != nil && !strings.EqualFold(alias.PricingMode, "manual") {
-			autoAliases = append(autoAliases, *alias)
-		}
-	}
 	deleted := append([]string(nil), s.pricingDeleted...)
 	path := s.pricingPath
 	syncState := s.pricingSync
@@ -842,35 +763,6 @@ func (s *Store) ApplyPricingSources(at time.Time, lite PricingFetchResult, liteE
 	for _, id := range deleted {
 		deletedSet[NormalizeModelIDForPricing(id)] = struct{}{}
 	}
-	autoCatalogSeeds := make(map[string][]ModelPrice, len(autoAliases)*2)
-	for _, alias := range autoAliases {
-		if strings.EqualFold(alias.BillingMode, "per_call") || !hasTokenPrices(alias.InputPricePerMillion, alias.OutputPricePerMillion, alias.CacheReadPricePerMillion, alias.CacheWritePricePerMillion) {
-			continue
-		}
-		seed := ModelPrice{
-			InputPricePerMillion:      alias.InputPricePerMillion,
-			OutputPricePerMillion:     alias.OutputPricePerMillion,
-			CacheReadPricePerMillion:  alias.CacheReadPricePerMillion,
-			CacheWritePricePerMillion: alias.CacheWritePricePerMillion,
-		}
-		if id := NormalizeModelIDForPricing(alias.Alias); id != "" {
-			autoCatalogSeeds[id] = append(autoCatalogSeeds[id], seed)
-		}
-		for _, target := range alias.Targets {
-			if id := NormalizeModelIDForPricing(target.TargetModel); id != "" {
-				autoCatalogSeeds[id] = append(autoCatalogSeeds[id], seed)
-			}
-		}
-	}
-	isAutomaticAliasSeed := func(id string, current ModelPrice) bool {
-		for _, seed := range autoCatalogSeeds[id] {
-			if samePriceValues(current, seed) {
-				return true
-			}
-		}
-		return false
-	}
-
 	// Mark source-owned rows stale before applying fresh candidates. They stay
 	// usable as last-known-good prices when one or both sources fail.
 	for id, current := range next {
@@ -901,12 +793,7 @@ func (s *Store) ApplyPricingSources(at time.Time, lite PricingFetchResult, liteE
 			case PricingSourceLegacy:
 				// fork.7 had no provenance. Values matching either upstream are
 				// safely recognized as prior auto-sync rows; custom values remain
-				// protected as legacy manual overrides. A row owned by an alias in
-				// automatic mode is explicitly replaceable even when the upstream
-				// now reports that model as known but unpriced.
-				if isAutomaticAliasSeed(id, current) {
-					break
-				}
+				// protected as legacy manual overrides.
 				matchesPriorSource := false
 				if prior, ok := liteIndex[id]; ok && samePriceValues(current, prior) {
 					matchesPriorSource = true
@@ -931,39 +818,6 @@ func (s *Store) ApplyPricingSources(at time.Time, lite PricingFetchResult, liteE
 			updated++
 		}
 		next[id] = candidate
-	}
-
-	// Older files may contain a custom alias-name row (for example "fast")
-	// copied from the alias's old price. Once an automatic target has a real
-	// source row, remove that legacy shadow so lookup reaches the target row.
-	// Manual catalog edits and manual aliases remain untouched.
-	for _, alias := range autoAliases {
-		aliasID := NormalizeModelIDForPricing(alias.Alias)
-		if aliasID == "" {
-			continue
-		}
-		hasSourcedTarget := false
-		hasDeletedTarget := false
-		aliasIsTarget := false
-		for _, target := range alias.Targets {
-			targetID := NormalizeModelIDForPricing(target.TargetModel)
-			if targetID == aliasID {
-				aliasIsTarget = true
-			}
-			if row, ok := next[targetID]; ok && (row.Source == PricingSourceLiteLLM || row.Source == PricingSourceModelsDev) {
-				hasSourcedTarget = true
-			}
-			if _, blocked := deletedSet[targetID]; blocked {
-				hasDeletedTarget = true
-			}
-		}
-		if aliasIsTarget || (!hasSourcedTarget && !hasDeletedTarget) {
-			continue
-		}
-		if row, ok := next[aliasID]; ok && row.Source == PricingSourceLegacy && isAutomaticAliasSeed(aliasID, row) {
-			delete(next, aliasID)
-			updated++
-		}
 	}
 
 	syncState.LiteLLM = sourceAttemptState(syncState.LiteLLM, atMillis, lite, liteErr)
@@ -1005,215 +859,4 @@ func (s *Store) PricingSyncStateSnapshot() PricingSyncState {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.pricingSync
-}
-
-// ReplaceCatalogPricing replaces the on-disk catalog with prices (cc-switch
-// sync overwrites the selected set rather than keeping reseller leftovers).
-func (s *Store) ReplaceCatalogPricing(prices []ModelPrice) (int, error) {
-	next := make(map[string]ModelPrice, len(prices))
-	for _, price := range prices {
-		putPrice(next, price, true)
-	}
-	s.mu.Lock()
-	path := s.pricingPath
-	syncCfg := s.pricingSync
-	deleted := append([]string(nil), s.pricingDeleted...)
-	s.prices = next
-	s.mu.Unlock()
-	if path == "" {
-		return len(next), nil
-	}
-	return len(next), s.persistPrices(path, next, syncCfg, deleted)
-}
-
-// MergeCatalogPricing upserts models.dev (or equivalent) rows into the
-// standalone catalog. Existing rows for other models are kept. Returns the
-// number of unique rows written from this batch.
-func (s *Store) MergeCatalogPricing(entries []ModelsDevEntry) (int, error) {
-	s.mu.Lock()
-	next := make(map[string]ModelPrice, len(s.prices)+len(entries)*2)
-	for k, v := range s.prices {
-		next[k] = v
-	}
-	written := 0
-	seen := make(map[string]struct{}, len(entries))
-	deletedSet := make(map[string]struct{}, len(s.pricingDeleted))
-	for _, id := range s.pricingDeleted {
-		deletedSet[NormalizeModelIDForPricing(id)] = struct{}{}
-	}
-	for _, entry := range entries {
-		id := NormalizeModelIDForPricing(entry.ModelID)
-		if id == "" || !hasTokenPrices(entry.Input, entry.Output, entry.CacheRead, entry.CacheWrite) {
-			continue
-		}
-		if _, blocked := deletedSet[id]; blocked {
-			continue
-		}
-		name := strings.TrimSpace(entry.Name)
-		if name == "" {
-			name = id
-		}
-		price := ModelPrice{
-			ID:                        id,
-			DisplayName:               name,
-			Provider:                  entry.ProviderID,
-			Source:                    entry.Source,
-			SourceModelID:             entry.SourceModelID,
-			Status:                    PricingStatusPriced,
-			Mode:                      PricingModeText,
-			LastSeenAt:                time.Now().UnixMilli(),
-			InputPricePerMillion:      entry.Input,
-			OutputPricePerMillion:     entry.Output,
-			CacheReadPricePerMillion:  entry.CacheRead,
-			CacheWritePricePerMillion: entry.CacheWrite,
-		}
-		before, existed := next[id]
-		putPrice(next, price, false)
-		if after, ok := next[id]; ok && (!existed || after != before) {
-			if _, dup := seen[id]; !dup {
-				seen[id] = struct{}{}
-				written++
-			}
-		}
-	}
-	deleted := append([]string(nil), s.pricingDeleted...)
-	path := s.pricingPath
-	syncCfg := s.pricingSync
-	s.prices = next
-	s.pricingDeleted = deleted
-	s.mu.Unlock()
-	if path == "" {
-		return written, nil
-	}
-	return written, s.persistPrices(path, next, syncCfg, deleted)
-}
-
-func aliasPricingModelIDs(alias AliasMapping) []string {
-	ids := []string{NormalizeModelIDForPricing(alias.Alias)}
-	for _, target := range alias.Targets {
-		ids = append(ids, NormalizeModelIDForPricing(target.TargetModel))
-	}
-	return uniqueSortedStrings(ids)
-}
-
-// upsertAliasIntoPricing reconciles alias-owned token prices in the catalog.
-// It also removes protected rows that no configured manual token alias owns
-// anymore (for example after switching to auto/per-call, clearing prices,
-// changing targets, or deleting an alias).
-func (s *Store) upsertAliasIntoPricing(alias AliasMapping) error {
-	s.mu.Lock()
-	next := make(map[string]ModelPrice, len(s.prices)+2)
-	for k, v := range s.prices {
-		next[k] = v
-	}
-	manualOwners := make(map[string]struct{})
-	for _, configured := range s.aliases {
-		if configured == nil || !strings.EqualFold(configured.PricingMode, "manual") ||
-			strings.EqualFold(configured.BillingMode, "per_call") ||
-			!hasTokenPrices(configured.InputPricePerMillion, configured.OutputPricePerMillion, configured.CacheReadPricePerMillion, configured.CacheWritePricePerMillion) {
-			continue
-		}
-		for _, id := range aliasPricingModelIDs(*configured) {
-			manualOwners[id] = struct{}{}
-		}
-	}
-	for id, row := range next {
-		if row.Source != PricingSourceAlias {
-			continue
-		}
-		if _, owned := manualOwners[id]; !owned {
-			delete(next, id)
-		}
-	}
-
-	manualPricing := strings.EqualFold(alias.PricingMode, "manual")
-	tokenPricing := !strings.EqualFold(alias.BillingMode, "per_call") &&
-		hasTokenPrices(alias.InputPricePerMillion, alias.OutputPricePerMillion, alias.CacheReadPricePerMillion, alias.CacheWritePricePerMillion)
-	deleted := append([]string(nil), s.pricingDeleted...)
-	deletedSet := make(map[string]struct{}, len(deleted))
-	for _, id := range deleted {
-		deletedSet[id] = struct{}{}
-	}
-	if !tokenPricing {
-		path := s.pricingPath
-		syncCfg := s.pricingSync
-		s.prices = next
-		s.mu.Unlock()
-		if path == "" {
-			return nil
-		}
-		return s.persistPrices(path, next, syncCfg, deleted)
-	}
-
-	provider := ""
-	if len(alias.Targets) > 0 {
-		provider = alias.Targets[0].Provider
-	}
-	source := PricingSourceLegacy
-	if manualPricing {
-		source = PricingSourceAlias
-	}
-	seed := ModelPrice{
-		InputPricePerMillion:      alias.InputPricePerMillion,
-		OutputPricePerMillion:     alias.OutputPricePerMillion,
-		CacheReadPricePerMillion:  alias.CacheReadPricePerMillion,
-		CacheWritePricePerMillion: alias.CacheWritePricePerMillion,
-	}
-	if !manualPricing {
-		for _, id := range aliasPricingModelIDs(alias) {
-			if current, ok := next[id]; ok && current.Source == PricingSourceAlias && samePriceValues(current, seed) {
-				// Switching an alias from manual back to auto must release its
-				// protected catalog rows so the next source sync can own them.
-				delete(next, id)
-			}
-		}
-	}
-	putAliasPrice := func(price ModelPrice) {
-		id := NormalizeModelIDForPricing(price.ID)
-		if id == "" {
-			return
-		}
-		if manualPricing {
-			deleted = withoutString(deleted, id)
-			delete(deletedSet, id)
-		} else if _, blocked := deletedSet[id]; blocked {
-			return
-		}
-		putPrice(next, price, manualPricing)
-	}
-	putAliasPrice(ModelPrice{
-		ID:                        alias.Alias,
-		DisplayName:               alias.Alias,
-		Provider:                  provider,
-		Source:                    source,
-		Status:                    PricingStatusPriced,
-		Mode:                      PricingModeText,
-		InputPricePerMillion:      alias.InputPricePerMillion,
-		OutputPricePerMillion:     alias.OutputPricePerMillion,
-		CacheReadPricePerMillion:  alias.CacheReadPricePerMillion,
-		CacheWritePricePerMillion: alias.CacheWritePricePerMillion,
-	})
-	for _, target := range alias.Targets {
-		putAliasPrice(ModelPrice{
-			ID:                        target.TargetModel,
-			DisplayName:               target.TargetModel,
-			Provider:                  target.Provider,
-			Source:                    source,
-			Status:                    PricingStatusPriced,
-			Mode:                      PricingModeText,
-			InputPricePerMillion:      alias.InputPricePerMillion,
-			OutputPricePerMillion:     alias.OutputPricePerMillion,
-			CacheReadPricePerMillion:  alias.CacheReadPricePerMillion,
-			CacheWritePricePerMillion: alias.CacheWritePricePerMillion,
-		})
-	}
-	path := s.pricingPath
-	syncCfg := s.pricingSync
-	s.prices = next
-	s.pricingDeleted = deleted
-	s.mu.Unlock()
-	if path == "" {
-		return nil
-	}
-	return s.persistPrices(path, next, syncCfg, deleted)
 }

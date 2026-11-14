@@ -16,8 +16,8 @@ func TestNativeBindingNameSyncManagementRoute(t *testing.T) {
 	app, statePath := configureNativeBindingManagementApp(t)
 	app.store.StopUsageFlusher()
 	const secret = "sk-synthetic-native-name-sync-0123456789"
-	created := nativeBindingManagementCall(t, app, http.MethodPost, nativeBatchTestPath, nil, map[string]string{
-		"id": "client", "key": secret, "group": "team",
+	created := nativeBindingManagementCall(t, app, http.MethodPost, nativeBatchTestPath, nil, map[string]any{
+		"id": "client", "key": secret, "auth_ids": []string{"team.json"},
 	})
 	if created.StatusCode != http.StatusCreated || !bytes.Contains(created.Body, []byte(`"name":""`)) {
 		t.Fatalf("create without name: status=%d body=%s", created.StatusCode, created.Body)
@@ -31,7 +31,7 @@ func TestNativeBindingNameSyncManagementRoute(t *testing.T) {
 		t.Fatalf("sync: status=%d body=%s", response.StatusCode, response.Body)
 	}
 	assertNativeBindingResponseIsRedacted(t, response.Body, secret)
-	if binding := app.store.NativeKeyBindingsSnapshot()[0]; binding.Name != "From CPA" || binding.Group != "team" {
+	if binding := app.store.NativeKeyBindingsSnapshot()[0]; binding.Name != "From CPA" || len(binding.AuthIDs) != 1 || binding.AuthIDs[0] != "team.json" {
 		t.Fatalf("unexpected synchronized binding: %+v", binding)
 	}
 	response = nativeBindingManagementCall(t, app, http.MethodPatch, nativeBatchTestPath, nil, map[string]string{"id": "client", "name": " "})
@@ -64,8 +64,8 @@ func TestNativeBindingNameSyncRejectsInvalidRequestsWithoutLeakingKey(t *testing
 	app, statePath := configureNativeBindingManagementApp(t)
 	app.store.StopUsageFlusher()
 	const secret = "sk-synthetic-native-name-private-0123456789"
-	created := nativeBindingManagementCall(t, app, http.MethodPost, nativeBatchTestPath, nil, map[string]string{
-		"id": "client", "key": secret, "group": "team", "name": "Before",
+	created := nativeBindingManagementCall(t, app, http.MethodPost, nativeBatchTestPath, nil, map[string]any{
+		"id": "client", "key": secret, "auth_ids": []string{"team.json"}, "name": "Before",
 	})
 	if created.StatusCode != http.StatusCreated {
 		t.Fatalf("create: status=%d", created.StatusCode)

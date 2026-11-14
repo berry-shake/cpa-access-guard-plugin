@@ -100,7 +100,7 @@ func TestNativeRoundRobinPersistenceAndPartialUpdates(t *testing.T) {
 		if len(snapshot) != 1 || snapshot[0].RoundRobin != want {
 			t.Fatalf("snapshot = %+v, want round_robin %v", snapshot, want)
 		}
-		constraint, ok := current.ResolveNativeKeyConstraint(binding.CallerScope, "codex", "gpt-5.3-codex-spark")
+		constraint, ok := current.ResolveNativeKeyConstraint(binding.CallerScope)
 		if !ok || constraint.RoundRobin != want || len(constraint.AuthIDs) != 2 {
 			t.Fatalf("constraint = %+v, resolved = %v, want round_robin %v", constraint, ok, want)
 		}
@@ -110,7 +110,7 @@ func TestNativeRoundRobinPersistenceAndPartialUpdates(t *testing.T) {
 		// Callers can modify snapshots without changing the live constraint.
 		snapshot[0].RoundRobin = !want
 		snapshot[0].AuthIDs[0] = "unbound.json"
-		fresh, _ := current.ResolveNativeKeyConstraint(binding.CallerScope, "codex", "gpt-5.3-codex-spark")
+		fresh, _ := current.ResolveNativeKeyConstraint(binding.CallerScope)
 		if fresh.RoundRobin != want || fresh.AuthIDs[0] != "codex-A.json" {
 			t.Fatalf("snapshot escaped into live constraint: %+v", fresh)
 		}
@@ -161,7 +161,7 @@ func TestNativeRoundRobinFailedPersistencePreservesSelectionPolicy(t *testing.T)
 				t.Fatal(err)
 			}
 			binding, err := store.CreateNativeKeyBinding(CreateNativeKeyBindingInput{
-				ID: "durable", Enabled: true, APIKey: "durable-round-robin-key", Group: "team", RoundRobin: before,
+				ID: "durable", Enabled: true, APIKey: "durable-round-robin-key", AuthIDs: []string{"team.json"}, RoundRobin: before,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -177,7 +177,7 @@ func TestNativeRoundRobinFailedPersistencePreservesSelectionPolicy(t *testing.T)
 			if _, errUpdate := store.UpdateNativeKeyBinding(binding.ID, UpdateNativeKeyBindingInput{RoundRobin: nativeBoolPtr(!before)}); !errors.Is(errUpdate, ErrNativeKeyBindingPersistence) {
 				t.Fatalf("update error = %v, want persistence failure", errUpdate)
 			}
-			constraint, ok := store.ResolveNativeKeyConstraint(binding.CallerScope, "codex", "gpt-5.3-codex-spark")
+			constraint, ok := store.ResolveNativeKeyConstraint(binding.CallerScope)
 			if !ok || constraint.RoundRobin != before {
 				t.Fatalf("failed update published selection policy: %+v, resolved %v", constraint, ok)
 			}

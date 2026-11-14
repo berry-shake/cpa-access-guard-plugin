@@ -105,12 +105,7 @@ func (s *Store) recordNativeUsage(binding NativeKeyBinding, alias, model string,
 
 	account := nativeUsageLedgerID(binding.CallerScope)
 
-	usage := TokenUsage{
-		PromptTokens:     int(detail.InputTokens),
-		CompletionTokens: int(detail.OutputTokens),
-		Found:            detail.InputTokens > 0 || detail.OutputTokens > 0,
-	}
-	if !usage.Found {
+	if detail.InputTokens <= 0 && detail.OutputTokens <= 0 {
 		return 0
 	}
 	sheet := PriceSheet{Input: inputPerMillion, Output: outputPerMillion, CacheRead: cacheReadPerMillion, CacheWrite: cacheWritePerMillion, Priced: priced}
@@ -197,14 +192,7 @@ func (s *Store) NativeBindingUsage(binding NativeKeyBinding) NativeBindingUsageS
 	if usageLedger == nil {
 		return summary
 	}
-	// Reuse the downstream key summary by projecting the binding onto a
-	// KeyConfig with the same ledger id and limits.
-	projection := KeyConfig{
-		ID:             nativeUsageLedgerID(binding.CallerScope),
-		DailyLimitUSD:  binding.DailyUSD,
-		WeeklyLimitUSD: binding.WeeklyUSD,
-	}
-	ledgerSummary := usageLedger.Summary(projection)
+	ledgerSummary := usageLedger.Summary(nativeUsageLedgerID(binding.CallerScope))
 	summary.DailyUSDUsed = ledgerSummary.DailyUSD
 	summary.WeeklyUSDUsed = ledgerSummary.WeeklyUSD
 	summary.DailyCalls = ledgerSummary.DailyCallCount
@@ -324,6 +312,11 @@ func resetNativeQuotaAccounts(accounts []string, usage *usageLedger, limiter *Ra
 		if limiter != nil {
 			delete(limiter.buckets, account)
 		}
+	}
+	if usage != nil {
+		// The persisted snapshot is exactly the new in-memory ledger.
+		usage.generation++
+		usage.flushed = usage.generation
 	}
 	return nil
 }

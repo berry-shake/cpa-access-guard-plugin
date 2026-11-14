@@ -58,7 +58,7 @@ func TestNativeRoundRobinManagementCRUDAndRestart(t *testing.T) {
 		app.Shutdown()
 		app = NewApp()
 		t.Cleanup(app.Shutdown)
-		config := []byte("enabled: true\nstate_file: \"" + filepath.ToSlash(statePath) + "\"\nkeys: []\n")
+		config := []byte("enabled: true\nstate_file: \"" + filepath.ToSlash(statePath) + "\"\n")
 		req, errMarshal := json.Marshal(LifecycleRequest{ConfigYAML: config})
 		if errMarshal != nil {
 			t.Fatal(errMarshal)
@@ -111,7 +111,7 @@ func TestNativeRoundRobinManagementDefaultsAndInvalidValues(t *testing.T) {
 	app, _ := configureNativeBindingManagementApp(t)
 	const basePath = "/v0/management/plugins/access-guard/native-key-bindings"
 	created := nativeBindingManagementCall(t, app, http.MethodPost, basePath, nil, map[string]any{
-		"id": "legacy", "key": "legacy-management-round-robin-key", "group": "team",
+		"id": "legacy", "key": "legacy-management-round-robin-key", "auth_ids": []string{"team.json"},
 	})
 	if created.StatusCode != http.StatusCreated {
 		t.Fatalf("create status = %d, body = %s", created.StatusCode, created.Body)

@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -57,7 +58,6 @@ func (a *App) startPricingSyncer(cfg policy.PricingSyncConfig) {
 		a.pricingSyncStatus.CatalogSize = a.store.PricingCatalogSize()
 		a.pricingSyncStatus.Sources = a.store.PricingSyncStateSnapshot()
 		a.pricingSyncMu.Unlock()
-		a.store.SyncAliasPricesFromCatalog()
 		return
 	}
 	old = a.pricingSyncer
@@ -148,14 +148,23 @@ func (s *pricingSyncer) loop(liteURL, modelsDevURL string, interval time.Duratio
 	}
 }
 
-// run executes one sync and records the outcome (also used by the manual
-// management-API trigger).
+// runPricingSync executes one sync and records the outcome (also used by the
+// manual management-API trigger).
 func (a *App) runPricingSync(liteURL, modelsDevURL string) policy.PricingSyncResult {
 	// A timer tick and an operator-triggered sync may arrive together. Keep one
 	// fetch/apply transaction in flight so an older run cannot finish last and
 	// overwrite newer source status or last-seen timestamps.
 	a.pricingRunMu.Lock()
 	defer a.pricingRunMu.Unlock()
+	result := a.syncPricingSources(liteURL, modelsDevURL)
+	// Decoding both catalogs briefly grows the heap by tens of MiB. This
+	// plugin runs its own Go runtime inside CPA, and the scavenger would hold
+	// that memory for minutes; one sync a day can afford to return it now.
+	debug.FreeOSMemory()
+	return result
+}
+
+func (a *App) syncPricingSources(liteURL, modelsDevURL string) policy.PricingSyncResult {
 
 	result := policy.PricingSyncResult{At: time.Now().UTC()}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -192,9 +201,6 @@ func (a *App) runPricingSync(liteURL, modelsDevURL string) policy.PricingSyncRes
 	result.KnownUnpriced = applied.KnownUnpriced
 	result.Stale = applied.Stale
 	result.Sources = a.store.PricingSyncStateSnapshot()
-	if lite.err == nil || modelsDev.err == nil {
-		result.Updated, result.Unmatched, result.Skipped = a.store.SyncAliasPricesFromCatalog()
-	}
 	if lite.err != nil || modelsDev.err != nil {
 		result.Partial = lite.err == nil || modelsDev.err == nil
 	}
@@ -206,8 +212,8 @@ func (a *App) runPricingSync(liteURL, modelsDevURL string) policy.PricingSyncRes
 	if result.Error != "" {
 		log.Printf("access-guard: pricing sync failed: %s", result.Error)
 	} else {
-		log.Printf("access-guard: pricing sync ok: %d aliases updated, %d unmatched, %d skipped, %d catalog rows (%d LiteLLM, %d models.dev fallback, %d manual, %d stale)",
-			result.Updated, result.Unmatched, result.Skipped, result.Catalog, result.LiteLLM, result.ModelsDev, result.Manual, result.Stale)
+		log.Printf("access-guard: pricing sync ok: %d catalog rows (%d LiteLLM, %d models.dev fallback, %d manual, %d stale), %d changed",
+			result.Catalog, result.LiteLLM, result.ModelsDev, result.Manual, result.Stale, result.CatalogUpdated)
 	}
 	return result
 }

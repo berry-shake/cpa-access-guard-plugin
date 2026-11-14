@@ -56,14 +56,12 @@ func (s *Store) SyncNativeBindingNames(updates []NativeBindingNameUpdate) (Nativ
 		return result, nil
 	}
 
-	// Sample usage under the persistence lock so a preceding flush cannot
-	// have saved newer counters than the ones included in this write.
+	// writeFullStateLocked samples usage under the persistence lock so a
+	// preceding flush cannot have saved newer counters than this write.
 	s.persistMu.Lock()
 	defer s.persistMu.Unlock()
 	s.mu.RLock()
 	bindings := s.nativeKeyBindingsSnapshotLocked()
-	keys, usage := s.keysSnapshotLocked(), s.usageSnapshotLocked()
-	aliases, rules := s.aliasesSnapshotLocked(), s.classifyRulesSnapshotLocked()
 	history, path := cloneNativeBindingHistory(s.nativeBindingHistory), s.statePath
 	s.mu.RUnlock()
 
@@ -74,7 +72,7 @@ func (s *Store) SyncNativeBindingNames(updates []NativeBindingNameUpdate) (Nativ
 			bindings[i].UpdatedAt = now
 		}
 	}
-	if err := saveStateWithNativeHistory(path, keys, usage, aliases, rules, bindings, history); err != nil {
+	if err := s.writeFullStateLocked(path, bindings, history); err != nil {
 		return NativeBindingNameSyncResult{}, fmt.Errorf("%w: %w", ErrNativeKeyBindingPersistence, err)
 	}
 	s.mu.Lock()

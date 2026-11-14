@@ -23,9 +23,9 @@ const (
 )
 
 // nativeAuthIDsFailClosedGroup keeps direct-auth bindings fail-closed when an
-// older plugin release ignores the additive auth_ids field. Custom classify
-// groups always carry the "classify:" prefix, while built-in tiers never use
-// this reserved value, so the legacy group-only scheduler cannot match it.
+// older plugin release ignores the additive auth_ids field. No real scheduler
+// group uses this reserved value, so the legacy group-only scheduler of a
+// downgraded plugin cannot match it.
 const nativeAuthIDsFailClosedGroup = "@access-guard/direct-auth-ids"
 
 // nativeAuthIDsPersistedGroupPrefix redundantly stores exact auth IDs in a
@@ -42,9 +42,14 @@ var (
 )
 
 // NativeKeyBinding maps the irreversible identity of a CPA built-in API key
-// to a model-access policy and either one auth-file group or an exact auth-ID
-// allow-list. It is an authorization constraint, not an authentication
-// credential: the original API key is intentionally absent.
+// to a model-access policy and an exact auth-ID allow-list. It is an
+// authorization constraint, not an authentication credential: the original API
+// key is intentionally absent.
+//
+// Group is persisted for downgrade safety only. For a binding with auth IDs it
+// carries the encoded fail-closed marker; a binding written by an older release
+// may still hold a credential group without auth IDs, which now rejects every
+// request until the operator selects credentials again.
 type NativeKeyBinding struct {
 	ID          string                  `yaml:"id" json:"id"`
 	Name        string                  `yaml:"name" json:"name"`
@@ -59,9 +64,8 @@ type NativeKeyBinding struct {
 	// are immutable after publication and intentionally never serialized.
 	modelIndex    map[string]struct{}
 	modelAnyIndex map[string]struct{}
-	// Optional usage limits, same semantics as the downstream KeyConfig
-	// equivalents: 0 = unlimited. USD usage is priced from the standalone
-	// model-pricing JSON, not alias mappings.
+	// Optional usage limits: 0 = unlimited. USD usage is priced from the
+	// standalone model-pricing JSON.
 	RPM       int       `yaml:"rpm,omitempty" json:"rpm,omitempty"`
 	DailyUSD  float64   `yaml:"daily_usd,omitempty" json:"daily_usd,omitempty"`
 	WeeklyUSD float64   `yaml:"weekly_usd,omitempty" json:"weekly_usd,omitempty"`
@@ -94,7 +98,6 @@ type CreateNativeKeyBindingInput struct {
 	Enabled     bool                     `json:"-" yaml:"-"`
 	RoundRobin  bool                     `json:"-" yaml:"-"`
 	APIKey      string                   `json:"-" yaml:"-"`
-	Group       string                   `json:"-" yaml:"-"`
 	AuthIDs     []string                 `json:"-" yaml:"-"`
 	ModelAccess *NativeModelAccessPolicy `json:"-" yaml:"-"`
 	RPM         *int                     `json:"-" yaml:"-"`
@@ -110,7 +113,6 @@ type UpdateNativeKeyBindingInput struct {
 	Enabled     *bool                    `json:"-" yaml:"-"`
 	RoundRobin  *bool                    `json:"-" yaml:"-"`
 	APIKey      string                   `json:"-" yaml:"-"`
-	Group       *string                  `json:"-" yaml:"-"`
 	AuthIDs     *[]string                `json:"-" yaml:"-"`
 	ModelAccess *NativeModelAccessPolicy `json:"-" yaml:"-"`
 	RPM         *int                     `json:"-" yaml:"-"`
@@ -140,7 +142,7 @@ func NativeKeyPreview(rawAPIKey string) string {
 	if len(rawAPIKey) <= 12 {
 		return "<redacted>"
 	}
-	return PreviewKey(rawAPIKey)
+	return rawAPIKey[:7] + "..." + rawAPIKey[len(rawAPIKey)-5:]
 }
 
 func normalizeNativeKeyBindings(bindings []NativeKeyBinding) error {
@@ -183,14 +185,9 @@ func normalizeNativeKeyBindings(bindings []NativeKeyBinding) error {
 			}
 			binding.Group = encodeNativeAuthIDsGroup(binding.AuthIDs)
 		} else if binding.Group == "" {
-			return fmt.Errorf("native key binding %q: group is required when auth_ids is empty", binding.ID)
-		}
-		if len(binding.AuthIDs) == 0 && strings.HasPrefix(binding.Group, ClassifyGroupPrefix) {
-			suffix := strings.TrimSpace(strings.TrimPrefix(binding.Group, ClassifyGroupPrefix))
-			if suffix == "" {
-				return fmt.Errorf("native key binding %q: classify group suffix is required", binding.ID)
-			}
-			binding.Group = ClassifyGroupPrefix + suffix
+			// A legacy group without auth IDs is still loaded so the operator
+			// can see it and reselect credentials; it never admits traffic.
+			return fmt.Errorf("native key binding %q: auth_ids is required", binding.ID)
 		}
 		if binding.RPM < 0 {
 			return fmt.Errorf("native key binding %q: rpm must be >= 0", binding.ID)
@@ -245,12 +242,23 @@ func decodeNativeAuthIDsGroup(group string) ([]string, bool) {
 	return authIDs, len(authIDs) > 0
 }
 
-// NativeKeyBindingNeedsReselection reports an older direct-auth marker whose
-// exact auth IDs are no longer recoverable. It remains fail-closed, but the
-// management API should ask the operator to reselect credentials instead of
-// exposing the internal marker as a normal group.
+// NativeKeyBindingNeedsReselection reports a binding without exact auth IDs:
+// either an older direct-auth marker whose IDs are no longer recoverable or a
+// credential group written by a release that still supported groups. Both stay
+// fail-closed until the operator selects credentials again.
 func NativeKeyBindingNeedsReselection(binding NativeKeyBinding) bool {
-	return len(binding.AuthIDs) == 0 && isNativeAuthIDsGroup(binding.Group)
+	return len(binding.AuthIDs) == 0
+}
+
+// NativeKeyBindingLegacyGroup returns the credential group an older release
+// saved for a binding without auth IDs, or "" (including for the internal
+// direct-auth marker). Management shows it read-only next to the reselection
+// prompt.
+func NativeKeyBindingLegacyGroup(binding NativeKeyBinding) string {
+	if len(binding.AuthIDs) > 0 || isNativeAuthIDsGroup(binding.Group) {
+		return ""
+	}
+	return binding.Group
 }
 
 func normalizeNativeAuthIDs(authIDs []string) []string {
@@ -423,7 +431,6 @@ func (s *Store) CreateNativeKeyBinding(input CreateNativeKeyBindingInput) (Nativ
 		RoundRobin:  input.RoundRobin,
 		CallerScope: callerScope,
 		KeyPreview:  NativeKeyPreview(rawAPIKey),
-		Group:       input.Group,
 		AuthIDs:     append([]string(nil), input.AuthIDs...),
 		ModelAccess: NativeModelAccessPolicy{Mode: NativeModelAccessAll},
 		CreatedAt:   now,
@@ -445,10 +452,6 @@ func (s *Store) CreateNativeKeyBinding(input CreateNativeKeyBindingInput) (Nativ
 	s.mu.RLock()
 	existing := s.nativeKeyBindingsSnapshotLocked()
 	_, idExists := s.nativeKeyBindings[strings.ToLower(strings.TrimSpace(input.ID))]
-	keys := s.keysSnapshotLocked()
-	usage := s.usageSnapshotLocked()
-	aliases := s.aliasesSnapshotLocked()
-	rules := s.classifyRulesSnapshotLocked()
 	path := s.statePath
 	s.mu.RUnlock()
 	if idExists {
@@ -462,7 +465,7 @@ func (s *Store) CreateNativeKeyBinding(input CreateNativeKeyBindingInput) (Nativ
 
 	// Persist before publishing the new authorization policy. A failed disk
 	// write must not leave a binding active only in memory.
-	if err := s.saveStateWithNativeBindings(path, keys, usage, aliases, rules, existing); err != nil {
+	if err := s.saveStateWithNativeBindings(path, existing); err != nil {
 		return NativeKeyBinding{}, fmt.Errorf("%w: %w", ErrNativeKeyBindingPersistence, err)
 	}
 	s.mu.Lock()
@@ -481,13 +484,8 @@ func (s *Store) CreateNativeKeyBinding(input CreateNativeKeyBindingInput) (Nativ
 func (s *Store) UpdateNativeKeyBinding(id string, input UpdateNativeKeyBindingInput) (NativeKeyBinding, error) {
 	s.updateMu.Lock()
 	defer s.updateMu.Unlock()
-	if input.Group != nil && input.AuthIDs != nil &&
-		strings.TrimSpace(*input.Group) != "" && len(normalizeNativeAuthIDs(*input.AuthIDs)) > 0 {
-		return NativeKeyBinding{}, errors.New("group and auth_ids are mutually exclusive")
-	}
-	if input.AuthIDs != nil && len(normalizeNativeAuthIDs(*input.AuthIDs)) == 0 &&
-		(input.Group == nil || strings.TrimSpace(*input.Group) == "") {
-		return NativeKeyBinding{}, errors.New("group is required when auth_ids is empty")
+	if input.AuthIDs != nil && len(normalizeNativeAuthIDs(*input.AuthIDs)) == 0 {
+		return NativeKeyBinding{}, errors.New("auth_ids is required")
 	}
 
 	id = strings.ToLower(strings.TrimSpace(id))
@@ -496,10 +494,6 @@ func (s *Store) UpdateNativeKeyBinding(id string, input UpdateNativeKeyBindingIn
 	}
 	s.mu.RLock()
 	existing := s.nativeKeyBindingsSnapshotLocked()
-	keys := s.keysSnapshotLocked()
-	usage := s.usageSnapshotLocked()
-	aliases := s.aliasesSnapshotLocked()
-	rules := s.classifyRulesSnapshotLocked()
 	path := s.statePath
 	s.mu.RUnlock()
 	index := -1
@@ -523,17 +517,11 @@ func (s *Store) UpdateNativeKeyBinding(id string, input UpdateNativeKeyBindingIn
 	if input.RoundRobin != nil {
 		candidate.RoundRobin = *input.RoundRobin
 	}
-	if input.Group != nil {
-		candidate.Group = *input.Group
-		if strings.TrimSpace(*input.Group) != "" {
-			candidate.AuthIDs = nil
-		}
-	}
 	if input.AuthIDs != nil {
+		// Replacing the auth IDs also retires a legacy credential group; the
+		// encoded marker is rebuilt during normalization.
 		candidate.AuthIDs = append([]string(nil), (*input.AuthIDs)...)
-		if len(normalizeNativeAuthIDs(*input.AuthIDs)) > 0 {
-			candidate.Group = ""
-		}
+		candidate.Group = ""
 	}
 	if input.ModelAccess != nil {
 		candidate.ModelAccess = cloneNativeModelAccess(*input.ModelAccess)
@@ -559,8 +547,8 @@ func (s *Store) UpdateNativeKeyBinding(id string, input UpdateNativeKeyBindingIn
 	candidate = existing[index]
 
 	// Persist before replacing the live lookup indexes. This also makes a
-	// failed disable/group/key rotation leave the last durable policy active.
-	if err := s.saveStateWithNativeBindings(path, keys, usage, aliases, rules, existing); err != nil {
+	// failed disable/credential/key rotation leave the last durable policy active.
+	if err := s.saveStateWithNativeBindings(path, existing); err != nil {
 		return NativeKeyBinding{}, fmt.Errorf("%w: %w", ErrNativeKeyBindingPersistence, err)
 	}
 	s.mu.Lock()
@@ -588,10 +576,6 @@ func (s *Store) DeleteNativeKeyBinding(id string) error {
 		return ErrUnknownNativeKeyBinding
 	}
 	existing := s.nativeKeyBindingsSnapshotLocked()
-	keys := s.keysSnapshotLocked()
-	usage := s.usageSnapshotLocked()
-	aliases := s.aliasesSnapshotLocked()
-	rules := s.classifyRulesSnapshotLocked()
 	path := s.statePath
 	s.mu.RUnlock()
 	next := make([]NativeKeyBinding, 0, len(existing)-1)
@@ -602,7 +586,7 @@ func (s *Store) DeleteNativeKeyBinding(id string) error {
 	}
 	// Keep the old restriction live until its removal is durable. This is
 	// especially important because an in-memory-only delete would fail open.
-	if err := s.saveStateWithNativeBindings(path, keys, usage, aliases, rules, next); err != nil {
+	if err := s.saveStateWithNativeBindings(path, next); err != nil {
 		return fmt.Errorf("%w: %w", ErrNativeKeyBindingPersistence, err)
 	}
 	s.mu.Lock()
@@ -663,11 +647,10 @@ func (s *Store) replaceNativeKeyBindingsLocked(bindings []NativeKeyBinding) {
 	}
 }
 
-// NativeKeyConstraint is the single authorization boundary resolved for one
-// enabled native key binding. Exactly one of Group or AuthIDs is populated,
-// and the immutable model indexes enforce the same binding before selection.
+// NativeKeyConstraint is the authorization boundary resolved for one enabled
+// native key binding: the exact auth-ID allow-list plus the immutable model
+// indexes. An empty AuthIDs list (legacy group binding) admits nothing.
 type NativeKeyConstraint struct {
-	Group         string
 	AuthIDs       []string
 	RoundRobin    bool
 	allModels     bool
@@ -675,35 +658,29 @@ type NativeKeyConstraint struct {
 	modelAnyIndex map[string]struct{}
 }
 
-// ResolveNativeKeyConstraint resolves a CPA-provided caller_scope into either
-// a group or an exact auth-ID allow-list plus its model-access policy. The
-// provider and model arguments are retained for source compatibility; callers
-// enforce the returned constraint with AllowsModel.
-func (s *Store) ResolveNativeKeyConstraint(callerScope, provider, model string) (NativeKeyConstraint, bool) {
-	_ = provider
-	_ = model
+// ResolveNativeKeyConstraint resolves a CPA-provided caller_scope into the
+// binding's exact auth-ID allow-list plus its model-access policy. The bool is
+// true only for an existing, enabled binding.
+func (s *Store) ResolveNativeKeyConstraint(callerScope string) (NativeKeyConstraint, bool) {
 	callerScope = strings.ToLower(strings.TrimSpace(callerScope))
 	if callerScope == "" {
 		return NativeKeyConstraint{}, false
 	}
 	s.mu.RLock()
+	defer s.mu.RUnlock()
 	binding := s.nativeKeyBindingsByScope[callerScope]
 	if binding == nil || !binding.Enabled {
-		s.mu.RUnlock()
 		return NativeKeyConstraint{}, false
 	}
-	constraint := NativeKeyConstraint{
+	// The model indexes are immutable after publication and can be shared;
+	// the auth-ID slice is copied so a caller cannot mutate the live policy.
+	return NativeKeyConstraint{
 		AuthIDs:       append([]string(nil), binding.AuthIDs...),
 		RoundRobin:    binding.RoundRobin,
 		allModels:     binding.ModelAccess.Mode == NativeModelAccessAll,
 		modelIndex:    binding.modelIndex,
 		modelAnyIndex: binding.modelAnyIndex,
-	}
-	if len(constraint.AuthIDs) == 0 {
-		constraint.Group = binding.Group
-	}
-	s.mu.RUnlock()
-	return constraint, true
+	}, true
 }
 
 // AllowsModel reports whether this binding authorizes a provider/model pair.
@@ -724,17 +701,4 @@ func (c NativeKeyConstraint) AllowsModel(provider, model string) bool {
 	}
 	_, allowed := c.modelIndex[nativeModelKey(provider, model)]
 	return allowed
-}
-
-// ResolveNativeKeyGroup resolves a CPA-provided caller_scope into the single
-// scheduler group authorized for that native key. provider and model are
-// reserved for future per-route bindings; the first version intentionally
-// applies one group to every request made by the key. The bool is true only
-// for an existing, enabled group-mode binding.
-func (s *Store) ResolveNativeKeyGroup(callerScope, provider, model string) (string, bool) {
-	constraint, ok := s.ResolveNativeKeyConstraint(callerScope, provider, model)
-	if !ok || len(constraint.AuthIDs) > 0 {
-		return "", false
-	}
-	return constraint.Group, true
 }

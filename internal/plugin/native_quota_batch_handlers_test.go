@@ -29,7 +29,7 @@ func nativeQuotaBatchFixture(t *testing.T) (*App, string, []policy.NativeKeyBind
 	for index, id := range []string{"one", "two", "three"} {
 		secret := "sk-native-quota-batch-" + id + "-0123456789"
 		response := nativeBindingManagementCall(t, app, http.MethodPost, nativeBatchTestPath, nil, map[string]any{
-			"id": id, "key": secret, "group": "team", "rpm": 10, "daily_usd": 10, "weekly_usd": 40,
+			"id": id, "key": secret, "auth_ids": []string{"team.json"}, "rpm": 10, "daily_usd": 10, "weekly_usd": 40,
 		})
 		if response.StatusCode != http.StatusCreated {
 			t.Fatalf("create %s: status=%d body=%s", id, response.StatusCode, response.Body)

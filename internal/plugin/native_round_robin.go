@@ -107,7 +107,7 @@ func (a *App) pruneNativeRoundRobin() {
 		if !binding.Enabled || !binding.RoundRobin {
 			continue
 		}
-		if constraint, ok := a.store.ResolveNativeKeyConstraint(binding.CallerScope, "", ""); ok {
+		if constraint, ok := a.store.ResolveNativeKeyConstraint(binding.CallerScope); ok {
 			constraints[binding.CallerScope] = constraint
 		}
 	}

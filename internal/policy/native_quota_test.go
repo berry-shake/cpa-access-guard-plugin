@@ -25,7 +25,7 @@ func createTestBinding(t *testing.T, store *Store, id string, mutate func(*Creat
 
 func createTestBindingWithKey(t *testing.T, store *Store, id, key string, mutate func(*CreateNativeKeyBindingInput)) NativeKeyBinding {
 	t.Helper()
-	input := CreateNativeKeyBindingInput{ID: id, Enabled: true, APIKey: key, Group: "team"}
+	input := CreateNativeKeyBindingInput{ID: id, Enabled: true, APIKey: key, AuthIDs: []string{"team.json"}}
 	if mutate != nil {
 		mutate(&input)
 	}
@@ -36,28 +36,24 @@ func createTestBindingWithKey(t *testing.T, store *Store, id, key string, mutate
 	return binding
 }
 
-func seedFastAlias(t *testing.T, store *Store) {
+// seedGPT5Price prices gpt-5 at $1 input / $2 output per 1M tokens.
+func seedGPT5Price(t *testing.T, store *Store) {
 	t.Helper()
-	if err := store.UpsertAlias(AliasMapping{
-		Alias:                 "fast",
-		InputPricePerMillion:  1,
-		OutputPricePerMillion: 2,
-		Targets:               []AliasTarget{{Provider: "codex", TargetModel: "gpt-5"}},
-	}); err != nil {
-		t.Fatalf("UpsertAlias: %v", err)
+	if err := store.UpsertModelPrice(ModelPrice{ID: "gpt-5", Provider: "openai", InputPricePerMillion: 1, OutputPricePerMillion: 2}); err != nil {
+		t.Fatalf("UpsertModelPrice: %v", err)
 	}
 }
 
 func TestNativeBindingLimitValidation(t *testing.T) {
 	store := newNativeQuotaStore(t, t.TempDir()+"/state.json")
 	_, err := store.CreateNativeKeyBinding(CreateNativeKeyBindingInput{
-		ID: "neg", Enabled: true, APIKey: nativeTestKey, Group: "team", RPM: intPtr(-1),
+		ID: "neg", Enabled: true, APIKey: nativeTestKey, AuthIDs: []string{"team.json"}, RPM: intPtr(-1),
 	})
 	if err == nil {
 		t.Fatal("negative rpm must be rejected")
 	}
 	_, err = store.CreateNativeKeyBinding(CreateNativeKeyBindingInput{
-		ID: "negd", Enabled: true, APIKey: nativeTestKey, Group: "team", DailyUSD: floatPtr(-0.5),
+		ID: "negd", Enabled: true, APIKey: nativeTestKey, AuthIDs: []string{"team.json"}, DailyUSD: floatPtr(-0.5),
 	})
 	if err == nil {
 		t.Fatal("negative daily_usd must be rejected")
@@ -102,40 +98,15 @@ func TestRecordUsageNativeFallback(t *testing.T) {
 	}
 }
 
-func TestRecordUsageNativeIgnoresAliasPrices(t *testing.T) {
-	store := newNativeQuotaStore(t, t.TempDir()+"/state.json")
-	createTestBinding(t, store, "native-catalog", nil)
-	if err := store.UpsertAlias(AliasMapping{
-		Alias:                 "fast",
-		InputPricePerMillion:  999,
-		OutputPricePerMillion: 999,
-		Targets:               []AliasTarget{{Provider: "xai", TargetModel: "grok-4.6"}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.UpsertModelPrice(ModelPrice{
-		ID: "grok-4.6", DisplayName: "Grok 4.6", Provider: "xai",
-		InputPricePerMillion: 1, OutputPricePerMillion: 2,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	cost := store.RecordUsage(nativeTestKey, "fast", "grok-4.6", false, UsageDetail{InputTokens: 1_000_000, OutputTokens: 1_000_000})
-	if cost != 3 {
-		t.Fatalf("native key must use pricing JSON not alias, got %v", cost)
-	}
-}
-
-func TestRecordUsageNativeCatalogWithoutAlias(t *testing.T) {
+func TestRecordUsageNativeFallsBackToRequestedModelPrice(t *testing.T) {
 	store := newNativeQuotaStore(t, t.TempDir()+"/state.json")
 	createTestBinding(t, store, "native-catalog-only", nil)
-	if _, err := store.MergeCatalogPricing([]ModelsDevEntry{
-		{ProviderID: "openai", ModelID: "gpt-5.6-sol", Input: 1, Output: 2},
-	}); err != nil {
+	if err := store.UpsertModelPrice(ModelPrice{ID: "gpt-5.6-sol", Provider: "openai", InputPricePerMillion: 1, OutputPricePerMillion: 2}); err != nil {
 		t.Fatal(err)
 	}
-	cost := store.RecordUsage(nativeTestKey, "gpt-5.6-sol", "gpt-5.6-sol", false, UsageDetail{InputTokens: 1_000_000, OutputTokens: 1_000_000})
+	cost := store.RecordUsage(nativeTestKey, "gpt-5.6-sol", "gpt-5.6-sol-2026-11-01", false, UsageDetail{InputTokens: 1_000_000, OutputTokens: 1_000_000})
 	if cost != 3 {
-		t.Fatalf("empty alias table should still bill from catalog, got %v", cost)
+		t.Fatalf("an unpriced upstream model should bill at the requested model price, got %v", cost)
 	}
 }
 
@@ -171,7 +142,7 @@ func TestCheckNativeKeyQuotaDollarLimits(t *testing.T) {
 	binding := createTestBinding(t, store, "budget", func(in *CreateNativeKeyBindingInput) {
 		in.DailyUSD = floatPtr(5)
 	})
-	seedFastAlias(t, store)
+	seedGPT5Price(t, store)
 	if _, limited := store.CheckNativeKeyQuota(binding.CallerScope); limited {
 		t.Fatal("fresh binding must pass")
 	}
@@ -201,7 +172,7 @@ func TestNativeUsagePersistsAcrossReload(t *testing.T) {
 	binding := createTestBinding(t, store, "persist", func(in *CreateNativeKeyBindingInput) {
 		in.DailyUSD = floatPtr(10)
 	})
-	seedFastAlias(t, store)
+	seedGPT5Price(t, store)
 	store.RecordUsage(nativeTestKey, "fast", "gpt-5", false, UsageDetail{InputTokens: 1_000_000})
 
 	// Simulate the flusher's write-back before reload.

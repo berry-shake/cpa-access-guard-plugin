@@ -18,7 +18,7 @@ func configureNativeBindingManagementApp(t *testing.T) (*App, string) {
 	t.Helper()
 	statePath := filepath.Join(t.TempDir(), "state.json")
 	app := NewApp()
-	config := []byte("enabled: true\nstate_file: \"" + filepath.ToSlash(statePath) + "\"\nkeys: []\n")
+	config := []byte("enabled: true\nstate_file: \"" + filepath.ToSlash(statePath) + "\"\n")
 	req, _ := json.Marshal(LifecycleRequest{ConfigYAML: config})
 	if _, err := app.HandleMethod(MethodPluginReconfigure, req); err != nil {
 		t.Fatalf("configure: %v", err)
@@ -54,7 +54,7 @@ func TestNativeKeyBindingManagementCRUDDoesNotExposeSecretOrScope(t *testing.T) 
 	)
 
 	created := nativeBindingManagementCall(t, app, http.MethodPost, basePath, nil, map[string]any{
-		"id": " Client-A ", "name": "Client A", "key": secret, "group": " CLASSIFY: TENANT-A ",
+		"id": " Client-A ", "name": "Client A", "key": secret, "auth_ids": []string{" tenant-a.json "},
 	})
 	if created.StatusCode != http.StatusCreated {
 		t.Fatalf("create status=%d body=%s", created.StatusCode, created.Body)
@@ -66,7 +66,7 @@ func TestNativeKeyBindingManagementCRUDDoesNotExposeSecretOrScope(t *testing.T) 
 	if err := json.Unmarshal(created.Body, &createPayload); err != nil {
 		t.Fatal(err)
 	}
-	if got := createPayload.Binding; got.ID != "client-a" || got.Name != "Client A" || !got.Enabled || got.Group != "classify:tenant-a" || got.KeyPreview == "" {
+	if got := createPayload.Binding; got.ID != "client-a" || got.Name != "Client A" || !got.Enabled || got.Group != "" || len(got.AuthIDs) != 1 || got.AuthIDs[0] != "tenant-a.json" || got.KeyPreview == "" {
 		t.Fatalf("created binding=%+v", got)
 	}
 	originalPreview := createPayload.Binding.KeyPreview
@@ -89,7 +89,7 @@ func TestNativeKeyBindingManagementCRUDDoesNotExposeSecretOrScope(t *testing.T) 
 	// A partial PATCH preserves the derived identity and key preview while
 	// changing only policy/display fields.
 	patched := nativeBindingManagementCall(t, app, http.MethodPatch, basePath, nil, map[string]any{
-		"id": "CLIENT-A", "name": "Renamed", "enabled": false, "group": "team",
+		"id": "CLIENT-A", "name": "Renamed", "enabled": false, "auth_ids": []string{"team.json"},
 	})
 	if patched.StatusCode != http.StatusOK {
 		t.Fatalf("patch status=%d body=%s", patched.StatusCode, patched.Body)
@@ -100,7 +100,7 @@ func TestNativeKeyBindingManagementCRUDDoesNotExposeSecretOrScope(t *testing.T) 
 	if err := json.Unmarshal(patched.Body, &patchPayload); err != nil {
 		t.Fatal(err)
 	}
-	if patchPayload.Binding.Enabled || patchPayload.Binding.Name != "Renamed" || patchPayload.Binding.Group != "team" || patchPayload.Binding.KeyPreview != originalPreview {
+	if patchPayload.Binding.Enabled || patchPayload.Binding.Name != "Renamed" || len(patchPayload.Binding.AuthIDs) != 1 || patchPayload.Binding.AuthIDs[0] != "team.json" || patchPayload.Binding.KeyPreview != originalPreview {
 		t.Fatalf("patched binding=%+v", patchPayload.Binding)
 	}
 
@@ -196,17 +196,8 @@ func TestNativeKeyBindingManagementDirectAuthIDsAndModeSwitch(t *testing.T) {
 	groupMode := nativeBindingManagementCall(t, app, http.MethodPatch, basePath, nil, map[string]any{
 		"id": "direct", "group": "team",
 	})
-	if groupMode.StatusCode != http.StatusOK {
-		t.Fatalf("group switch status=%d body=%s", groupMode.StatusCode, groupMode.Body)
-	}
-	var groupPayload struct {
-		Binding publicNativeKeyBinding `json:"binding"`
-	}
-	if err := json.Unmarshal(groupMode.Body, &groupPayload); err != nil {
-		t.Fatal(err)
-	}
-	if groupPayload.Binding.Group != "team" || len(groupPayload.Binding.AuthIDs) != 0 {
-		t.Fatalf("group switch binding=%+v", groupPayload.Binding)
+	if groupMode.StatusCode != http.StatusBadRequest || !bytes.Contains(groupMode.Body, []byte("group_unsupported")) {
+		t.Fatalf("group switch status=%d body=%s, want group_unsupported", groupMode.StatusCode, groupMode.Body)
 	}
 
 	directMode := nativeBindingManagementCall(t, app, http.MethodPatch, basePath, nil, map[string]any{
@@ -226,9 +217,9 @@ func TestNativeKeyBindingManagementDirectAuthIDsAndModeSwitch(t *testing.T) {
 	}
 
 	conflict := nativeBindingManagementCall(t, app, http.MethodPatch, basePath, nil, map[string]any{
-		"id": "direct", "group": "free", "auth_ids": []string{"codex-conflict.json"},
+		"id": "direct", "group": "pro", "auth_ids": []string{"codex-conflict.json"},
 	})
-	if conflict.StatusCode != http.StatusBadRequest || !bytes.Contains(conflict.Body, []byte("mutually exclusive")) {
+	if conflict.StatusCode != http.StatusBadRequest || !bytes.Contains(conflict.Body, []byte("group_unsupported")) {
 		t.Fatalf("conflicting switch status=%d body=%s", conflict.StatusCode, conflict.Body)
 	}
 	listed := nativeBindingManagementCall(t, app, http.MethodGet, basePath, nil, nil)
@@ -316,7 +307,7 @@ func TestNativeKeyBindingManagementModelAccessCRUD(t *testing.T) {
 
 func TestNativeKeyBindingManagementPromptsToRepairDegradedDirectBinding(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "state.json")
-	if err := policy.SaveState(statePath, nil, nil, nil, nil, []policy.NativeKeyBinding{{
+	if err := policy.SaveState(statePath, nil, []policy.NativeKeyBinding{{
 		ID:          "degraded-direct",
 		Name:        "Degraded Direct",
 		Enabled:     true,
@@ -326,7 +317,7 @@ func TestNativeKeyBindingManagementPromptsToRepairDegradedDirectBinding(t *testi
 		t.Fatal(err)
 	}
 	app := NewApp()
-	config := []byte("enabled: true\nstate_file: \"" + filepath.ToSlash(statePath) + "\"\nkeys: []\n")
+	config := []byte("enabled: true\nstate_file: \"" + filepath.ToSlash(statePath) + "\"\n")
 	reconfigure, _ := json.Marshal(LifecycleRequest{ConfigYAML: config})
 	if _, err := app.HandleMethod(MethodPluginReconfigure, reconfigure); err != nil {
 		t.Fatalf("configure: %v", err)
@@ -370,8 +361,8 @@ func TestNativeKeyBindingCatalogMatchesScopesAndRedactsSecrets(t *testing.T) {
 	)
 
 	for _, input := range []map[string]any{
-		{"id": "matched", "name": "Matched", "key": matchedSecret, "group": "team"},
-		{"id": "orphan", "name": "Orphan", "key": orphanSecret, "group": "free"},
+		{"id": "matched", "name": "Matched", "key": matchedSecret, "auth_ids": []string{"team.json"}},
+		{"id": "orphan", "name": "Orphan", "key": orphanSecret, "auth_ids": []string{"free.json"}},
 	} {
 		created := nativeBindingManagementCall(t, app, http.MethodPost, basePath, nil, input)
 		if created.StatusCode != http.StatusCreated {
@@ -459,9 +450,10 @@ func TestNativeKeyBindingManagementValidationAndRegistration(t *testing.T) {
 		name string
 		body map[string]any
 	}{
-		{name: "missing id", body: map[string]any{"key": "sk-long-enough-secret", "group": "team"}},
-		{name: "missing key", body: map[string]any{"id": "a", "group": "team"}},
-		{name: "missing group", body: map[string]any{"id": "a", "key": "sk-long-enough-secret"}},
+		{name: "missing id", body: map[string]any{"key": "sk-long-enough-secret", "auth_ids": []string{"team.json"}}},
+		{name: "missing key", body: map[string]any{"id": "a", "auth_ids": []string{"team.json"}}},
+		{name: "missing auth ids", body: map[string]any{"id": "a", "key": "sk-long-enough-secret"}},
+		{name: "group instead of auth ids", body: map[string]any{"id": "a", "key": "sk-long-enough-secret", "group": "team"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resp := nativeBindingManagementCall(t, app, http.MethodPost, path, nil, tc.body)
@@ -473,19 +465,19 @@ func TestNativeKeyBindingManagementValidationAndRegistration(t *testing.T) {
 
 	secret := "sk-duplicate-native-secret-0123456789"
 	first := nativeBindingManagementCall(t, app, http.MethodPost, path, nil, map[string]any{
-		"id": "a", "key": secret, "group": "team",
+		"id": "a", "key": secret, "auth_ids": []string{"team.json"},
 	})
 	if first.StatusCode != http.StatusCreated {
 		t.Fatalf("first create status=%d body=%s", first.StatusCode, first.Body)
 	}
 	duplicateID := nativeBindingManagementCall(t, app, http.MethodPost, path, nil, map[string]any{
-		"id": "A", "key": "sk-different-native-secret-9876543210", "group": "free",
+		"id": "A", "key": "sk-different-native-secret-9876543210", "auth_ids": []string{"free.json"},
 	})
 	if duplicateID.StatusCode != http.StatusConflict {
 		t.Fatalf("duplicate id status=%d body=%s", duplicateID.StatusCode, duplicateID.Body)
 	}
 	duplicateScope := nativeBindingManagementCall(t, app, http.MethodPost, path, nil, map[string]any{
-		"id": "b", "key": secret, "group": "free",
+		"id": "b", "key": secret, "auth_ids": []string{"free.json"},
 	})
 	if duplicateScope.StatusCode != http.StatusBadRequest {
 		t.Fatalf("duplicate scope status=%d body=%s", duplicateScope.StatusCode, duplicateScope.Body)
@@ -542,7 +534,7 @@ func TestResetNativeKeyBindingQuotaManagement(t *testing.T) {
 		secret   = "sk-native-reset-secret-0123456789"
 	)
 	created := nativeBindingManagementCall(t, app, http.MethodPost, basePath, nil, map[string]any{
-		"id": "reset-me", "key": secret, "group": "team", "rpm": 10, "daily_usd": 5, "weekly_usd": 20,
+		"id": "reset-me", "key": secret, "auth_ids": []string{"team.json"}, "rpm": 10, "daily_usd": 5, "weekly_usd": 20,
 	})
 	if created.StatusCode != http.StatusCreated {
 		t.Fatalf("create status=%d body=%s", created.StatusCode, created.Body)

@@ -26,8 +26,17 @@ native_key_bindings:
     enabled: %t
     caller_scope: %q
     key_preview: "sk-nat...nt-a"
-    group: team
-keys: []
+    auth_ids:
+      - codex-team-low
+      - codex-team-high
+      - codex-team-disabled
+      - codex-team
+      - codex-z-team
+      - codex-a-team
+      - codex-m-team
+      - team-low
+      - team-high
+      - team-disabled
 `, filepath.ToSlash(filepath.Join(t.TempDir(), "state.json")), enabled, testNativeCallerScope))
 	req, _ := json.Marshal(LifecycleRequest{ConfigYAML: yaml})
 	if _, err := app.HandleMethod(MethodPluginReconfigure, req); err != nil {
@@ -54,8 +63,7 @@ native_key_bindings:
     caller_scope: %q
     key_preview: "sk-nat...rect"
     auth_ids:
-%skeys: []
-`, filepath.ToSlash(filepath.Join(t.TempDir(), "state.json")), testNativeCallerScope, authIDYAML.String()))
+%s`, filepath.ToSlash(filepath.Join(t.TempDir(), "state.json")), testNativeCallerScope, authIDYAML.String()))
 	req, _ := json.Marshal(LifecycleRequest{ConfigYAML: yaml})
 	if _, err := app.HandleMethod(MethodPluginReconfigure, req); err != nil {
 		t.Fatalf("configure direct native binding app: %v", err)
@@ -85,7 +93,6 @@ native_key_bindings:
         - provider: codex
           model: gpt-5.6-luna
     rpm: %d
-keys: []
 `, filepath.ToSlash(filepath.Join(t.TempDir(), "state.json")), testNativeCallerScope, rpm))
 	req, _ := json.Marshal(LifecycleRequest{ConfigYAML: yaml})
 	if _, err := app.HandleMethod(MethodPluginReconfigure, req); err != nil {
@@ -95,15 +102,15 @@ keys: []
 	return app
 }
 
-func TestSchedulerPickNoGroupDefers(t *testing.T) {
-	app, _ := configureTestApp(t)
+func TestSchedulerPickWithoutCallerScopeDefers(t *testing.T) {
+	app := configureNativeBindingSchedulerApp(t, true)
 	req, _ := json.Marshal(SchedulerPickRequest{
 		Provider: "codex",
 		Model:    "gpt-5-codex",
 		Options:  SchedulerPickOptions{Metadata: map[string]any{}},
 		Candidates: []SchedulerAuthCandidate{
-			{ID: "codex-a-free", Provider: "codex", Attributes: map[string]string{"plan_type": "free"}},
-			{ID: "codex-b-team", Provider: "codex", Attributes: map[string]string{"plan_type": "team"}},
+			{ID: "codex-a-free", Provider: "codex"},
+			{ID: "codex-b-team", Provider: "codex"},
 		},
 	})
 	raw, err := app.HandleMethod(MethodSchedulerPick, req)
@@ -119,7 +126,7 @@ func TestSchedulerPickNoGroupDefers(t *testing.T) {
 		t.Fatal(err)
 	}
 	if resp.Handled {
-		t.Fatalf("expected Handled=false when no group, got %+v", resp)
+		t.Fatalf("expected Handled=false without caller_scope, got %+v", resp)
 	}
 }
 
@@ -133,11 +140,11 @@ func TestSchedulerPickNativeBindingFiltersAndPrioritizes(t *testing.T) {
 		}},
 		Candidates: []SchedulerAuthCandidate{
 			// A higher-priority candidate outside the binding must never win.
-			{ID: "codex-free", Provider: "codex", Priority: 100, Attributes: map[string]string{"plan_type": "free"}},
-			{ID: "codex-team-low", Provider: "codex", Priority: 2, Attributes: map[string]string{"plan_type": "team"}},
-			{ID: "codex-team-high", Provider: "codex", Priority: 9, Attributes: map[string]string{"plan_type": "team"}},
+			{ID: "codex-free", Provider: "codex", Priority: 100},
+			{ID: "codex-team-low", Provider: "codex", Priority: 2},
+			{ID: "codex-team-high", Provider: "codex", Priority: 9},
 			// Unusable candidates remain ineligible even when they match the group.
-			{ID: "codex-team-disabled", Provider: "codex", Priority: 200, Status: "disabled", Attributes: map[string]string{"plan_type": "team"}},
+			{ID: "codex-team-disabled", Provider: "codex", Priority: 200, Status: "disabled"},
 		},
 	})
 	raw, err := app.HandleMethod(MethodSchedulerPick, req)
@@ -161,7 +168,7 @@ func TestSchedulerPickDirectNativeBindingFiltersExactAuthIDs(t *testing.T) {
 			Provider: "codex",
 			Model:    "gpt-5-codex",
 			Options: SchedulerPickOptions{Metadata: map[string]any{
-				SchedulerGroupMetadataKey:       "free",
+				"group":                         "free",
 				SchedulerCallerScopeMetadataKey: testNativeCallerScope,
 			}},
 			Candidates: candidates,
@@ -178,9 +185,9 @@ func TestSchedulerPickDirectNativeBindingFiltersExactAuthIDs(t *testing.T) {
 	}
 
 	first := request([]SchedulerAuthCandidate{
-		{ID: "tenant/unselected.json", Provider: "codex", Priority: 100, Attributes: map[string]string{"plan_type": "free"}},
-		{ID: "tenant/codex-b.json", Provider: "codex", Priority: 2, Attributes: map[string]string{"plan_type": "team"}},
-		{ID: "tenant/Codex-A.json", Provider: "codex", Priority: 9, Attributes: map[string]string{"plan_type": "free"}},
+		{ID: "tenant/unselected.json", Provider: "codex", Priority: 100},
+		{ID: "tenant/codex-b.json", Provider: "codex", Priority: 2},
+		{ID: "tenant/Codex-A.json", Provider: "codex", Priority: 9},
 		{ID: "tenant/codex-b.json", Provider: "codex", Priority: 200, Status: "disabled"},
 		{ID: "tenant/codex-a.json", Provider: "codex", Priority: 300}, // wrong case
 	})
@@ -337,33 +344,6 @@ func TestSchedulerPickDeniedModelDoesNotConsumeNativeRPM(t *testing.T) {
 	}
 }
 
-func TestSchedulerPickNativeBindingTakesPriorityOverExplicitGroup(t *testing.T) {
-	app := configureNativeBindingSchedulerApp(t, true)
-	req, _ := json.Marshal(SchedulerPickRequest{
-		Provider: "codex",
-		Model:    "gpt-5-codex",
-		Options: SchedulerPickOptions{Metadata: map[string]any{
-			SchedulerGroupMetadataKey:       "free",
-			SchedulerCallerScopeMetadataKey: testNativeCallerScope,
-		}},
-		Candidates: []SchedulerAuthCandidate{
-			{ID: "codex-free", Provider: "codex", Attributes: map[string]string{"plan_type": "free"}},
-			{ID: "codex-team", Provider: "codex", Priority: 100, Attributes: map[string]string{"plan_type": "team"}},
-		},
-	})
-	raw, err := app.HandleMethod(MethodSchedulerPick, req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var resp SchedulerPickResponse
-	if err := unmarshalOK(raw, &resp); err != nil {
-		t.Fatal(err)
-	}
-	if !resp.Handled || resp.AuthID != "codex-team" {
-		t.Fatalf("expected native binding to override unverified group metadata, got %+v", resp)
-	}
-}
-
 func TestSchedulerPickMalformedCallerScopeFailsClosed(t *testing.T) {
 	app := configureNativeBindingSchedulerApp(t, true)
 	for _, test := range []struct {
@@ -380,11 +360,11 @@ func TestSchedulerPickMalformedCallerScopeFailsClosed(t *testing.T) {
 				Provider: "codex",
 				Model:    "gpt-5-codex",
 				Options: SchedulerPickOptions{Metadata: map[string]any{
-					SchedulerGroupMetadataKey:       "free",
+					"group":                         "free",
 					SchedulerCallerScopeMetadataKey: test.value,
 				}},
 				Candidates: []SchedulerAuthCandidate{
-					{ID: "codex-free", Provider: "codex", Attributes: map[string]string{"plan_type": "free"}},
+					{ID: "codex-free", Provider: "codex"},
 				},
 			})
 			raw, err := app.HandleMethod(MethodSchedulerPick, req)
@@ -411,7 +391,7 @@ func TestSchedulerPickUnboundNativeKeyDefers(t *testing.T) {
 			SchedulerCallerScopeMetadataKey: testDisabledCallerScope,
 		}},
 		Candidates: []SchedulerAuthCandidate{
-			{ID: "codex-team", Provider: "codex", Attributes: map[string]string{"plan_type": "team"}},
+			{ID: "codex-team", Provider: "codex"},
 		},
 	})
 	raw, err := app.HandleMethod(MethodSchedulerPick, req)
@@ -436,7 +416,7 @@ func TestSchedulerPickDisabledNativeBindingDefers(t *testing.T) {
 			SchedulerCallerScopeMetadataKey: testNativeCallerScope,
 		}},
 		Candidates: []SchedulerAuthCandidate{
-			{ID: "codex-team", Provider: "codex", Attributes: map[string]string{"plan_type": "team"}},
+			{ID: "codex-team", Provider: "codex"},
 		},
 	})
 	raw, err := app.HandleMethod(MethodSchedulerPick, req)
@@ -462,7 +442,7 @@ native_key_bindings:
   - id: native-client-a
     enabled: true
     caller_scope: %q
-    group: team
+    auth_ids: [codex-team]
 `, statePath, testNativeCallerScope))
 	reconfigure, _ := json.Marshal(LifecycleRequest{ConfigYAML: yaml})
 	if _, err := app.HandleMethod(MethodPluginReconfigure, reconfigure); err != nil {
@@ -477,7 +457,7 @@ native_key_bindings:
 			SchedulerCallerScopeMetadataKey: testNativeCallerScope,
 		}},
 		Candidates: []SchedulerAuthCandidate{
-			{ID: "codex-team", Provider: "codex", Attributes: map[string]string{"plan_type": "team"}},
+			{ID: "codex-team", Provider: "codex"},
 		},
 	})
 	raw, err := app.HandleMethod(MethodSchedulerPick, req)
@@ -501,9 +481,9 @@ func TestSchedulerPickNativeBindingWithoutEligibleCandidateFailsClosed(t *testin
 	}{
 		{name: "empty candidate list"},
 		{
-			name: "only candidate outside bound group",
+			name: "only candidate outside bound auth IDs",
 			candidates: []SchedulerAuthCandidate{
-				{ID: "codex-free", Provider: "codex", Attributes: map[string]string{"plan_type": "free"}},
+				{ID: "codex-free", Provider: "codex"},
 			},
 		},
 	}
@@ -532,42 +512,15 @@ func TestSchedulerPickNativeBindingWithoutEligibleCandidateFailsClosed(t *testin
 	}
 }
 
-func TestSchedulerPickFiltersByPlanType(t *testing.T) {
-	app, _ := configureTestApp(t)
-	req, _ := json.Marshal(SchedulerPickRequest{
-		Provider: "codex",
-		Model:    "gpt-5-codex",
-		Options: SchedulerPickOptions{Metadata: map[string]any{
-			"group": "team",
-		}},
-		Candidates: []SchedulerAuthCandidate{
-			{ID: "codex-a-free", Provider: "codex", Attributes: map[string]string{"plan_type": "free"}},
-			{ID: "codex-b-team", Provider: "codex", Attributes: map[string]string{"plan_type": "team"}},
-			{ID: "codex-c-plus", Provider: "codex", Attributes: map[string]string{"plan_type": "plus"}},
-		},
-	})
-	raw, err := app.HandleMethod(MethodSchedulerPick, req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var resp SchedulerPickResponse
-	if err := unmarshalOK(raw, &resp); err != nil {
-		t.Fatal(err)
-	}
-	if !resp.Handled || resp.AuthID != "codex-b-team" {
-		t.Fatalf("expected team-only pick, got %+v", resp)
-	}
-}
-
 func TestSchedulerPickPriorityTiebreaksByID(t *testing.T) {
-	app, _ := configureTestApp(t)
+	app := configureNativeBindingSchedulerApp(t, true)
 	req, _ := json.Marshal(SchedulerPickRequest{
 		Provider: "codex",
-		Options:  SchedulerPickOptions{Metadata: map[string]any{"group": "team"}},
+		Options:  SchedulerPickOptions{Metadata: map[string]any{SchedulerCallerScopeMetadataKey: testNativeCallerScope}},
 		Candidates: []SchedulerAuthCandidate{
-			{ID: "codex-z-team", Provider: "codex", Priority: 5, Attributes: map[string]string{"plan_type": "team"}},
-			{ID: "codex-a-team", Provider: "codex", Priority: 5, Attributes: map[string]string{"plan_type": "team"}},
-			{ID: "codex-m-team", Provider: "codex", Priority: 9, Attributes: map[string]string{"plan_type": "team"}},
+			{ID: "codex-z-team", Provider: "codex", Priority: 5},
+			{ID: "codex-a-team", Provider: "codex", Priority: 5},
+			{ID: "codex-m-team", Provider: "codex", Priority: 9},
 		},
 	})
 	raw, _ := app.HandleMethod(MethodSchedulerPick, req)
@@ -582,10 +535,10 @@ func TestSchedulerPickPriorityTiebreaksByID(t *testing.T) {
 
 	// Equal priority → lowest ID.
 	req2, _ := json.Marshal(SchedulerPickRequest{
-		Options: SchedulerPickOptions{Metadata: map[string]any{"group": "team"}},
+		Options: SchedulerPickOptions{Metadata: map[string]any{SchedulerCallerScopeMetadataKey: testNativeCallerScope}},
 		Candidates: []SchedulerAuthCandidate{
-			{ID: "codex-z-team", Provider: "codex", Attributes: map[string]string{"plan_type": "team"}},
-			{ID: "codex-a-team", Provider: "codex", Attributes: map[string]string{"plan_type": "team"}},
+			{ID: "codex-z-team", Provider: "codex"},
+			{ID: "codex-a-team", Provider: "codex"},
 		},
 	})
 	raw2, _ := app.HandleMethod(MethodSchedulerPick, req2)
@@ -595,171 +548,6 @@ func TestSchedulerPickPriorityTiebreaksByID(t *testing.T) {
 	}
 	if resp2.AuthID != "codex-a-team" {
 		t.Fatalf("expected lowest ID tiebreak, got %q", resp2.AuthID)
-	}
-}
-
-// Isolation guarantee: when a tier group has no matching candidate, we must NOT
-// fall back to a different tier. The plugin must return a structured scheduler
-// error because an empty AuthID is invalid and would make the host fall back.
-func TestSchedulerPickNoTierMatchRefusesFallback(t *testing.T) {
-	app, _ := configureTestApp(t)
-	req, _ := json.Marshal(SchedulerPickRequest{
-		Options: SchedulerPickOptions{Metadata: map[string]any{"group": "team"}},
-		Candidates: []SchedulerAuthCandidate{
-			{ID: "codex-a-free", Provider: "codex", Attributes: map[string]string{"plan_type": "free"}},
-			{ID: "codex-b-plus", Provider: "codex", Attributes: map[string]string{"plan_type": "plus"}},
-		},
-	})
-	raw, _ := app.HandleMethod(MethodSchedulerPick, req)
-	var envelope Envelope
-	if err := json.Unmarshal(raw, &envelope); err != nil {
-		t.Fatal(err)
-	}
-	if envelope.OK || envelope.Error == nil || envelope.Error.Code != "auth_not_found" || envelope.Error.HTTPStatus != http.StatusServiceUnavailable {
-		t.Fatalf("expected auth_not_found scheduler error, got %+v", envelope)
-	}
-}
-
-// "supported"/"unknown" group matches only untiered candidates: a key pinned to
-// a real tier never lands on an untiered file, and an untiered key never stings
-// onto a tiered file.
-func TestSchedulerPickSupportedMatchesUntieredOnly(t *testing.T) {
-	app, _ := configureTestApp(t)
-	req, _ := json.Marshal(SchedulerPickRequest{
-		Options: SchedulerPickOptions{Metadata: map[string]any{"group": "supported"}},
-		Candidates: []SchedulerAuthCandidate{
-			{ID: "codex-no-claim", Provider: "codex", Attributes: map[string]string{}},
-			{ID: "codex-team", Provider: "codex", Attributes: map[string]string{"plan_type": "team"}},
-		},
-	})
-	raw, _ := app.HandleMethod(MethodSchedulerPick, req)
-	var resp SchedulerPickResponse
-	if err := unmarshalOK(raw, &resp); err != nil {
-		t.Fatal(err)
-	}
-	if !resp.Handled || resp.AuthID != "codex-no-claim" {
-		t.Fatalf("expected untiered pick, got %+v", resp)
-	}
-}
-
-func TestSchedulerPickSupportedDoesNotSplitNonTierProvider(t *testing.T) {
-	app, _ := configureTestApp(t)
-	req, _ := json.Marshal(SchedulerPickRequest{
-		Provider: "claude",
-		Options:  SchedulerPickOptions{Metadata: map[string]any{"group": "supported"}},
-		Candidates: []SchedulerAuthCandidate{
-			{ID: "claude-oauth", Provider: "claude", Attributes: map[string]string{"auth_kind": "oauth"}},
-		},
-	})
-	raw, err := app.HandleMethod(MethodSchedulerPick, req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var envelope Envelope
-	if err := json.Unmarshal(raw, &envelope); err != nil {
-		t.Fatal(err)
-	}
-	if envelope.OK || envelope.Error == nil || envelope.Error.Code != "auth_not_found" {
-		t.Fatalf("non-tier provider must stay flat rather than join supported: %+v", envelope)
-	}
-}
-
-// Custom classify groups are matched with the classify: prefix so they never
-// collide with built-in plan_type values like "free".
-func TestSchedulerPickMatchesClassifyPrefix(t *testing.T) {
-	app := NewApp()
-	yaml := []byte(`
-enabled: true
-state_file: "` + filepath.ToSlash(filepath.Join(t.TempDir(), "state.json")) + `"
-classify_rules:
-  - name: vip-files
-    field: filename
-    pattern: "vip"
-    group: vip
-    enabled: true
-keys: []
-`)
-	reqCfg, _ := json.Marshal(LifecycleRequest{ConfigYAML: yaml})
-	if _, err := app.HandleMethod(MethodPluginReconfigure, reqCfg); err != nil {
-		t.Fatal(err)
-	}
-	req, _ := json.Marshal(SchedulerPickRequest{
-		Provider: "codex",
-		Options:  SchedulerPickOptions{Metadata: map[string]any{"group": "classify:vip"}},
-		Candidates: []SchedulerAuthCandidate{
-			{ID: "free-user.json", Provider: "codex", Attributes: map[string]string{"plan_type": "free"}},
-			{ID: "vip-user.json", Provider: "codex", Attributes: map[string]string{"plan_type": "free"}},
-		},
-	})
-	raw, err := app.HandleMethod(MethodSchedulerPick, req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var resp SchedulerPickResponse
-	if err := unmarshalOK(raw, &resp); err != nil {
-		t.Fatal(err)
-	}
-	if !resp.Handled || resp.AuthID != "vip-user.json" {
-		t.Fatalf("expected vip-user via classify:vip, got %+v", resp)
-	}
-
-	// Bare "vip" (no prefix) must NOT match — isolation from unprefixed names.
-	req2, _ := json.Marshal(SchedulerPickRequest{
-		Options: SchedulerPickOptions{Metadata: map[string]any{"group": "vip"}},
-		Candidates: []SchedulerAuthCandidate{
-			{ID: "vip-user.json", Provider: "codex", Attributes: map[string]string{"plan_type": "free"}},
-		},
-	})
-	raw2, _ := app.HandleMethod(MethodSchedulerPick, req2)
-	var envelope Envelope
-	if err := json.Unmarshal(raw2, &envelope); err != nil {
-		t.Fatal(err)
-	}
-	if envelope.OK || envelope.Error == nil || envelope.Error.Code != "auth_not_found" {
-		t.Fatalf("bare vip must return auth_not_found, got %+v", envelope)
-	}
-}
-
-func TestCandidateClassifyCacheTracksAttributeChanges(t *testing.T) {
-	app := NewApp()
-	free := app.candidateGroups(SchedulerAuthCandidate{ID: "same.json", Provider: "codex", Attributes: map[string]string{"plan_type": "free"}})
-	team := app.candidateGroups(SchedulerAuthCandidate{ID: "same.json", Provider: "codex", Attributes: map[string]string{"plan_type": "team"}})
-	if len(free) != 1 || free[0] != "free" || len(team) != 1 || team[0] != "team" {
-		t.Fatalf("cached groups did not track attributes: free=%v team=%v", free, team)
-	}
-}
-
-func TestCandidateClassifyCacheIsBounded(t *testing.T) {
-	app := NewApp()
-	for index := 0; index < classifyCacheCapacity+25; index++ {
-		app.candidateGroups(SchedulerAuthCandidate{ID: fmt.Sprintf("auth-%d", index), Provider: "codex"})
-	}
-	app.classifyMu.RLock()
-	size := len(app.classifyCache)
-	app.classifyMu.RUnlock()
-	if size > classifyCacheCapacity {
-		t.Fatalf("classify cache size = %d, capacity = %d", size, classifyCacheCapacity)
-	}
-}
-
-// antigravity uses a "tier" attribute rather than plan_type; same filter logic.
-func TestSchedulerPickMatchesAntigravityTier(t *testing.T) {
-	app, _ := configureTestApp(t)
-	req, _ := json.Marshal(SchedulerPickRequest{
-		Provider: "antigravity",
-		Options:  SchedulerPickOptions{Metadata: map[string]any{"group": "free-tier"}},
-		Candidates: []SchedulerAuthCandidate{
-			{ID: "ag-paid", Provider: "antigravity", Attributes: map[string]string{"tier": "paid-tier"}},
-			{ID: "ag-free", Provider: "antigravity", Attributes: map[string]string{"tier": "free-tier"}},
-		},
-	})
-	raw, _ := app.HandleMethod(MethodSchedulerPick, req)
-	var resp SchedulerPickResponse
-	if err := unmarshalOK(raw, &resp); err != nil {
-		t.Fatal(err)
-	}
-	if !resp.Handled || resp.AuthID != "ag-free" {
-		t.Fatalf("expected antigravity free-tier pick, got %+v", resp)
 	}
 }
 
@@ -784,11 +572,10 @@ native_key_bindings:
     enabled: true
     caller_scope: %q
     key_preview: "sk-nat...quota"
-    group: team
+    auth_ids: [codex-team, codex-a, codex-b, team]
     rpm: %d
     daily_usd: %d
     weekly_usd: %d
-keys: []
 `, filepath.ToSlash(filepath.Join(t.TempDir(), "state.json")), testNativeCallerScope, rpm, dailyUSD, weeklyUSD))
 	req, _ := json.Marshal(LifecycleRequest{ConfigYAML: yaml})
 	if _, err := app.HandleMethod(MethodPluginReconfigure, req); err != nil {
@@ -806,7 +593,7 @@ func nativeQuotaPickRequest() []byte {
 			SchedulerCallerScopeMetadataKey: testNativeCallerScope,
 		}},
 		Candidates: []SchedulerAuthCandidate{
-			{ID: "codex-team", Provider: "codex", Attributes: map[string]string{"plan_type": "team"}},
+			{ID: "codex-team", Provider: "codex"},
 		},
 	})
 	return req
@@ -864,5 +651,65 @@ func TestSchedulerPickNativeQuotaRPMExceeded(t *testing.T) {
 	}
 	if passthrough.Error.Type != "usage_limit_reached" || passthrough.Error.Message != "The usage limit has been reached" {
 		t.Fatalf("unexpected passthrough body: %+v", passthrough)
+	}
+}
+
+// TestSchedulerPickLegacyGroupBindingFailsClosed: a credential group saved by
+// an older release no longer schedules; the bound key gets a 503 until the
+// operator selects exact credentials.
+func TestSchedulerPickLegacyGroupBindingFailsClosed(t *testing.T) {
+	app := NewApp()
+	yaml := []byte(fmt.Sprintf(`
+enabled: true
+state_file: %q
+native_key_bindings:
+  - id: legacy-group
+    enabled: true
+    caller_scope: %q
+    group: team
+`, filepath.ToSlash(filepath.Join(t.TempDir(), "state.json")), testNativeCallerScope))
+	req, _ := json.Marshal(LifecycleRequest{ConfigYAML: yaml})
+	if _, err := app.HandleMethod(MethodPluginReconfigure, req); err != nil {
+		t.Fatalf("configure legacy group binding: %v", err)
+	}
+	t.Cleanup(app.Shutdown)
+	pick, _ := json.Marshal(SchedulerPickRequest{
+		Provider:   "codex",
+		Model:      "gpt-5-codex",
+		Options:    SchedulerPickOptions{Metadata: map[string]any{SchedulerCallerScopeMetadataKey: testNativeCallerScope}},
+		Candidates: []SchedulerAuthCandidate{{ID: "team", Provider: "codex", Priority: 10}},
+	})
+	raw, err := app.HandleMethod(MethodSchedulerPick, pick)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var envelope Envelope
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.OK || envelope.Error == nil || envelope.Error.Code != "auth_not_found" || envelope.Error.HTTPStatus != http.StatusServiceUnavailable {
+		t.Fatalf("legacy group binding must fail closed, got %+v", envelope)
+	}
+}
+
+// TestSchedulerPickIgnoresCandidateDetails: CPA still sends each candidate's
+// attributes and metadata; the plugin must decode and pick without them.
+func TestSchedulerPickIgnoresCandidateDetails(t *testing.T) {
+	app := configureNativeBindingSchedulerApp(t, true)
+	raw := []byte(`{"Provider":"codex","Model":"gpt-5-codex","Stream":true,` +
+		`"Options":{"Headers":{"User-Agent":["x"]},"Metadata":{"caller_scope":"` + testNativeCallerScope + `"}},` +
+		`"Candidates":[` +
+		`{"ID":"codex-free","Provider":"codex","Priority":50,"Attributes":{"plan_type":"free"},"Metadata":{"blob":{"nested":[1,2,3]}}},` +
+		`{"ID":"codex-team","Provider":"codex","Priority":1,"Attributes":{"plan_type":"team"},"Metadata":{"email":"a@example.com"}}]}`)
+	out, err := app.HandleMethod(MethodSchedulerPick, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resp SchedulerPickResponse
+	if err := unmarshalOK(out, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Handled || resp.AuthID != "codex-team" {
+		t.Fatalf("pick = %+v, want codex-team", resp)
 	}
 }

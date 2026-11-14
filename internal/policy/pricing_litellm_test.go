@@ -2,8 +2,10 @@ package policy
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -92,5 +94,45 @@ func TestPricingFetchErrorDoesNotExposeURLQuery(t *testing.T) {
 	}
 	if got := err.Error(); got != "litellm: invalid URL" {
 		t.Fatalf("malformed URL error leaked or changed unexpectedly: %q", got)
+	}
+}
+
+func TestFetchLiteLLMPricingSkipsMistypedModelAndKeepsStreaming(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"sample_spec": {"input_cost_per_token": "documentation"},
+			"broken-model": {"litellm_provider": "openai", "input_cost_per_token": "not-a-number"},
+			"not-an-object": "string value",
+			"gpt-5.6-sol": {"litellm_provider": "openai", "mode": "chat", "input_cost_per_token": 0.000005, "output_cost_per_token": 0.00003}
+		}`))
+	}))
+	defer srv.Close()
+	result, err := FetchLiteLLMPricing(context.Background(), srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Fetched != 4 || result.Accepted != 1 || result.Entries[0].ModelID != "gpt-5.6-sol" || result.Entries[0].Input != 5 {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestFetchLiteLLMPricingRejectsTruncatedCatalog(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"gpt-5.6-sol": {"litellm_provider": "openai", "input_cost_per_token": 0.000005}`))
+	}))
+	defer srv.Close()
+	if _, err := FetchLiteLLMPricing(context.Background(), srv.URL); err == nil || !strings.Contains(err.Error(), "litellm: decode") {
+		t.Fatalf("truncated catalog error = %v", err)
+	}
+}
+
+func TestCappedReaderRejectsOversizedBody(t *testing.T) {
+	exact := &cappedReader{r: strings.NewReader("abcd"), remaining: 4}
+	if raw, err := io.ReadAll(exact); err != nil || string(raw) != "abcd" || exact.exceeded {
+		t.Fatalf("exact-size body = %q, %v, exceeded=%v", raw, err, exact.exceeded)
+	}
+	over := &cappedReader{r: strings.NewReader("abcde"), remaining: 4}
+	if _, err := io.ReadAll(over); err == nil || !over.exceeded {
+		t.Fatalf("oversized body error = %v, exceeded=%v", err, over.exceeded)
 	}
 }

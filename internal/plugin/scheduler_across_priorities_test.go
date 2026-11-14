@@ -39,7 +39,6 @@ func acrossPriorityRequest(candidates ...SchedulerAuthCandidate) SchedulerPickRe
 	return SchedulerPickRequest{
 		Provider: "codex", Providers: []string{"codex"}, Model: "gpt-6.1-sol",
 		Options: SchedulerPickOptions{
-			Headers: map[string][]string{"Session_id": {"preserve-this-session"}},
 			Metadata: map[string]any{
 				SchedulerCallerScopeMetadataKey: testNativeCallerScope,
 				"session_id":                    "preserve-this-session", "prompt_cache_key": "keep-cache-key",
@@ -117,24 +116,19 @@ func TestSchedulerAcrossPrioritiesAuthorizedTierAndRetry(t *testing.T) {
 	}
 }
 
-func TestSchedulerAcrossPrioritiesGroupAndDownstreamBoundaries(t *testing.T) {
-	for _, native := range []bool{true, false} {
-		app := configureNativeBindingSchedulerApp(t, true)
-		request := acrossPriorityRequest(
-			SchedulerAuthCandidate{ID: "outside-free", Provider: "codex", Priority: 500, Attributes: map[string]string{"plan_type": "free"}},
-			SchedulerAuthCandidate{ID: "team-low", Provider: "codex", Priority: -10, Attributes: map[string]string{"plan_type": "team"}},
-			SchedulerAuthCandidate{ID: "team-high", Provider: "codex", Priority: -1, Attributes: map[string]string{"plan_type": "team"}},
-			SchedulerAuthCandidate{ID: "team-disabled", Provider: "codex", Priority: 1000, Status: "disabled", Attributes: map[string]string{"plan_type": "team"}},
-		)
-		if !native {
-			request.Options.Metadata = map[string]any{SchedulerGroupMetadataKey: "team"}
-		}
-		assertNativeRoundRobinSequence(t, app, request, "team-high")
-		request.Candidates = request.Candidates[:2]
-		assertNativeRoundRobinSequence(t, app, request, "team-low")
-		request.Candidates = request.Candidates[:1]
-		assertAcrossPriorityRejection(t, app, request)
-	}
+func TestSchedulerAcrossPrioritiesBindingBoundaries(t *testing.T) {
+	app := configureNativeBindingSchedulerApp(t, true)
+	request := acrossPriorityRequest(
+		SchedulerAuthCandidate{ID: "outside-free", Provider: "codex", Priority: 500},
+		SchedulerAuthCandidate{ID: "team-low", Provider: "codex", Priority: -10},
+		SchedulerAuthCandidate{ID: "team-high", Provider: "codex", Priority: -1},
+		SchedulerAuthCandidate{ID: "team-disabled", Provider: "codex", Priority: 1000, Status: "disabled"},
+	)
+	assertNativeRoundRobinSequence(t, app, request, "team-high")
+	request.Candidates = request.Candidates[:2]
+	assertNativeRoundRobinSequence(t, app, request, "team-low")
+	request.Candidates = request.Candidates[:1]
+	assertAcrossPriorityRejection(t, app, request)
 }
 
 func TestSchedulerAcrossPrioritiesUnboundAndDisabledPreserveHostSelection(t *testing.T) {

@@ -13,27 +13,16 @@ const (
 	MethodPluginRegister    = "plugin.register"
 	MethodPluginReconfigure = "plugin.reconfigure"
 
-	MethodFrontendAuthIdentifier   = "frontend_auth.identifier"
-	MethodFrontendAuthAuthenticate = "frontend_auth.authenticate"
-
-	MethodModelRoute = "model.route"
-
-	MethodResponseInterceptAfter = "response.intercept_after"
-
 	// MethodSchedulerPick is the host->plugin call that asks this plugin to
 	// choose an auth candidate among those available for a routed provider,
-	// before the host's built-in scheduler runs. We use it to honor a ModelRule's
-	// Group: when a downstream key pinned a tier (e.g. codex "team"), we filter
-	// candidates by their plan_type attribute so the request only ever lands on
-	// an auth file of that tier. Returning Handled=false falls back to the host
-	// scheduler, so providers without a tier concept behave as before.
+	// before the host's built-in scheduler runs. A native key binding narrows
+	// the candidates to its exact auth IDs. Returning Handled=false falls back
+	// to the host scheduler for unbound keys.
 	MethodSchedulerPick = "scheduler.pick"
 
 	// MethodUsageHandle is the host->plugin call that delivers a finalized
-	// usage record (tokens already parsed by CPA) after a request completes.
-	// This is the billing entry point that ALSO fires for streaming responses
-	// (unlike response.intercept_after, which the host never invokes on the
-	// streaming path — it only invokes response.intercept_stream_chunk).
+	// usage record (tokens already parsed by CPA) after a request completes,
+	// streaming and non-streaming alike.
 	MethodUsageHandle = "usage.handle"
 
 	MethodManagementRegister = "management.register"
@@ -41,11 +30,6 @@ const (
 )
 
 const (
-	// SchedulerGroupMetadataKey is populated by this plugin's frontend auth
-	// provider for plugin-managed downstream keys. A matching native-key binding
-	// takes precedence because the Scheduler ABI does not carry enough provider
-	// provenance to trust an arbitrary group over an authenticated caller scope.
-	SchedulerGroupMetadataKey = "group"
 	// SchedulerCallerScopeMetadataKey is populated by CPA after its native
 	// config-api-key provider authenticates a downstream key. The value is a
 	// stable, one-way scope identifier rather than the plaintext API key.
@@ -102,80 +86,36 @@ type ConfigField struct {
 
 type Capabilities struct {
 	// Receiving all available tiers lets authorization run before priority.
-	SchedulerAcrossPriorities     bool `json:"scheduler_across_priorities,omitempty"`
-	FrontendAuthProvider          bool `json:"frontend_auth_provider"`
-	FrontendAuthProviderExclusive bool `json:"frontend_auth_provider_exclusive,omitempty"`
-	ModelRouter                   bool `json:"model_router"`
-	Scheduler                     bool `json:"scheduler,omitempty"`
-	ResponseInterceptor           bool `json:"response_interceptor"`
-	UsagePlugin                   bool `json:"usage_plugin"`
-	ManagementAPI                 bool `json:"management_api"`
-}
-
-type IdentifierResponse struct {
-	Identifier string `json:"identifier"`
-}
-
-type FrontendAuthRequest struct {
-	Method  string      `json:"Method"`
-	Path    string      `json:"Path"`
-	Headers http.Header `json:"Headers"`
-	Query   url.Values  `json:"Query"`
-	Body    []byte      `json:"Body"`
-}
-
-type FrontendAuthResponse struct {
-	Authenticated bool              `json:"Authenticated"`
-	Principal     string            `json:"Principal,omitempty"`
-	Metadata      map[string]string `json:"Metadata,omitempty"`
-}
-
-type ModelRouteRequest struct {
-	SourceFormat       string         `json:"SourceFormat"`
-	RequestedModel     string         `json:"RequestedModel"`
-	Stream             bool           `json:"Stream"`
-	Headers            http.Header    `json:"Headers"`
-	Query              url.Values     `json:"Query"`
-	Body               []byte         `json:"Body"`
-	Metadata           map[string]any `json:"Metadata"`
-	AvailableProviders []string       `json:"AvailableProviders"`
-}
-
-type ModelRouteResponse struct {
-	Handled     bool   `json:"Handled"`
-	TargetKind  string `json:"TargetKind,omitempty"`
-	Target      string `json:"Target,omitempty"`
-	TargetModel string `json:"TargetModel,omitempty"`
-	Reason      string `json:"Reason,omitempty"`
+	SchedulerAcrossPriorities bool `json:"scheduler_across_priorities,omitempty"`
+	Scheduler                 bool `json:"scheduler,omitempty"`
+	UsagePlugin               bool `json:"usage_plugin"`
+	ManagementAPI             bool `json:"management_api"`
 }
 
 // SchedulerPickRequest is the payload of the host->plugin scheduler.pick call.
-// It mirrors pluginapi.SchedulerPickRequest. The plugin only needs Provider,
-// Model, Options.Metadata (carrying either the group stamped by our frontend
-// auth provider or CPA's native caller_scope) and Candidates[].Attributes
-// (codex plan_type etc.).
+// It mirrors only the parts of pluginapi.SchedulerPickRequest the plugin
+// reads. Leaving out request headers and each candidate's Attributes and
+// Metadata means the decoder skips them instead of allocating maps for every
+// candidate on every request.
 type SchedulerPickRequest struct {
 	Provider   string                   `json:"Provider,omitempty"`
 	Providers  []string                 `json:"Providers,omitempty"`
 	Model      string                   `json:"Model"`
-	Stream     bool                     `json:"Stream,omitempty"`
 	Options    SchedulerPickOptions     `json:"Options"`
 	Candidates []SchedulerAuthCandidate `json:"Candidates"`
 }
 
 type SchedulerPickOptions struct {
-	Headers  map[string][]string `json:"Headers,omitempty"`
-	Metadata map[string]any      `json:"Metadata,omitempty"`
+	// Metadata carries CPA's native caller_scope.
+	Metadata map[string]any `json:"Metadata,omitempty"`
 }
 
 // SchedulerAuthCandidate describes one selectable auth record.
 type SchedulerAuthCandidate struct {
-	ID         string            `json:"ID"`
-	Provider   string            `json:"Provider"`
-	Priority   int               `json:"Priority,omitempty"`
-	Status     string            `json:"Status,omitempty"`
-	Attributes map[string]string `json:"Attributes,omitempty"`
-	Metadata   map[string]any    `json:"Metadata,omitempty"`
+	ID       string `json:"ID"`
+	Provider string `json:"Provider"`
+	Priority int    `json:"Priority,omitempty"`
+	Status   string `json:"Status,omitempty"`
 }
 
 type SchedulerPickResponse struct {
@@ -186,35 +126,19 @@ type SchedulerPickResponse struct {
 	Handled bool `json:"Handled"`
 }
 
-type ResponseInterceptRequest struct {
-	SourceFormat    string         `json:"SourceFormat"`
-	Model           string         `json:"Model"`
-	RequestedModel  string         `json:"RequestedModel"`
-	Stream          bool           `json:"Stream"`
-	RequestHeaders  http.Header    `json:"RequestHeaders"`
-	ResponseHeaders http.Header    `json:"ResponseHeaders"`
-	OriginalRequest []byte         `json:"OriginalRequest"`
-	RequestBody     []byte         `json:"RequestBody"`
-	Body            []byte         `json:"Body"`
-	StatusCode      int            `json:"StatusCode"`
-	Metadata        map[string]any `json:"Metadata"`
-}
-
 // UsageHandleRequest is the payload of the host->plugin usage.handle call.
 // CPA parses the token counts itself (from the upstream response, including
 // the final usage frame of a stream) and delivers them here after a request
-// completes — both streaming and non-streaming. This is the reliable billing
-// entry point: the host never invokes response.intercept_after on streaming
-// responses, so the plugin cannot rely on that alone to bill streams.
+// completes — both streaming and non-streaming.
 type UsageHandleRequest struct {
 	// Model is the resolved upstream model id.
 	Model string `json:"Model"`
 	// Alias is the client-requested model name (what the caller passed in the
-	// request body's "model" field), when one was used. This is what we match
-	// against our ModelRule aliases to price the request.
+	// request body's "model" field). It is the pricing fallback and the
+	// per-model usage bucket.
 	Alias string `json:"Alias"`
-	// APIKey is the client's downstream key (the cpa_... value), when available.
-	// We hash it to find the owning key config — same lookup path as auth.
+	// APIKey is the client's native downstream key. It is hashed into the
+	// caller scope that identifies the binding and never stored.
 	APIKey string      `json:"APIKey"`
 	Failed bool        `json:"Failed"`
 	Detail UsageDetail `json:"Detail"`
@@ -233,17 +157,6 @@ type UsageDetail struct {
 
 // UsageHandleResponse is empty: usage.handle is a fire-and-forget notification.
 type UsageHandleResponse struct{}
-
-type ResponseInterceptResponse struct {
-	Headers      http.Header `json:"Headers,omitempty"`
-	Body         []byte      `json:"Body,omitempty"`
-	ClearHeaders []string    `json:"ClearHeaders,omitempty"`
-}
-
-type ManagementRegistrationRequest struct {
-	BasePath         string `json:"BasePath"`
-	ResourceBasePath string `json:"ResourceBasePath"`
-}
 
 type ManagementRegistrationResponse struct {
 	Routes    []ManagementRoute `json:"Routes"`

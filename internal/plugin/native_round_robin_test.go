@@ -35,7 +35,6 @@ func nativeRoundRobinTestRequest() SchedulerPickRequest {
 	return SchedulerPickRequest{
 		Provider: "codex", Model: "gpt-5.3-codex-spark",
 		Options: SchedulerPickOptions{
-			Headers: map[string][]string{"Session_id": {"same-session"}},
 			Metadata: map[string]any{
 				SchedulerCallerScopeMetadataKey: testNativeCallerScope,
 				"session_id":                    "same-session", "prompt_cache_key": "same-cache", "session_affinity": true,
@@ -207,25 +206,17 @@ func TestNativeRoundRobinPoolChangesAndRetrySuccessors(t *testing.T) {
 	assertNativeRoundRobinSequence(t, app, req, "d", "e")
 }
 
-func TestNativeRoundRobinPriorityAndGroupIsolation(t *testing.T) {
-	for _, direct := range []bool{true, false} {
-		t.Run(fmt.Sprintf("direct=%t", direct), func(t *testing.T) {
-			binding := nativeRoundRobinTestBinding()
-			if !direct {
-				binding.AuthIDs, binding.Group = nil, "team"
-			}
-			app := newNativeRoundRobinTestApp(t, binding)
-			req := nativeRoundRobinTestRequest()
-			req.Candidates = []SchedulerAuthCandidate{
-				{ID: "a", Provider: "codex", Priority: 0, Attributes: map[string]string{"plan_type": "team"}},
-				{ID: "b", Provider: "codex", Priority: 5, Attributes: map[string]string{"plan_type": "team"}},
-				{ID: "c", Provider: "codex", Priority: 5, Attributes: map[string]string{"plan_type": "team"}},
-				{ID: "d", Provider: "codex", Priority: 500, Status: "disabled", Attributes: map[string]string{"plan_type": "team"}},
-				{ID: "outsider", Provider: "codex", Priority: 500, Attributes: map[string]string{"plan_type": "free"}},
-			}
-			assertNativeRoundRobinSequence(t, app, req, "b", "c", "b", "c")
-		})
+func TestNativeRoundRobinPriorityAndBindingIsolation(t *testing.T) {
+	app := newNativeRoundRobinTestApp(t, nativeRoundRobinTestBinding())
+	req := nativeRoundRobinTestRequest()
+	req.Candidates = []SchedulerAuthCandidate{
+		{ID: "a", Provider: "codex", Priority: 0},
+		{ID: "b", Provider: "codex", Priority: 5},
+		{ID: "c", Provider: "codex", Priority: 5},
+		{ID: "d", Provider: "codex", Priority: 500, Status: "disabled"},
+		{ID: "outsider", Provider: "codex", Priority: 500},
 	}
+	assertNativeRoundRobinSequence(t, app, req, "b", "c", "b", "c")
 }
 
 func TestNativeRoundRobinModelAllowlistFailsClosed(t *testing.T) {

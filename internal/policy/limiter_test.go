@@ -22,3 +22,14 @@ func TestRateLimiter(t *testing.T) {
 		t.Fatal("request after window denied")
 	}
 }
+
+// Snapshot returns every bucket's in-minute count (test helper).
+func (l *RateLimiter) Snapshot() map[string]int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := make(map[string]int, len(l.buckets))
+	for key, bucket := range l.buckets {
+		out[key] = bucket.count
+	}
+	return out
+}

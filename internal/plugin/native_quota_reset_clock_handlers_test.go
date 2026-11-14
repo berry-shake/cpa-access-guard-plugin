@@ -19,7 +19,7 @@ func TestNativeQuotaResetClockManagementImmediateDeadline(t *testing.T) {
 	const path = "/v0/management/plugins/access-guard/native-key-bindings"
 	for _, id := range []string{"one", "two", "never-used", "old-expired"} {
 		resp := nativeBindingManagementCall(t, app, http.MethodPost, path, nil, map[string]any{
-			"id": id, "key": "synthetic-reset-clock-" + id, "group": "team", "weekly_usd": 50,
+			"id": id, "key": "synthetic-reset-clock-" + id, "auth_ids": []string{"team.json"}, "weekly_usd": 50,
 		})
 		if resp.StatusCode != http.StatusCreated {
 			t.Fatalf("create %s: %s", id, resp.Body)

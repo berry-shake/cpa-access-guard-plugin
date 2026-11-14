@@ -117,10 +117,6 @@ state_file: "` + filepath.ToSlash(statePath) + `"
 pricing_sync:
   litellm_url: "` + srv.URL + `/litellm"
   models_dev_url: "` + srv.URL + `/models-dev"
-aliases:
-  - alias: gpt-5.6-sol
-    targets: [{provider: codex, target_model: gpt-5.6-sol}]
-keys: []
 `)
 	req, _ := json.Marshal(LifecycleRequest{ConfigYAML: yaml})
 	if _, err := app.HandleMethod(MethodPluginReconfigure, req); err != nil {
@@ -143,7 +139,7 @@ keys: []
 	if err := json.Unmarshal(resp.Body, &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.Error != "" || result.Updated != 1 || result.Catalog < 1 {
+	if result.Error != "" || result.CatalogUpdated < 1 || result.Catalog < 1 {
 		t.Fatalf("result=%+v", result)
 	}
 
@@ -174,11 +170,6 @@ keys: []
 	if len(file.Models) == 0 || file.Models[0].InputPricePerMillion != 5 {
 		t.Fatalf("catalog=%+v", file)
 	}
-
-	aliases := app.store.AliasesSnapshot()
-	if len(aliases) != 1 || aliases[0].InputPricePerMillion != 5 {
-		t.Fatalf("alias prices not stamped: %+v", aliases)
-	}
 }
 
 func TestModelPricingManagementCRUD(t *testing.T) {
@@ -187,7 +178,6 @@ func TestModelPricingManagementCRUD(t *testing.T) {
 	yaml := []byte(`
 enabled: true
 state_file: "` + filepath.ToSlash(filepath.Join(t.TempDir(), "state.json")) + `"
-keys: []
 `)
 	req, _ := json.Marshal(LifecycleRequest{ConfigYAML: yaml})
 	if _, err := app.HandleMethod(MethodPluginReconfigure, req); err != nil {

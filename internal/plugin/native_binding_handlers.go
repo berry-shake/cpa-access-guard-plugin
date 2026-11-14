@@ -13,7 +13,8 @@ import (
 // nativeKeyBindingWriteRequest is used by both create and patch operations.
 // Key is accepted once to derive CPA's caller_scope, but is never returned or
 // persisted. Pointer fields let PATCH distinguish an omitted field from a
-// deliberate false/empty value.
+// deliberate false/empty value. Group is read only to reject clients written
+// for releases that still supported credential groups.
 type nativeKeyBindingWriteRequest struct {
 	ID          string                          `json:"id"`
 	Name        *string                         `json:"name,omitempty"`
@@ -32,11 +33,13 @@ type nativeKeyBindingWriteRequest struct {
 // irreversible, it is a stable authorization identity and management clients
 // do not need it. The API exposes only a short key preview for identification.
 type publicNativeKeyBinding struct {
-	ID               string                            `json:"id"`
-	Name             string                            `json:"name"`
-	Enabled          bool                              `json:"enabled"`
-	RoundRobin       bool                              `json:"round_robin"`
-	KeyPreview       string                            `json:"key_preview"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Enabled    bool   `json:"enabled"`
+	RoundRobin bool   `json:"round_robin"`
+	KeyPreview string `json:"key_preview"`
+	// Group is the read-only credential group of a binding saved by an older
+	// release; such a binding needs reselection.
 	Group            string                            `json:"group,omitempty"`
 	AuthIDs          []string                          `json:"auth_ids,omitempty"`
 	ModelAccess      policy.NativeModelAccessPolicy    `json:"model_access"`
@@ -139,20 +142,15 @@ func (a *App) createNativeKeyBinding(body []byte) ManagementResponse {
 	if key == "" {
 		return jsonError(http.StatusBadRequest, "missing_key", "key is required")
 	}
-	group := ""
-	if req.Group != nil {
-		group = strings.TrimSpace(*req.Group)
+	if resp, rejected := rejectNativeBindingGroup(req.Group); rejected {
+		return resp
 	}
 	authIDs := []string(nil)
 	if req.AuthIDs != nil {
 		authIDs = append(authIDs, (*req.AuthIDs)...)
 	}
-	hasAuthIDs := nativeAuthIDsPresent(authIDs)
-	if group == "" && !hasAuthIDs {
-		return jsonError(http.StatusBadRequest, "missing_restriction", "group or auth_ids is required")
-	}
-	if group != "" && hasAuthIDs {
-		return jsonError(http.StatusBadRequest, "conflicting_restriction", "group and auth_ids are mutually exclusive")
+	if !nativeAuthIDsPresent(authIDs) {
+		return jsonError(http.StatusBadRequest, "missing_restriction", "auth_ids is required")
 	}
 	name := ""
 	if req.Name != nil {
@@ -164,7 +162,6 @@ func (a *App) createNativeKeyBinding(body []byte) ManagementResponse {
 		Enabled:     applyBool(req.Enabled, true),
 		RoundRobin:  applyBool(req.RoundRobin, false),
 		APIKey:      key,
-		Group:       group,
 		AuthIDs:     authIDs,
 		ModelAccess: req.ModelAccess,
 		RPM:         req.RPM,
@@ -188,13 +185,15 @@ func (a *App) patchNativeKeyBinding(body []byte) ManagementResponse {
 	if id == "" {
 		return jsonError(http.StatusBadRequest, "missing_id", "id is required")
 	}
+	if resp, rejected := rejectNativeBindingGroup(req.Group); rejected {
+		return resp
+	}
 
 	binding, err := a.store.UpdateNativeKeyBinding(id, policy.UpdateNativeKeyBindingInput{
 		Name:        trimmedOptionalString(req.Name),
 		Enabled:     req.Enabled,
 		RoundRobin:  req.RoundRobin,
 		APIKey:      strings.TrimSpace(req.Key),
-		Group:       trimmedOptionalString(req.Group),
 		AuthIDs:     req.AuthIDs,
 		ModelAccess: req.ModelAccess,
 		RPM:         req.RPM,
@@ -254,6 +253,16 @@ func trimmedOptionalString(value *string) *string {
 	return &trimmed
 }
 
+// rejectNativeBindingGroup refuses a credential group. Groups were removed
+// together with classification rules; only exact auth IDs remain. An empty
+// group is ignored so older clients that always send the field keep working.
+func rejectNativeBindingGroup(group *string) (ManagementResponse, bool) {
+	if group == nil || strings.TrimSpace(*group) == "" {
+		return ManagementResponse{}, false
+	}
+	return jsonError(http.StatusBadRequest, "group_unsupported", "credential groups are no longer supported; select auth_ids instead"), true
+}
+
 func nativeAuthIDsPresent(authIDs []string) bool {
 	for _, authID := range authIDs {
 		if strings.TrimSpace(authID) != "" {
@@ -293,10 +302,9 @@ func publicNativeKeyBindingFromPolicyWithUsage(binding policy.NativeKeyBinding, 
 	}
 	if len(binding.AuthIDs) > 0 {
 		out.AuthIDs = append([]string(nil), binding.AuthIDs...)
-	} else if policy.NativeKeyBindingNeedsReselection(binding) {
-		out.NeedsReselection = true
 	} else {
-		out.Group = binding.Group
+		out.NeedsReselection = policy.NativeKeyBindingNeedsReselection(binding)
+		out.Group = policy.NativeKeyBindingLegacyGroup(binding)
 	}
 	if !binding.CreatedAt.IsZero() {
 		out.CreatedAt = binding.CreatedAt.UTC().Format(time.RFC3339)

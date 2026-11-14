@@ -51,22 +51,6 @@ func (l *RateLimiter) Allow(id string, rpm int) bool {
 	return true
 }
 
-func (l *RateLimiter) Reset(id string) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	delete(l.buckets, id)
-}
-
-func (l *RateLimiter) Snapshot() map[string]int {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	out := make(map[string]int, len(l.buckets))
-	for key, bucket := range l.buckets {
-		out[key] = bucket.count
-	}
-	return out
-}
-
 // SnapshotID returns the current in-minute allowance usage for one id (0
 // when no bucket exists yet).
 func (l *RateLimiter) SnapshotID(id string) int {

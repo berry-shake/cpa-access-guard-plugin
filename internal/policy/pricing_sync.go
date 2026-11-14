@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"time"
@@ -89,67 +90,38 @@ func modelsDevIsTextModel(modelID string, m modelsDevModel) bool {
 	return true
 }
 
+// modelsDevProviderCount only counts models; providers outside every
+// official-family rule are never selected, so their model bodies are skipped.
+type modelsDevProviderCount struct {
+	Models map[string]struct{} `json:"models"`
+}
+
 // FetchModelsDevCatalog downloads and flattens the fallback catalog into the
-// canonical official-family text rows accepted by the plugin.
+// canonical official-family text rows accepted by the plugin. The catalog is
+// decoded one provider at a time instead of buffering the whole document.
 func FetchModelsDevCatalog(ctx context.Context, rawURL string) (PricingFetchResult, error) {
-	body, err := fetchPricingPayload(ctx, rawURL, DefaultModelsDevURL, PricingSourceModelsDev)
-	if err != nil {
-		return PricingFetchResult{}, err
-	}
-	var catalog map[string]modelsDevProvider
-	if err := json.Unmarshal(body, &catalog); err != nil {
-		return PricingFetchResult{}, fmt.Errorf("models.dev: decode: %w", err)
-	}
 	var entries []PricingCatalogEntry
 	fetched := 0
-	for providerID, provider := range catalog {
-		for modelID, model := range provider.Models {
-			fetched++
-			if !modelsDevIsTextModel(modelID, model) {
-				continue
+	err := fetchPricingPayload(ctx, rawURL, DefaultModelsDevURL, PricingSourceModelsDev, func(body io.Reader) error {
+		return decodeJSONObjectMembers(body, func(providerID string, dec *json.Decoder) error {
+			if _, common := commonFamilyProviders[providerID]; !common {
+				var counted modelsDevProviderCount
+				if err := dec.Decode(&counted); err != nil {
+					return err
+				}
+				fetched += len(counted.Models)
+				return nil
 			}
-			cost := model.Cost
-			if cost == nil {
-				continue
+			var provider modelsDevProvider
+			if err := dec.Decode(&provider); err != nil {
+				return err
 			}
-			var input, output float64
-			if cost.Input != nil {
-				input = *cost.Input
-			}
-			if cost.Output != nil {
-				output = *cost.Output
-			}
-			if cost.Input == nil && cost.Output == nil {
-				continue
-			}
-			name := strings.TrimSpace(model.Name)
-			if name == "" {
-				name = modelID
-			}
-			entry := PricingCatalogEntry{
-				Key:           providerID + "/" + modelID,
-				ProviderID:    providerID,
-				ModelID:       modelID,
-				Name:          name,
-				ReleaseDate:   strings.TrimSpace(model.ReleaseDate),
-				Source:        PricingSourceModelsDev,
-				SourceModelID: providerID + "/" + modelID,
-				Status:        PricingStatusPriced,
-				Mode:          PricingModeText,
-				Input:         input,
-				Output:        output,
-			}
-			if cost.CacheRead != nil {
-				entry.CacheRead = *cost.CacheRead
-			}
-			if cost.CacheWrite != nil {
-				entry.CacheWrite = *cost.CacheWrite
-			}
-			if err := validateCatalogEntry(entry); err != nil {
-				continue
-			}
-			entries = append(entries, entry)
-		}
+			entries = appendModelsDevEntries(entries, providerID, provider, &fetched)
+			return nil
+		})
+	})
+	if err != nil {
+		return PricingFetchResult{}, err
 	}
 	sort.Slice(entries, func(i, j int) bool {
 		if entries[i].ReleaseDate != entries[j].ReleaseDate {
@@ -164,14 +136,55 @@ func FetchModelsDevCatalog(ctx context.Context, rawURL string) (PricingFetchResu
 	return PricingFetchResult{Entries: selected, Fetched: fetched, Accepted: len(selected)}, nil
 }
 
-// FetchModelsDevPricing is retained for callers written before the dual-source
-// result type was introduced.
-func FetchModelsDevPricing(ctx context.Context, rawURL string) ([]ModelsDevEntry, error) {
-	result, err := FetchModelsDevCatalog(ctx, rawURL)
-	if err != nil {
-		return nil, err
+func appendModelsDevEntries(entries []PricingCatalogEntry, providerID string, provider modelsDevProvider, fetched *int) []PricingCatalogEntry {
+	for modelID, model := range provider.Models {
+		*fetched++
+		if !modelsDevIsTextModel(modelID, model) {
+			continue
+		}
+		cost := model.Cost
+		if cost == nil {
+			continue
+		}
+		var input, output float64
+		if cost.Input != nil {
+			input = *cost.Input
+		}
+		if cost.Output != nil {
+			output = *cost.Output
+		}
+		if cost.Input == nil && cost.Output == nil {
+			continue
+		}
+		name := strings.TrimSpace(model.Name)
+		if name == "" {
+			name = modelID
+		}
+		entry := PricingCatalogEntry{
+			Key:           providerID + "/" + modelID,
+			ProviderID:    providerID,
+			ModelID:       modelID,
+			Name:          name,
+			ReleaseDate:   strings.TrimSpace(model.ReleaseDate),
+			Source:        PricingSourceModelsDev,
+			SourceModelID: providerID + "/" + modelID,
+			Status:        PricingStatusPriced,
+			Mode:          PricingModeText,
+			Input:         input,
+			Output:        output,
+		}
+		if cost.CacheRead != nil {
+			entry.CacheRead = *cost.CacheRead
+		}
+		if cost.CacheWrite != nil {
+			entry.CacheWrite = *cost.CacheWrite
+		}
+		if err := validateCatalogEntry(entry); err != nil {
+			continue
+		}
+		entries = append(entries, entry)
 	}
-	return result.Entries, nil
+	return entries
 }
 
 type commonFamilyRule struct {
@@ -203,7 +216,18 @@ var commonFamilyRules = []commonFamilyRule{
 	{providers: newProviderSet("zai"), match: func(id string) bool { return strings.HasPrefix(id, "glm-") }},
 }
 
-func commonModelKeys(entries []ModelsDevEntry) map[string]struct{} {
+// commonFamilyProviders lists every models.dev provider some rule accepts.
+var commonFamilyProviders = func() map[string]struct{} {
+	out := make(map[string]struct{})
+	for _, rule := range commonFamilyRules {
+		for id := range rule.providers {
+			out[id] = struct{}{}
+		}
+	}
+	return out
+}()
+
+func commonModelKeys(entries []PricingCatalogEntry) map[string]struct{} {
 	wanted := make(map[string]struct{})
 	for _, rule := range commonFamilyRules {
 		for _, entry := range entries {
@@ -222,9 +246,9 @@ func commonModelKeys(entries []ModelsDevEntry) map[string]struct{} {
 // SelectCommonModelsDev keeps every matching official-family text model from
 // the canonical provider. The old six-newest cap caused supported Codex models
 // to disappear from pricing and is intentionally gone.
-func SelectCommonModelsDev(entries []ModelsDevEntry) []ModelsDevEntry {
+func SelectCommonModelsDev(entries []PricingCatalogEntry) []PricingCatalogEntry {
 	wanted := commonModelKeys(entries)
-	out := make([]ModelsDevEntry, 0, len(wanted))
+	out := make([]PricingCatalogEntry, 0, len(wanted))
 	for _, entry := range entries {
 		if _, ok := wanted[entry.Key]; ok {
 			out = append(out, entry)
@@ -233,51 +257,9 @@ func SelectCommonModelsDev(entries []ModelsDevEntry) []ModelsDevEntry {
 	return out
 }
 
-// ToModelPrices is cc-switch toModelPricing: first normalized id wins.
-func ToModelPrices(entries []ModelsDevEntry) []ModelPrice {
-	seen := make(map[string]struct{}, len(entries))
-	out := make([]ModelPrice, 0, len(entries))
-	for _, entry := range entries {
-		id := NormalizeModelIDForPricing(entry.ModelID)
-		if id == "" {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		name := strings.TrimSpace(entry.Name)
-		if name == "" {
-			name = id
-		}
-		out = append(out, ModelPrice{
-			ID:                        id,
-			DisplayName:               name,
-			Provider:                  entry.ProviderID,
-			InputPricePerMillion:      entry.Input,
-			OutputPricePerMillion:     entry.Output,
-			CacheReadPricePerMillion:  entry.CacheRead,
-			CacheWritePricePerMillion: entry.CacheWrite,
-		})
-	}
-	return out
-}
-
-// pricingProviderAliases maps our alias provider ids to the catalog's
-// provider ids for preferential matching.
-var pricingProviderAliases = map[string][]string{
-	"codex":  {"openai"},
-	"claude": {"anthropic"},
-	"xai":    {"xai"},
-	"gemini": {"google"},
-}
-
 // PricingSyncResult reports one sync run.
 type PricingSyncResult struct {
 	At             time.Time        `json:"at"`
-	Updated        int              `json:"updated"`
-	Unmatched      int              `json:"unmatched"`
-	Skipped        int              `json:"skipped"`
 	CatalogUpdated int              `json:"catalog_updated"`
 	Catalog        int              `json:"catalog"`
 	LiteLLM        int              `json:"litellm"`
@@ -290,121 +272,4 @@ type PricingSyncResult struct {
 	Partial        bool             `json:"partial,omitempty"`
 	PricingFile    string           `json:"pricing_file,omitempty"`
 	Error          string           `json:"error,omitempty"`
-}
-
-// SyncAliasPrices matches every existing tokens-billed alias against the
-// catalog and overwrites its price fields. Only aliases whose name (or
-// normalized name) matches a catalog entry are touched; per_call aliases are
-// skipped. Prices propagate to downstream keys on the next resolve (the
-// alias table is the single source of truth).
-func (s *Store) SyncAliasPrices(entries []ModelsDevEntry) (updated, unmatched, skipped int) {
-	// Index by normalized id, preferring the provider that matches each
-	// alias's target provider at lookup time.
-	byNormalized := make(map[string][]ModelsDevEntry, len(entries))
-	for _, entry := range entries {
-		n := NormalizeModelIDForPricing(entry.ModelID)
-		if n == "" {
-			continue
-		}
-		byNormalized[n] = append(byNormalized[n], entry)
-	}
-
-	aliases := s.AliasesSnapshot()
-	for _, alias := range aliases {
-		if strings.EqualFold(alias.BillingMode, "per_call") || strings.EqualFold(alias.PricingMode, "manual") {
-			skipped++
-			continue
-		}
-		n := NormalizeModelIDForPricing(alias.Alias)
-		candidates := byNormalized[n]
-		if len(candidates) == 0 {
-			// Try the first target's model id when the alias name itself
-			// doesn't match (e.g. alias "fast" targeting "gpt-5.6-sol").
-			for _, target := range alias.Targets {
-				if tn := NormalizeModelIDForPricing(target.TargetModel); tn != "" {
-					if candidates = byNormalized[tn]; len(candidates) > 0 {
-						break
-					}
-				}
-			}
-		}
-		if len(candidates) == 0 {
-			unmatched++
-			continue
-		}
-		entry := pickPricingEntry(candidates, alias.Targets)
-		if entry.Status == PricingStatusKnownUnpriced || entry.Mode == PricingModeImageGeneration {
-			// An automatic alias must not retain a formerly published price after
-			// the primary source explicitly reports no public text-token price.
-			alias.InputPricePerMillion = 0
-			alias.OutputPricePerMillion = 0
-			alias.CacheReadPricePerMillion = 0
-			alias.CacheWritePricePerMillion = 0
-		} else {
-			alias.InputPricePerMillion = entry.Input
-			alias.OutputPricePerMillion = entry.Output
-			alias.CacheReadPricePerMillion = entry.CacheRead
-			alias.CacheWritePricePerMillion = entry.CacheWrite
-		}
-		if err := s.upsertAliasFromPricingSync(alias); err != nil {
-			skipped++
-			continue
-		}
-		updated++
-	}
-	return updated, unmatched, skipped
-}
-
-// SyncAliasPricesFromCatalog updates auto-priced token aliases from the
-// already merged, last-known-good catalog. This prevents a transient primary
-// failure from stamping fallback prices over a retained LiteLLM row.
-func (s *Store) SyncAliasPricesFromCatalog() (updated, unmatched, skipped int) {
-	rows := s.PricingSnapshot()
-	entries := make([]PricingCatalogEntry, 0, len(rows))
-	for _, row := range rows {
-		if row.Status != PricingStatusKnownUnpriced && row.Mode != PricingModeImageGeneration && !row.hasTokenPrices() {
-			continue
-		}
-		entries = append(entries, PricingCatalogEntry{
-			Key:           row.Provider + "/" + row.ID,
-			ProviderID:    row.Provider,
-			ModelID:       row.ID,
-			Name:          row.DisplayName,
-			Source:        row.Source,
-			SourceModelID: row.SourceModelID,
-			Status:        row.Status,
-			Mode:          row.Mode,
-			Input:         row.InputPricePerMillion,
-			Output:        row.OutputPricePerMillion,
-			CacheRead:     row.CacheReadPricePerMillion,
-			CacheWrite:    row.CacheWritePricePerMillion,
-		})
-	}
-	return s.SyncAliasPrices(entries)
-}
-
-// pickPricingEntry prefers a catalog entry whose provider matches one of the
-// alias's targets (through the alias provider-id mapping); otherwise the
-// first candidate.
-func pickPricingEntry(candidates []ModelsDevEntry, targets []AliasTarget) ModelsDevEntry {
-	if len(candidates) == 1 || len(targets) == 0 {
-		return candidates[0]
-	}
-	wanted := make(map[string]struct{}, 2)
-	for _, target := range targets {
-		wanted[strings.ToLower(strings.TrimSpace(target.Provider))] = struct{}{}
-	}
-	for _, candidate := range candidates {
-		for aliasProvider, catalogProviders := range pricingProviderAliases {
-			if _, ok := wanted[aliasProvider]; !ok {
-				continue
-			}
-			for _, cp := range catalogProviders {
-				if strings.EqualFold(candidate.ProviderID, cp) {
-					return candidate
-				}
-			}
-		}
-	}
-	return candidates[0]
 }

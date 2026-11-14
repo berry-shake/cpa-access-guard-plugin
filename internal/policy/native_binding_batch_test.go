@@ -792,61 +792,37 @@ func TestNativeBindingRollbackPersistenceFailurePublishesNothing(t *testing.T) {
 	}
 }
 
-func TestNativeBindingRollbackGroupRestoreWarnsAboutCurrentMembership(t *testing.T) {
-	store, _ := batchTestStore(t)
-	if err := store.UpsertClassifyRule(ClassifyRule{Name: "translation", Field: "email", Pattern: "@example\\.com$", Group: "translation", Enabled: true}); err != nil {
+// TestNativeBindingRollbackRejectsLegacyGroupTarget: a binding saved with a
+// credential group by an older release can be replaced by exact auth IDs, but
+// rolling back to the group is refused because groups no longer schedule.
+func TestNativeBindingRollbackRejectsLegacyGroupTarget(t *testing.T) {
+	store, path := batchTestStore(t)
+	legacy := NativeKeyBinding{
+		ID: "group", Enabled: true, CallerScope: NativeCallerScope(batchTestKeyA),
+		Group: "classify:translation", ModelAccess: NativeModelAccessPolicy{Mode: NativeModelAccessAll},
+	}
+	if err := SaveState(path, nil, []NativeKeyBinding{legacy}); err != nil {
 		t.Fatal(err)
 	}
-	original, err := store.CreateNativeKeyBinding(CreateNativeKeyBindingInput{
-		ID: "group", APIKey: batchTestKeyA, Enabled: true, Group: "classify:translation",
-	})
-	if err != nil {
+	if err := store.Configure(Config{Enabled: true, StateFile: path}); err != nil {
 		t.Fatal(err)
+	}
+	loaded := batchTestFind(t, store, legacy.CallerScope)
+	if !NativeKeyBindingNeedsReselection(loaded) || NativeKeyBindingLegacyGroup(loaded) != "classify:translation" {
+		t.Fatalf("legacy group binding = %+v, want needs reselection with its group", loaded)
 	}
 	input := batchTestInput()
 	input.SelectedIndices = []int{0}
 	result := batchTestApply(t, store, input)
+	if replaced := batchTestFind(t, store, legacy.CallerScope); len(replaced.AuthIDs) != 2 {
+		t.Fatalf("replaced binding = %+v, want exact auth IDs", replaced)
+	}
 	rollback := batchTestRollbackInput(result.Operation.ID)
 	preview, err := store.PreviewNativeBindingRollback(rollback)
-	if err != nil || !preview.CanApply || len(preview.Warnings) == 0 {
-		t.Fatalf("group rollback must warn about current rule membership: %+v err=%v", preview, err)
+	if err != nil || len(preview.Conflicts) != 1 || preview.Conflicts[0].Code != "group_unsupported" {
+		t.Fatalf("rollback preview = %+v err=%v, want group_unsupported", preview, err)
 	}
-	batchTestRollback(t, store, rollback)
-	restored := batchTestFind(t, store, original.CallerScope)
-	if restored.Group != original.Group || len(restored.AuthIDs) != 0 {
-		t.Fatalf("group restriction was not restored: %+v", restored)
-	}
-}
-
-func TestNativeBindingRollbackRejectsMissingOrDisabledClassification(t *testing.T) {
-	for _, disable := range []bool{false, true} {
-		name := "deleted rule"
-		if disable {
-			name = "disabled rule"
-		}
-		t.Run(name, func(t *testing.T) {
-			store, path := batchTestStore(t)
-			rule := ClassifyRule{Name: "translation", Field: "email", Pattern: "@example\\.com$", Group: "translation", Enabled: true}
-			if err := store.UpsertClassifyRule(rule); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := store.CreateNativeKeyBinding(CreateNativeKeyBindingInput{ID: "group", APIKey: batchTestKeyA, Enabled: true, Group: "classify:translation"}); err != nil {
-				t.Fatal(err)
-			}
-			input := batchTestInput()
-			input.SelectedIndices = []int{0}
-			result := batchTestApply(t, store, input)
-			if disable {
-				rule.Enabled = false
-				if err := store.UpsertClassifyRule(rule); err != nil {
-					t.Fatal(err)
-				}
-			} else if err := store.DeleteClassifyRule(rule.Name); err != nil {
-				t.Fatal(err)
-			}
-			batchTestAssertRollbackConflict(t, store, path, batchTestRollbackInput(result.Operation.ID))
-		})
-	}
+	batchTestAssertRollbackConflict(t, store, path, rollback)
 }
 
 func TestNativeBindingRollbackRequiresCurrentRevisionAndKnownOperation(t *testing.T) {
