@@ -31,7 +31,7 @@ export default function Login() {
     try {
       setSession(baseUrl, secretKey);
       await verifySession(fetch);
-      nav("/mapping");
+      nav("/native-keys");
     } catch (err) {
       setError((err as Error).message || t("login.loginFailed"));
     } finally {

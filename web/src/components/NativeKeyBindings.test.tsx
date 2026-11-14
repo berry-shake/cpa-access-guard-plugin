@@ -1,7 +1,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ClassifyRule, NativeBindingUsageSummary, NativeKeyBinding, NativeKeyBindingCatalog } from "../types";
+import type { NativeBindingUsageSummary, NativeKeyBinding, NativeKeyBindingCatalog } from "../types";
 import { _resetLocale } from "../i18n";
 import { sha256Hex } from "../sha256";
 import { clearSession, setSession } from "../store/session";
@@ -13,13 +13,11 @@ const apiMocks = vi.hoisted(() => ({
   fetchNativeKeyBindingCatalog: vi.fn(),
   fetchNativeBindingCredentialCatalog: vi.fn(),
   fetchNativeCredentialOptions: vi.fn(),
-  fetchClassifyRules: vi.fn(),
   createNativeKeyBinding: vi.fn(),
   updateNativeKeyBinding: vi.fn(),
   deleteNativeKeyBinding: vi.fn(),
   resetNativeKeyBindingQuota: vi.fn(),
 }));
-const modelMocks = vi.hoisted(() => ({ fetchCatalog: vi.fn() }));
 const noteMocks = vi.hoisted(() => ({ read: vi.fn(), sync: vi.fn() }));
 const quotaResetClient = vi.hoisted(() => ({ loadBindings: vi.fn(), reset: vi.fn() }));
 
@@ -28,19 +26,21 @@ vi.mock("../api/nativeKeyNotes", async (importOriginal) => ({
   ...await importOriginal<typeof import("../api/nativeKeyNotes")>(),
   createNativeKeyNotesClient: () => noteMocks,
 }));
-vi.mock("../api/models", () => modelMocks);
 vi.mock("../api/nativeQuotaReset", () => ({ createNativeQuotaResetClient: () => quotaResetClient }));
 
-import NativeKeyBindingsTab, { buildNativeBindingGroupOptions } from "./NativeKeyBindings";
+import NativeKeyBindingsTab from "./NativeKeyBindings";
 
 const existing: NativeKeyBinding = {
   id: "client-a",
   name: "Client A",
   enabled: true,
   key_preview: "sk-ab...wxyz",
-  group: "team",
+  auth_ids: ["tenant/codex-a.json"],
   model_access: { mode: "all", models: [] },
 };
+
+// Older versions restricted by credential group; such bindings must be re-pointed at credentials.
+const legacyGroupBinding: NativeKeyBinding = { ...existing, auth_ids: undefined, group: "team", needs_reselection: true };
 
 const existingSecret = "sk-existing-native-secret-0123456789";
 
@@ -91,8 +91,14 @@ async function openDirectBindingEditor(binding: NativeKeyBinding = existing) {
   const edit = Array.from(container.querySelectorAll<HTMLButtonElement>(".native-binding-card button"))
     .find((button) => button.textContent?.includes("编辑 / 轮换"))!;
   await act(async () => { edit.click(); await tick(); });
-  const direct = container.querySelector<HTMLInputElement>('input[name="native-restriction-mode"][value="auth_ids"]')!;
-  if (!direct.checked) await act(async () => { direct.click(); await tick(); });
+}
+
+async function checkCredential(id: string) {
+  await act(async () => { await tick(); });
+  const option = Array.from(container.querySelectorAll(".native-credential-option"))
+    .find((label) => label.textContent?.includes(id));
+  expect(option, id).toBeTruthy();
+  await act(async () => { option!.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click(); });
 }
 
 function weeklyMeter() {
@@ -105,12 +111,6 @@ function change(input: HTMLInputElement, value: string) {
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
   setter?.call(input, value);
   input.dispatchEvent(new Event("input", { bubbles: true }));
-}
-
-function changeSelect(select: HTMLSelectElement, value: string) {
-  const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
-  setter?.call(select, value);
-  select.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
 beforeEach(() => {
@@ -126,14 +126,8 @@ beforeEach(() => {
     orphan_bindings: [],
   });
   apiMocks.fetchNativeBindingCredentialCatalog.mockResolvedValue({
-    credentials: [], identitiesComplete: true, groups: {}, unavailableGroups: [], groupsAvailable: true,
+    credentials: [], identitiesComplete: true,
   });
-  apiMocks.fetchClassifyRules.mockResolvedValue([
-    { name: "sample-tenant-a-filename", field: "filename", pattern: "tenant-a", group: "tenant-a", enabled: true },
-    { name: "sample-claude-provider", field: "provider", pattern: "claude", group: "claude-auth", enabled: true },
-    { name: "sample-codex-team-plan", field: "plan_type", pattern: "team", group: "codex-premium", enabled: true },
-    { name: "sample-antigravity-paid-tier", field: "tier", pattern: "paid", group: "antigravity-paid", enabled: true },
-  ] satisfies ClassifyRule[]);
   apiMocks.fetchNativeCredentialOptions.mockResolvedValue([
     { id: "tenant/codex-a.json", provider: "codex", label: "Account A", status: "active", plan: "team", source: "auth_file" },
     {
@@ -146,12 +140,6 @@ beforeEach(() => {
       authIndex: "index-12345678",
       models: ["gpt-5.6-luna", "gpt-5.5"],
     },
-  ]);
-  modelMocks.fetchCatalog.mockResolvedValue([
-    { provider: "codex", group: "team", model: "gpt-5.6-luna" },
-    { provider: "codex", group: "plus", model: "gpt-5.6-luna" },
-    { provider: "codex", group: "team", model: "gpt-5.5" },
-    { provider: "gemini", model: "gemini-2.5-pro" },
   ]);
   apiMocks.createNativeKeyBinding.mockResolvedValue(existing);
   apiMocks.updateNativeKeyBinding.mockResolvedValue(existing);
@@ -169,17 +157,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
   if (originalClipboard) Object.defineProperty(navigator, "clipboard", originalClipboard);
   else Reflect.deleteProperty(navigator, "clipboard");
-});
-
-describe("buildNativeBindingGroupOptions", () => {
-  it("combines built-in groups with enabled classify rules and de-duplicates them", () => {
-    const options = buildNativeBindingGroupOptions([
-      { name: "a", field: "filename", pattern: "a", group: "VIP", enabled: true },
-      { name: "b", field: "filename", pattern: "b", group: "classify:vip", enabled: true },
-      { name: "c", field: "filename", pattern: "c", group: "off", enabled: false },
-    ]);
-    expect(options).toEqual(["free", "team", "plus", "supported", "classify:vip"]);
-  });
 });
 
 describe("CPA notes on native key bindings", () => {
@@ -302,12 +279,10 @@ describe("CPA notes on native key bindings", () => {
     const name = container.querySelector<HTMLInputElement>("#native-binding-name")!;
     expect(name.value).toBe("CPA first");
     expect(name.readOnly).toBe(true);
-    await act(async () => {
-      changeSelect(container.querySelector<HTMLSelectElement>("#native-binding-group")!, "team");
-    });
+    await checkCredential("tenant/codex-a.json");
     await submitEditor();
     expect(apiMocks.createNativeKeyBinding).toHaveBeenCalledWith(expect.objectContaining({
-      key: existingSecret, name: "CPA first",
+      key: existingSecret, name: "CPA first", auth_ids: ["tenant/codex-a.json"],
     }));
     expect(noteMocks.sync).not.toHaveBeenCalled();
   });
@@ -428,9 +403,8 @@ describe("NativeKeyBindingsTab copy and credential identities", () => {
         { id: "auth-b", provider: "codex", email: "second@example.test", name: "Ignore name B" },
         { id: "unbound", provider: "codex", email: "unbound@example.test" },
       ],
-      groups: {}, unavailableGroups: [], groupsAvailable: true,
     });
-    await renderQuotaBinding({ ...existing, group: undefined, auth_ids: ["auth-a", "auth-b"], round_robin: true });
+    await renderQuotaBinding({ ...existing, auth_ids: ["auth-a", "auth-b"], round_robin: true });
     const list = container.querySelector('ul.native-binding-credentials[aria-label="绑定凭据"]')!;
     expect(list).toBeTruthy();
     const rows = list.querySelectorAll("li.native-binding-credential");
@@ -444,26 +418,20 @@ describe("NativeKeyBindingsTab copy and credential identities", () => {
     expect(container.textContent).toContain("轮询并发");
   });
 
-  it.each(["team", "classify:vip"])("shows only credentials mapped to group %s", async (group) => {
-    apiMocks.fetchNativeBindingCredentialCatalog.mockResolvedValue({
-      credentials: [
-        { id: "group-a", provider: "codex", email: "group-a@example.test" },
-        { id: "outside", provider: "codex", email: "outside@example.test" },
-        { id: "group-b", provider: "codex", email: "group-b@example.test" },
-      ],
-      groups: { [group]: ["group-a", "group-b"] }, unavailableGroups: [], groupsAvailable: true,
-    });
-    await renderQuotaBinding({ ...existing, group });
-    const rows = container.querySelectorAll("li.native-binding-credential");
-    expect(rows).toHaveLength(2);
-    expect(Array.from(rows).map((row) => row.textContent)).toEqual([
-      expect.stringContaining("group-a@example.test"), expect.stringContaining("group-b@example.test"),
-    ]);
-    expect(container.querySelector(".native-binding-group")?.textContent).toBe(group);
-    expect(container.querySelector(".native-binding-credentials")?.textContent).not.toContain("outside@example.test");
-    expect(apiMocks.fetchNativeBindingCredentialCatalog).toHaveBeenCalledWith(expect.arrayContaining([
-      expect.objectContaining({ group: "codex-premium", enabled: true }),
-    ]));
+  it("shows a legacy group binding as needing credential reselection", async () => {
+    await renderQuotaBinding({ ...existing, auth_ids: undefined, group: "classify:vip", needs_reselection: true });
+    expect(container.querySelector(".native-binding-group")?.textContent).toBe("旧版凭证组：classify:vip，请重新选择凭证");
+    expect(container.querySelector(".native-binding-group")?.classList.contains("needs-reselection")).toBe(true);
+    expect(container.querySelector(".native-binding-account-panel")).toBeNull();
+    expect(apiMocks.fetchNativeBindingCredentialCatalog).toHaveBeenCalledWith();
+  });
+
+  it("explains a legacy group in the bound account panel instead of listing members", async () => {
+    await renderQuotaBinding({ ...existing, auth_ids: undefined, group: "team" });
+    expect(container.querySelector(".native-binding-group")?.textContent).toBe("旧版凭证组：team，请重新选择凭证");
+    expect(container.querySelector(".native-binding-account-content")?.textContent).toBe("旧版凭证组：team，请重新选择凭证");
+    expect(container.querySelector("li.native-binding-credential")).toBeNull();
+    expect(container.querySelector(".native-binding-account-count")).toBeNull();
   });
 
   it("keeps separate rows for different credential IDs sharing one account email", async () => {
@@ -472,9 +440,8 @@ describe("NativeKeyBindingsTab copy and credential identities", () => {
         { id: "same-account-a", provider: "codex", email: "shared@example.test" },
         { id: "same-account-b", provider: "codex", email: "shared@example.test" },
       ],
-      groups: {}, unavailableGroups: [], groupsAvailable: true,
     });
-    await renderQuotaBinding({ ...existing, group: undefined, auth_ids: ["same-account-a", "same-account-b"] });
+    await renderQuotaBinding({ ...existing, auth_ids: ["same-account-a", "same-account-b"] });
     const rows = container.querySelectorAll("li.native-binding-credential");
     expect(rows).toHaveLength(2);
     expect(Array.from(rows).map((row) => row.textContent)).toEqual(["shared@example.test", "shared@example.test"]);
@@ -499,9 +466,9 @@ describe("NativeKeyBindingsTab copy and credential identities", () => {
     ];
     const credentials = [...known, ...withoutBadges];
     apiMocks.fetchNativeBindingCredentialCatalog.mockResolvedValue({
-      credentials, groups: {}, unavailableGroups: [], groupsAvailable: true,
+      credentials,
     });
-    await renderQuotaBinding({ ...existing, group: undefined, auth_ids: credentials.map((item) => item.id) });
+    await renderQuotaBinding({ ...existing, auth_ids: credentials.map((item) => item.id) });
 
     const rows = container.querySelectorAll("li.native-binding-credential");
     expect(rows).toHaveLength(credentials.length);
@@ -519,9 +486,8 @@ describe("NativeKeyBindingsTab copy and credential identities", () => {
         { id: "account-a", provider: "codex", email: "a@example.test" },
         { id: "account-b", provider: "codex", email: "b@example.test" },
       ],
-      groups: {}, unavailableGroups: [], groupsAvailable: true,
     });
-    await renderQuotaBinding({ ...existing, group: undefined, auth_ids: ["account-a", "account-b"] });
+    await renderQuotaBinding({ ...existing, auth_ids: ["account-a", "account-b"] });
 
     const toggle = container.querySelector<HTMLButtonElement>(".native-binding-account-toggle[aria-expanded][aria-controls]")!;
     expect(toggle).toBeTruthy();
@@ -555,9 +521,8 @@ describe("NativeKeyBindingsTab copy and credential identities", () => {
         { id: "name-id", provider: "codex", name: "Provider name" },
         { id: "plain-auth-id", provider: "codex" },
       ],
-      groups: {}, unavailableGroups: [], groupsAvailable: true,
     });
-    await renderQuotaBinding({ ...existing, group: undefined, auth_ids: ["label-id", "name-id", "plain-auth-id", "missing-auth-id"] });
+    await renderQuotaBinding({ ...existing, auth_ids: ["label-id", "name-id", "plain-auth-id", "missing-auth-id"] });
     const rows = container.querySelectorAll("li.native-binding-credential");
     expect(rows).toHaveLength(4);
     expect(rows[0].textContent).toContain("Friendly label");
@@ -569,31 +534,11 @@ describe("NativeKeyBindingsTab copy and credential identities", () => {
     expect(container.textContent).toContain("指定 4 个凭证");
   });
 
-  it.each([
-    { unavailableGroups: ["classify:vip"], groupsAvailable: true },
-    { unavailableGroups: [], groupsAvailable: false },
-  ])("does not describe unavailable group identities as an empty pool (%j)", async (availability) => {
-    apiMocks.fetchNativeBindingCredentialCatalog.mockResolvedValue({ credentials: [], groups: {}, ...availability });
-    await renderQuotaBinding({ ...existing, group: "classify:vip" });
-    expect(container.textContent).toContain("暂时无法确定此组的凭据");
-    expect(container.textContent).not.toContain("此组当前没有匹配的凭据");
-    expect(container.querySelector(".native-binding-card")).toBeTruthy();
-  });
-
-  it("distinguishes a successfully loaded empty group from unavailable identities", async () => {
-    apiMocks.fetchNativeBindingCredentialCatalog.mockResolvedValue({
-      credentials: [], groups: { team: [] }, unavailableGroups: [], groupsAvailable: true,
-    });
-    await renderQuotaBinding(existing);
-    expect(container.textContent).toContain("此组当前没有匹配的凭据");
-    expect(container.textContent).not.toContain("暂时无法确定此组的凭据");
-  });
-
   it("does not label a credential deleted when its identity inventory failed", async () => {
     apiMocks.fetchNativeBindingCredentialCatalog.mockResolvedValue({
-      credentials: [], identitiesComplete: false, groups: {}, unavailableGroups: [], groupsAvailable: false,
+      credentials: [], identitiesComplete: false,
     });
-    await renderQuotaBinding({ ...existing, group: undefined, auth_ids: ["temporarily-unavailable"] });
+    await renderQuotaBinding({ ...existing, auth_ids: ["temporarily-unavailable"] });
     expect(container.querySelector(".native-binding-credentials")?.textContent).toContain("凭据身份加载失败");
     expect(container.textContent).not.toContain("凭据不存在");
     expect(container.querySelector<HTMLButtonElement>(".native-key-copy")?.disabled).toBe(false);
@@ -614,10 +559,10 @@ describe("NativeKeyBindingsTab copy and credential identities", () => {
   it("ignores an old identity response after the card list has been refreshed", async () => {
     let finishFirst!: (value: unknown) => void;
     apiMocks.fetchNativeBindingCredentialCatalog.mockReturnValueOnce(new Promise((resolve) => { finishFirst = resolve; }));
-    await renderQuotaBinding({ ...existing, group: undefined, auth_ids: ["same-id"] });
+    await renderQuotaBinding({ ...existing, auth_ids: ["same-id"] });
     apiMocks.fetchNativeBindingCredentialCatalog.mockResolvedValue({
       credentials: [{ id: "same-id", provider: "codex", email: "current@example.test" }],
-      identitiesComplete: true, groups: {}, unavailableGroups: [], groupsAvailable: true,
+      identitiesComplete: true,
     });
     await act(async () => {
       container.querySelector<HTMLButtonElement>(".native-binding-toolbar button")!.click();
@@ -626,7 +571,7 @@ describe("NativeKeyBindingsTab copy and credential identities", () => {
     await act(async () => {
       finishFirst({
         credentials: [{ id: "same-id", provider: "codex", email: "old@example.test" }],
-        identitiesComplete: true, groups: {}, unavailableGroups: [], groupsAvailable: true,
+        identitiesComplete: true,
       });
       await tick();
     });
@@ -636,7 +581,7 @@ describe("NativeKeyBindingsTab copy and credential identities", () => {
 
   it("keeps key cards and editing usable if credential identity loading fails", async () => {
     apiMocks.fetchNativeBindingCredentialCatalog.mockRejectedValue(new Error("credential identities unavailable"));
-    const binding = { ...existing, group: undefined, auth_ids: ["tenant/codex-a.json"], round_robin: true };
+    const binding = { ...existing, auth_ids: ["tenant/codex-a.json"], round_robin: true };
     await renderQuotaBinding(binding);
     expect(container.querySelector(".native-binding-card")).toBeTruthy();
     expect(container.textContent).toContain("凭据身份加载失败");
@@ -979,7 +924,7 @@ describe("NativeKeyBindingsTab", () => {
       id: "client-a",
       enabled: true,
       round_robin: false,
-      group: "team",
+      auth_ids: ["tenant/codex-a.json"],
       model_access: { mode: "all", models: [] },
     });
     expect(apiMocks.updateNativeKeyBinding.mock.calls[0][0]).not.toHaveProperty("key");
@@ -993,7 +938,6 @@ describe("NativeKeyBindingsTab", () => {
   ])("round-robin routing $name", async ({ initial, toggle, expected }) => {
     const translationBinding: NativeKeyBinding = {
       ...existing,
-      group: undefined,
       auth_ids: ["tenant/codex-a.json", "tenant/codex-b.json"],
       round_robin: initial,
       model_access: { mode: "allowlist", models: [{ provider: "codex", model: "gpt-5.3-codex-spark" }] },
@@ -1097,12 +1041,12 @@ describe("NativeKeyBindingsTab", () => {
       id: "client-a",
       enabled: false,
       round_robin: false,
-      group: "team",
+      auth_ids: ["tenant/codex-a.json"],
       model_access: { mode: "all", models: [] },
     });
   });
 
-  it("renders an explicit group selector and creates a binding from a suggested group", async () => {
+  it("offers only the credential picker and creates a binding from picked credentials", async () => {
     apiMocks.fetchTopLevelAPIKeys.mockResolvedValue([existingSecret, "sk-client-b-secret"]);
     apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValue({
       entries: [
@@ -1128,40 +1072,16 @@ describe("NativeKeyBindingsTab", () => {
     expect(bindButton).toBeTruthy();
     await act(async () => { bindButton!.click(); });
 
-    const groupSelect = container.querySelector("#native-binding-group") as HTMLSelectElement;
-    expect(groupSelect.tagName).toBe("SELECT");
-    expect(groupSelect.classList.contains("native-binding-group-select")).toBe(true);
-    expect(container.querySelector("datalist")).toBeNull();
-    const optionValues = Array.from(groupSelect.options)
-      .map((option) => (option as HTMLOptionElement).value);
-    expect(optionValues).toEqual(expect.arrayContaining([
-      "free",
-      "team",
-      "plus",
-      "supported",
-      "classify:tenant-a",
-      "classify:claude-auth",
-      "classify:codex-premium",
-      "classify:antigravity-paid",
-    ]));
-    const optionLabels = Array.from(groupSelect.options).map((option) => option.textContent);
-    expect(optionLabels).toEqual(expect.arrayContaining([
-      "free",
-      "team",
-      "plus",
-      "supported",
-      "classify:tenant-a",
-      "classify:claude-auth",
-      "classify:codex-premium",
-      "classify:antigravity-paid",
-      "手动输入其他组…",
-    ]));
+    expect(container.querySelector("#native-binding-group")).toBeNull();
+    expect(container.querySelector('input[name="native-restriction-mode"]')).toBeNull();
+    expect(container.querySelector("#native-credential-search")).toBeTruthy();
+    expect(container.textContent).not.toContain("凭证组");
 
     await act(async () => {
       change(container.querySelector("#native-binding-id") as HTMLInputElement, "client-b");
       change(container.querySelector("#native-binding-name") as HTMLInputElement, "Client B");
-      changeSelect(groupSelect, "classify:tenant-a");
     });
+    await checkCredential("tenant/codex-a.json");
 
     const form = container.querySelector(".native-binding-editor form") as HTMLFormElement;
     await act(async () => {
@@ -1175,64 +1095,8 @@ describe("NativeKeyBindingsTab", () => {
       enabled: true,
       round_robin: false,
       key: "sk-client-b-secret",
-      group: "classify:tenant-a",
+      auth_ids: ["tenant/codex-a.json"],
       model_access: { mode: "allowlist", models: [] },
-    });
-  });
-
-  it("shows a separate input for a manually entered group", async () => {
-    apiMocks.fetchTopLevelAPIKeys.mockResolvedValue([existingSecret, "sk-client-manual-secret"]);
-    apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValue({
-      entries: [
-        { key_index: 0, key_preview: existing.key_preview, binding: existing },
-        { key_index: 1, key_preview: "sk-clie...ecret" },
-      ],
-      orphan_bindings: [],
-    });
-    await act(async () => {
-      root = createRoot(container);
-      root.render(<NativeKeyBindingsTab />);
-      await tick();
-    });
-
-    const bindButton = Array.from(container.querySelectorAll("button"))
-      .find((button) => button.textContent?.includes("配置绑定"));
-    await act(async () => { bindButton!.click(); });
-
-    const groupSelect = container.querySelector("#native-binding-group") as HTMLSelectElement;
-    const manualOption = Array.from(groupSelect.options)
-      .find((option) => option.textContent === "手动输入其他组…");
-    expect(manualOption).toBeTruthy();
-
-    await act(async () => {
-      change(container.querySelector("#native-binding-id") as HTMLInputElement, "client-manual");
-      changeSelect(groupSelect, manualOption!.value);
-    });
-
-    const manualInput = container.querySelector("#native-binding-manual-group") as HTMLInputElement;
-    expect(manualInput).toBeTruthy();
-    expect(manualInput.labels?.[0]?.textContent).toBe("其他凭证组");
-    expect(container.querySelector('.map-form-foot button[type="submit"]')?.hasAttribute("disabled")).toBe(true);
-    await act(async () => { change(manualInput, "classify:manual"); });
-    expect(container.querySelector('.map-form-foot button[type="submit"]')?.hasAttribute("disabled")).toBe(false);
-
-    const form = container.querySelector(".native-binding-editor form") as HTMLFormElement;
-    await act(async () => {
-      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-      await tick();
-    });
-
-    expect(apiMocks.createNativeKeyBinding).toHaveBeenCalledWith({
-      id: "client-manual",
-      name: undefined,
-      enabled: true,
-      round_robin: false,
-      key: "sk-client-manual-secret",
-      group: "classify:manual",
-      model_access: { mode: "allowlist", models: [] },
-      rpm: undefined,
-      daily_usd: undefined,
-      weekly_usd: undefined,
     });
   });
 
@@ -1291,12 +1155,7 @@ describe("NativeKeyBindingsTab", () => {
     expect(container.querySelector("#native-binding-key")).toBeNull();
     expect(container.innerHTML).not.toContain(secret);
 
-    await act(async () => {
-      changeSelect(
-        container.querySelector("#native-binding-group") as HTMLSelectElement,
-        "classify:codex-premium",
-      );
-    });
+    await checkCredential("tenant/codex-a.json");
     const form = container.querySelector(".native-binding-editor form") as HTMLFormElement;
     await act(async () => {
       form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
@@ -1309,7 +1168,7 @@ describe("NativeKeyBindingsTab", () => {
       enabled: true,
       round_robin: false,
       key: secret,
-      group: "classify:codex-premium",
+      auth_ids: ["tenant/codex-a.json"],
       model_access: { mode: "allowlist", models: [] },
     });
   });
@@ -1332,9 +1191,8 @@ describe("NativeKeyBindingsTab", () => {
       bindButton!.click();
       await tick();
     });
-    await act(async () => {
-      changeSelect(container.querySelector("#native-binding-group") as HTMLSelectElement, "team");
-    });
+    expect(container.querySelector(".native-model-options")).toBeNull();
+    await checkCredential("tenant/codex-b.json");
     const luna = Array.from(container.querySelectorAll(".native-model-options label"))
       .find((label) => label.textContent?.trim() === "gpt-5.6-luna");
     expect(luna).toBeTruthy();
@@ -1350,7 +1208,7 @@ describe("NativeKeyBindingsTab", () => {
     expect(apiMocks.createNativeKeyBinding).toHaveBeenCalledWith(expect.objectContaining({
       id: "native-key-1",
       key: secret,
-      group: "team",
+      auth_ids: ["tenant/codex-b.json"],
       model_access: {
         mode: "allowlist",
         models: [{ provider: "codex", model: "gpt-5.6-luna" }],
@@ -1378,9 +1236,6 @@ describe("NativeKeyBindingsTab", () => {
       await tick();
     });
 
-    const directMode = container.querySelector('input[name="native-restriction-mode"][value="auth_ids"]') as HTMLInputElement;
-    await act(async () => { directMode.click(); });
-    expect(container.querySelector("#native-binding-group")).toBeNull();
     const credentialCheckboxes = Array.from(
       container.querySelectorAll<HTMLInputElement>(".native-credential-option input[type=checkbox]"),
     );
@@ -1427,7 +1282,7 @@ describe("NativeKeyBindingsTab", () => {
       },
     ]);
     const storageWrites = vi.spyOn(Storage.prototype, "setItem");
-    await openDirectBindingEditor();
+    await openDirectBindingEditor(legacyGroupBinding);
     const groups = Array.from(container.querySelectorAll(".native-credential-source-group"));
     const aiGroup = groups.find((group) => group.querySelector(".native-credential-source-head")?.textContent?.includes("AI 提供商供应"))!;
     const authGroup = groups.find((group) => group.querySelector(".native-credential-source-head")?.textContent?.includes("认证文件"))!;
@@ -1451,7 +1306,7 @@ describe("NativeKeyBindingsTab", () => {
       id: "codex:apikey:unverified", provider: "codex", name: "Unverified Codex", source: "ai_provider",
       models: ["fallback-spark"], identityVerified: false,
     }]);
-    await openDirectBindingEditor();
+    await openDirectBindingEditor(legacyGroupBinding);
     const credential = container.querySelector<HTMLInputElement>(".native-credential-option input")!;
     expect(credential.disabled).toBe(true);
     const selectAll = container.querySelector<HTMLButtonElement>(".native-credential-actions button")!;
@@ -1488,7 +1343,7 @@ describe("NativeKeyBindingsTab", () => {
     const runtimeID = "codex:runtime:stored-live-id";
     apiMocks.fetchNativeBindingCredentialCatalog.mockRejectedValue(new Error("Identity sources unavailable"));
     apiMocks.fetchNativeCredentialOptions.mockRejectedValue(new Error(`Credential inventory failed ${existingSecret}`));
-    await openDirectBindingEditor({ ...existing, group: undefined, auth_ids: [runtimeID], round_robin: true });
+    await openDirectBindingEditor({ ...existing, auth_ids: [runtimeID], round_robin: true });
     expect(container.querySelector(".native-binding-editor")?.textContent).toContain("凭据列表加载失败");
     expect(container.innerHTML).not.toContain(existingSecret);
     expect(container.textContent).not.toContain("Credential inventory failed");
@@ -1506,7 +1361,6 @@ describe("NativeKeyBindingsTab", () => {
   it("preserves selected Auth IDs that are no longer returned by the host", async () => {
     const directBinding: NativeKeyBinding = {
       ...existing,
-      group: undefined,
       auth_ids: ["tenant/missing.json", "tenant/codex-a.json"],
     };
     apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValue({
@@ -1545,7 +1399,6 @@ describe("NativeKeyBindingsTab", () => {
   it("round-trips a fork.13 direct binding unchanged when AI provider credentials are available", async () => {
     const legacyDirectBinding: NativeKeyBinding = {
       ...existing,
-      group: undefined,
       auth_ids: ["tenant/missing.json", "tenant/codex-a.json"],
       model_access: {
         mode: "allowlist",
@@ -1604,7 +1457,6 @@ describe("NativeKeyBindingsTab", () => {
   it("shows a degraded direct binding as requiring credential reselection", async () => {
     const degraded: NativeKeyBinding = {
       ...existing,
-      group: undefined,
       auth_ids: undefined,
       needs_reselection: true,
     };
@@ -1627,8 +1479,6 @@ describe("NativeKeyBindingsTab", () => {
       editButton!.click();
       await tick();
     });
-    const directMode = container.querySelector('input[name="native-restriction-mode"][value="auth_ids"]') as HTMLInputElement;
-    expect(directMode.checked).toBe(true);
     expect(container.textContent).toContain("已选择 0 个凭证");
     const submit = container.querySelector('.map-form-foot button[type="submit"]') as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
@@ -1648,8 +1498,10 @@ describe("NativeKeyBindingsTab", () => {
     expect(apiMocks.updateNativeKeyBinding.mock.calls[0][0]).not.toHaveProperty("group");
   });
 
-  it("preserves an existing group that is not in the suggestion list", async () => {
-    const legacy = { ...existing, group: "classify:legacy-customer" };
+  it("requires picking credentials before saving a legacy group binding", async () => {
+    const legacy: NativeKeyBinding = {
+      ...existing, auth_ids: undefined, group: "classify:legacy-customer", needs_reselection: true,
+    };
     apiMocks.fetchNativeKeyBindingCatalog.mockResolvedValue({
       entries: [{ key_index: 0, key_preview: legacy.key_preview, binding: legacy }],
       orphan_bindings: [],
@@ -1663,13 +1515,15 @@ describe("NativeKeyBindingsTab", () => {
 
     const editButton = Array.from(container.querySelectorAll("button"))
       .find((button) => button.textContent?.includes("编辑 / 轮换"));
-    await act(async () => { editButton!.click(); });
+    await act(async () => { editButton!.click(); await tick(); });
 
-    const groupSelect = container.querySelector("#native-binding-group") as HTMLSelectElement;
-    expect(groupSelect.selectedOptions[0]?.textContent).toBe("手动输入其他组…");
-    expect((container.querySelector("#native-binding-manual-group") as HTMLInputElement).value)
-      .toBe("classify:legacy-customer");
+    expect(container.querySelector("#native-binding-group")).toBeNull();
+    expect(container.textContent).toContain("已选择 0 个凭证");
+    const submit = container.querySelector('.map-form-foot button[type="submit"]') as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
 
+    await checkCredential("tenant/codex-a.json");
+    expect(submit.disabled).toBe(false);
     const form = container.querySelector(".native-binding-editor form") as HTMLFormElement;
     await act(async () => {
       form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
@@ -1680,9 +1534,10 @@ describe("NativeKeyBindingsTab", () => {
       id: "client-a",
       enabled: true,
       round_robin: false,
-      group: "classify:legacy-customer",
+      auth_ids: ["tenant/codex-a.json"],
       model_access: { mode: "all", models: [] },
     });
+    expect(apiMocks.updateNativeKeyBinding.mock.calls[0][0]).not.toHaveProperty("group");
   });
 
   it("keeps bindings whose top-level key was removed visible as orphan records", async () => {

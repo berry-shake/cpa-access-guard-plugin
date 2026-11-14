@@ -160,7 +160,7 @@ export default function PricingTable() {
       )}
       {error && <div className="error">{error}</div>}
       {loading ? (
-        <div className="muted" style={{ padding: 20 }}>{t("keys.loading")}</div>
+        <div className="muted" style={{ padding: 20 }}>{t("mapping.loading")}</div>
       ) : rows.length === 0 ? (
         <div className="muted" style={{ padding: 20 }}>{t("mapping.pricing.empty")}</div>
       ) : (

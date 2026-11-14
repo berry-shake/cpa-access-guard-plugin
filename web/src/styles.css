@@ -184,16 +184,7 @@ a:hover { color: var(--accent-2); text-decoration: underline; }
 }
 .topnav-actions .tn-link:hover { color: var(--text); text-decoration: none; }
 .topnav-actions .tn-link.active { color: var(--accent); font-weight: 600; border-bottom-color: var(--accent); }
-.topnav-actions .tn-link.danger:hover { color: var(--danger); }
 .topnav-actions .tn-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
-
-/* Legacy .header kept for mobile (max-width:640px) stacked layout. */
-.header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 16px 0; margin-bottom: 24px; border-bottom: 1px solid var(--border);
-}
-.header h1 { font-size: 20px; margin: 0; font-weight: 700; letter-spacing: -0.01em; }
-.header .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
 
 /* Buttons — panel components.scss .btn */
 .btn {
@@ -270,46 +261,14 @@ tbody tr { transition: background-color var(--t-fast); }
 tbody tr:hover td { background: var(--row-hover); }
 td .mono, .mono { font-family: "Courier Prime", ui-monospace, Consolas, "Courier New", monospace; font-size: 12px; }
 
-/* Status badge — panel .status-badge (translucent bg + colored border, pill) */
-.tag {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 4px 10px; border-radius: var(--r-full);
-  font-size: 12px; font-weight: 600;
-  border: 1px solid var(--border);
-}
-.tag.on { color: var(--ok); border-color: var(--ok-border); background: var(--ok-soft); }
-.tag.off { color: var(--danger); border-color: var(--danger-border); background: var(--danger-soft); }
-
 .muted { color: var(--muted); }
 .error {
   color: var(--danger); margin: 8px 0; font-size: 13px;
   background: var(--danger-soft); border: 1px solid var(--danger-border);
   border-radius: var(--r-md); padding: 8px 12px;
 }
-.success { color: var(--ok); margin: 8px 0; }
 
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.spacer { flex: 1; }
-
-/* Model picker — chips with panel SelectionCheckbox treatment */
-.picker-group { margin-bottom: 16px; }
-.picker-group .pg-head {
-  color: var(--muted); font-size: 11px; margin: 14px 0 8px;
-  font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
-}
-.picker-group .pg-models { display: flex; flex-wrap: wrap; gap: 8px; }
-.picker-group label {
-  display: inline-flex; align-items: center; gap: 6px;
-  background: var(--bg); border: 1px solid var(--border);
-  padding: 6px 11px; border-radius: var(--r-md);
-  cursor: pointer; font-size: 13px; font-weight: 500;
-  transition: border-color var(--t-fast), background-color var(--t-fast), box-shadow var(--t-fast);
-}
-.picker-group label input { accent-color: var(--accent); width: 14px; height: 14px; }
-.picker-group label:hover { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
-.picker-group label.active {
-  border-color: var(--accent); background: var(--accent-soft); color: var(--accent-3);
-}
 
 /* Modal — panel .modal-overlay / .modal */
 .modal-overlay {
@@ -322,14 +281,8 @@ td .mono, .mono { font-family: "Courier Prime", ui-monospace, Consolas, "Courier
   padding: 24px; max-width: 540px; width: 100%; max-height: 90vh; overflow: auto;
 }
 .modal h3 { margin: 0 0 14px; font-size: 18px; font-weight: 700; }
-.modal .keybox {
-  background: var(--bg); border: 1px solid var(--border);
-  border-radius: var(--r-md); padding: 14px;
-  font-family: "Courier Prime", ui-monospace, Consolas, monospace;
-  word-break: break-all; font-size: 13px; margin: 12px 0;
-}
 
-/* Inline toggle (KeyForm enabled checkbox) — styled like panel .switch */
+/* Inline toggle — styled like panel .switch */
 .switch { position: relative; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
 .switch input { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); }
 .switch .track { width: 44px; height: 24px; background: var(--border-strong); border-radius: var(--r-full); position: relative; transition: background var(--t-fast); }
@@ -338,71 +291,16 @@ td .mono, .mono { font-family: "Courier Prime", ui-monospace, Consolas, "Courier
 .switch input:checked + .track .thumb { transform: translateX(20px); }
 .switch input:focus-visible + .track { box-shadow: 0 0 0 3px var(--accent-ring); }
 
-/* ===== Key detail (KeyUsage) page ===== */
-/* Right-aligned numeric cells: applied via the .num class on th/td. Keeps the
-   per-alias usage table's USD / token / call-count columns tidy and scannable. */
+/* Right-aligned numeric cells (th/td.num), e.g. the model price columns. */
 th.num, td.num { text-align: right; }
-/* "strong" = emphasized numeric value (the USD total per alias row). */
-td.strong { font-weight: 600; color: var(--text); }
-
-/* Header row: back button + key id (mono) + name on the left, daily/weekly
-   window toggle on the right. Mirrors the Stitch design's header layout but
-   reuses .btn instead of pill styling for consistency with the rest of the UI. */
-.keyusage-header {
-  display: flex; align-items: center; justify-content: space-between;
-  flex-wrap: wrap; gap: 12px;
-  margin-bottom: 16px; padding-bottom: 14px;
-  border-bottom: 1px solid var(--border);
-}
-.keyusage-idline { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.keyusage-id { font-size: 13px; background: var(--panel-2); color: var(--muted);
-  padding: 2px 8px; border-radius: var(--r-sm); border: 1px solid var(--border); }
-.keyusage-toggle { display: inline-flex; gap: 6px; }
-
-/* Empty-state hint above the table: subtle italic muted text. */
-.keyusage-empty {
-  font-style: italic; padding: 10px 14px 18px; font-size: 13px;
-}
-/* No-alias fallback row (a key with zero configured models). */
-.keyusage-noalias { text-align: center; padding: 28px 14px; }
-
-/* Residual alias rows (in_config=false): keep them readable but visually
-   de-emphasized so admins can distinguish historical-only aliases from active
-   ones. The badge marks them inline next to the alias. */
-.keyusage-residual td { opacity: 0.85; }
-.keyusage-badge {
-  display: inline-block; margin-top: 3px;
-  font-size: 10px; font-weight: 600; letter-spacing: 0.04em;
-  color: var(--danger); background: var(--danger-soft);
-  border: 1px solid var(--danger-border);
-  border-radius: var(--r-sm); padding: 1px 6px;
-}
 
 /* ===================================================================
    MOBILE LAYOUT (@media max-width: 640px)
-   Desktop styles above are untouched. Everything below only applies to
-   phone-width screens, implementing the Stitch "Quiet Paper" mobile design:
-   key cards instead of tables, ink-drop progress bars, horizontal bar
-   rankings, bottom-sheet forms, bottom sticky tab bar. Theme colors come
-   from the same CSS variables, so light/white/dark all work automatically.
+   Desktop styles above are untouched. Theme colors come from the same CSS
+   variables, so light/white/dark all work automatically.
    ==================================================================== */
-
-/* --- Reset desktop-only layout assumptions for narrow screens --- */
 @media (max-width: 640px) {
   .app { max-width: 100%; margin: 0; padding: 0 16px 88px; }
-
-  /* Header: stack title + actions, allow wrap. Drop the top buttons since
-     the bottom tab bar + FAB replace them on mobile. */
-  .header {
-    flex-wrap: wrap; gap: 12px;
-    padding: 12px 0; margin-bottom: 16px;
-    position: sticky; top: 0; z-index: 50;
-    background: var(--bg);
-  }
-  .header h1 { font-size: 18px; }
-  .header .sub { font-size: 11px; }
-  /* Hide header nav buttons on mobile — replaced by bottom tab bar. */
-  .header .actions { display: none; }
 
   /* Forms: single column, no 2-col grids. */
   .row2 { grid-template-columns: 1fr; gap: 12px; }
@@ -418,379 +316,11 @@ td.strong { font-weight: 600; color: var(--text); }
     max-height: 92vh;
   }
 
-  /* Tables are hidden on mobile — replaced by card stacks. The .card-stack
-     sibling is shown instead. */
-  .card.table-wrap { display: none; }
-  .card-stack { display: block; }
-
-  /* Desktop action rows (refresh/newKey above the table) are hidden on
-     mobile — FAB + pull-to-refresh replace them. */
-  .actions.mobile-hidden { display: none; }
-  .mobile-hidden { display: none !important; }
-  .mobile-only { display: block !important; }
-  a.mobile-only, .keyusage-edit-link.mobile-only { display: inline-flex !important; }
-
-  .mobile-form-header {
-    display: flex; align-items: center; gap: 10px;
-    margin-bottom: 14px; padding-bottom: 12px;
-    border-bottom: 1px solid var(--border);
-  }
-  .mobile-form-header .mfb-back {
-    flex-shrink: 0; font-size: 14px; font-weight: 600;
-    color: var(--accent); text-decoration: none;
-  }
-  .mobile-form-header .mfb-title {
-    margin: 0; font-size: 17px; font-weight: 700;
-    line-height: 1.25; flex: 1; min-width: 0;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  }
-  .form-page form.card { margin-top: 0; }
-  .key-form.card { background: transparent; border: none; box-shadow: none; padding: 0; }
-  .kf-section { margin-bottom: 20px; }
-  .kf-section-card {
-    background: var(--panel); border: 1px solid var(--border);
-    border-radius: var(--r-md); padding: 14px 16px;
-  }
-  .kf-section-card .form-row:last-child { margin-bottom: 0; }
-  .kf-hint { font-size: 12px; line-height: 1.45; margin: 8px 0 0; }
-  .kf-warn { font-size: 12px; margin: 8px 0 0; }
-  .kf-access-switch { display: flex; align-items: center; gap: 8px; }
-  .kf-model-list { display: flex; flex-direction: column; gap: 10px; }
-  .kf-model-card {
-    background: var(--panel); border: 1px solid var(--border);
-    border-radius: var(--r-md); overflow: hidden;
-  }
-  .kf-model-head {
-    width: 100%; display: flex; align-items: flex-start; gap: 10px;
-    padding: 12px 14px; border: none; background: none; cursor: pointer;
-    text-align: left; font-family: inherit; color: inherit;
-  }
-  .kf-model-head > div:first-child { flex: 1; min-width: 0; }
-  .kf-model-alias { font-weight: 600; font-size: 15px; }
-  .kf-model-meta { font-size: 12px; margin-top: 2px; }
-  .kf-model-target { font-size: 11px; margin-top: 4px; word-break: break-all; }
-  .kf-chevron { color: var(--muted); flex-shrink: 0; margin-top: 4px; }
-  .kf-mprice-body {
-    padding: 0 14px 14px; border-top: 1px solid var(--border);
-    background: var(--muted-bg);
-  }
-  .kf-billing-seg { margin: 12px 0; width: 100%; }
-  .kf-billing-seg .seg-btn { flex: 1; }
-
-  .keyusage-header .keyusage-idline { width: 100%; }
-  .keyusage-edit-link { margin-left: auto; }
-
-  .tabbar--no-usage .tab { flex: 1; }
-
-  /* KeyForm submit row: sticky bottom on mobile so the primary action stays
-     reachable without scrolling past all model rows. */
-  form.card > .actions {
-    position: sticky; bottom: 64px; z-index: 10;
-    background: var(--panel); padding: 12px 0; margin-top: 12px;
-    border-top: 1px solid var(--border);
-  }
-  form.card > .actions .btn.primary { flex: 1; }
-
-  /* KeyForm pricing table: on mobile, allow horizontal scroll inside the
-     card so wide price rows don't overflow the viewport. */
-  form.card .card.table-wrap { display: block; overflow-x: auto; }
-  form.card .card.table-wrap table { min-width: 520px; }
+  /* Wide tables (model pricing) scroll sideways instead of being clipped. */
+  .card.table-wrap { overflow-x: auto; }
 }
 
-/* --- Mobile-only component classes (hidden on desktop, shown on mobile) --- */
-/* .card-stack: key list container. On mobile it's a vertical stack;
- * on desktop it becomes a responsive card grid (min-width:641px block). */
-.card-stack { display: flex; flex-direction: column; gap: 10px; }
-@media (min-width: 641px) {
-  .card-stack {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: 16px;
-  }
-}
-
-/* .tabbar: bottom sticky navigation. Hidden on desktop by the min-width
-   block; shown on mobile by the max-width block below. */
-.tabbar {
-  position: fixed; bottom: 0; left: 0; right: 0;
-  height: 56px; z-index: 100;
-  background: var(--panel);
-  border-top: 1px solid var(--border);
-  align-items: stretch;
-}
-.tabbar .tab {
-  flex: 1; display: flex; flex-direction: column; align-items: center;
-  justify-content: center; gap: 2px;
-  background: none; border: none; cursor: pointer;
-  color: var(--muted); font-size: 11px; font-weight: 600;
-  font-family: inherit; padding: 0;
-  position: relative;
-}
-.tabbar .tab .tab-icon { font-size: 18px; line-height: 1; }
-.tabbar .tab.active { color: var(--accent); }
-.tabbar .tab.active::before {
-  content: ""; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
-  width: 24px; height: 2px; background: var(--accent); border-radius: var(--r-full);
-}
-@media (max-width: 640px) {
-  .tabbar { display: flex; }
-}
-
-/* .fab: floating action button. Hidden on desktop. */
-.fab {
-  position: fixed; bottom: 72px; right: 16px; z-index: 99;
-  width: 52px; height: 52px; border-radius: var(--r-full);
-  background: var(--accent); color: var(--on-accent);
-  border: none; cursor: pointer;
-  font-size: 26px; line-height: 1; font-weight: 300;
-  box-shadow: 0 4px 20px var(--accent-ring);
-  align-items: center; justify-content: center;
-  transition: transform var(--t-fast), box-shadow var(--t-fast);
-}
-.fab:hover { transform: scale(1.05); }
-.fab:active { transform: scale(0.96); }
-@media (max-width: 640px) {
-  .fab { display: inline-flex; }
-}
-
-/* .keycard: one key in the mobile list. */
-.keycard {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: 14px;
-  margin-bottom: 10px;
-  cursor: pointer;
-  transition: border-color var(--t-fast), box-shadow var(--t-fast);
-  position: relative;
-  overflow: hidden;
-}
-.keycard:hover { border-color: var(--border-hover); }
-/* Dim the content only; the action row stays fully opaque so it reads as clickable. */
-.keycard.disabled > :not(.kc-actions):not(.kc-revoke) { opacity: 0.55; }
-.keycard .kc-head {
-  display: flex; align-items: center; gap: 8px;
-  margin-bottom: 6px;
-}
-.keycard .kc-dot {
-  width: 8px; height: 8px; border-radius: var(--r-full); flex: none;
-  background: var(--ok);
-}
-.keycard.disabled .kc-dot { background: var(--danger); }
-.keycard .kc-name { font-weight: 600; font-size: 15px; flex: 1; }
-.keycard .kc-chevron { color: var(--muted); font-size: 16px; }
-.keycard .kc-preview {
-  font-family: "Courier Prime", ui-monospace, Consolas, monospace;
-  font-size: 12px; color: var(--muted);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  margin-bottom: 10px;
-}
-/* ink-drop progress bar */
-.keycard .kc-bar {
-  height: 4px; border-radius: var(--r-full);
-  background: var(--muted-bg); overflow: hidden; margin-bottom: 6px;
-}
-.keycard .kc-bar > span {
-  display: block; height: 100%; border-radius: var(--r-full);
-  background: var(--accent); transition: width var(--t-fast);
-}
-.keycard.over .kc-bar > span { background: var(--danger); }
-.keycard .kc-meta {
-  display: flex; justify-content: space-between;
-  font-size: 11px; color: var(--muted);
-}
-/* swipe-to-revoke layer */
-.keycard .kc-revoke {
-  position: absolute; top: 0; right: 0; bottom: 0;
-  width: 88px; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; gap: 4px;
-  background: var(--danger-soft); color: var(--danger);
-  font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
-  border-radius: 0 var(--r-md) var(--r-md) 0;
-}
-.keycard .kc-revoke .revoke-icon { font-size: 18px; }
-
-/* Desktop action row (>= 641px): always visible, disabled keys included
- * (they need edit/delete too). The card is a flex column and the ::after
- * spacer (min 12px) grows, so action rows line up at the bottom of every
- * card in a grid row. Mobile hides it and uses swipe-to-revoke instead. */
-.keycard .kc-actions {
-  display: none; /* hidden on mobile; shown on desktop */
-}
-@media (min-width: 641px) {
-  .keycard { cursor: default; margin-bottom: 0; display: flex; flex-direction: column; }
-  .keycard:hover { border-color: var(--border-hover); box-shadow: 0 0 0 3px var(--accent-ring); }
-  .keycard::after { content: ""; order: 1; flex: 1 0 12px; }
-  .keycard .kc-actions {
-    order: 2; display: flex; flex-wrap: wrap; gap: 6px;
-    padding-top: 12px; border-top: 1px solid var(--border);
-  }
-  .keycard .kc-actions .btn { flex: 0 0 auto; }
-}
-
-/* .usage-hero: the big-number card at the top of the mobile usage page. */
-.usage-hero {
-  background: var(--panel); border: 1px solid var(--border);
-  border-radius: var(--r-md); padding: 18px; margin-bottom: 16px;
-}
-.usage-hero .uh-label {
-  font-size: 11px; font-weight: 700; letter-spacing: 0.05em;
-  color: var(--muted); text-transform: uppercase;
-}
-.usage-hero .uh-amount {
-  font-size: 34px; font-weight: 700; line-height: 1.1; margin: 2px 0 12px;
-}
-.usage-hero .uh-amount .uh-unit {
-  font-size: 14px; font-weight: 400; color: var(--muted); margin-left: 6px;
-}
-.usage-hero .uh-row {
-  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
-}
-.usage-hero .uh-ring {
-  width: 64px; height: 64px; position: relative; flex: none;
-}
-.usage-hero .uh-ring svg { transform: rotate(-90deg); }
-.usage-hero .uh-ring .uh-pct {
-  position: absolute; inset: 0; display: flex;
-  align-items: center; justify-content: center;
-  font-size: 12px; font-weight: 700; color: var(--text);
-}
-.usage-hero .uh-limits { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
-.usage-hero .uh-limits .uh-lk { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
-.usage-hero .uh-limits .uh-lv { font-weight: 600; }
-.usage-hero .uh-stats {
-  display: flex; gap: 0; margin-top: 12px;
-  font-size: 11px; color: var(--muted);
-  border-top: 1px solid var(--border); padding-top: 10px;
-}
-.usage-hero .uh-stats > span { flex: 1; text-align: center; }
-.usage-hero .uh-stats > span + span { border-left: 1px solid var(--border); }
-
-/* .seg: segmented daily/weekly toggle. */
-.seg {
-  display: inline-flex; background: var(--muted-bg);
-  border-radius: var(--r-md); padding: 2px; gap: 2px; margin-bottom: 16px;
-}
-.seg .seg-btn {
-  border: none; background: none; cursor: pointer;
-  padding: 6px 16px; border-radius: calc(var(--r-md) - 2px);
-  font-size: 13px; font-weight: 600; color: var(--muted); font-family: inherit;
-  transition: all var(--t-fast);
-}
-.seg .seg-btn.active { background: var(--accent); color: var(--on-accent); }
-
-/* .bar-rank: horizontal bar ranking (replaces the alias table on mobile). */
-.bar-rank { display: flex; flex-direction: column; gap: 12px; }
-.bar-rank .br-row { cursor: pointer; }
-.bar-rank .br-top {
-  display: flex; justify-content: space-between; align-items: baseline;
-  margin-bottom: 5px;
-}
-.bar-rank .br-name { font-size: 14px; font-weight: 600; }
-.bar-rank .br-usd {
-  font-family: "Courier Prime", ui-monospace, Consolas, monospace;
-  font-size: 14px; font-weight: 600;
-}
-.bar-rank .br-bar {
-  height: 8px; border-radius: var(--r-full);
-  background: var(--muted-bg); overflow: hidden; margin-bottom: 4px;
-}
-.bar-rank .br-bar > span {
-  display: block; height: 100%; border-radius: var(--r-full);
-  background: var(--accent);
-}
-.bar-rank .br-cap {
-  font-size: 11px; color: var(--muted);
-}
-.bar-rank .br-residual { opacity: 0.7; }
-.bar-rank .br-badge {
-  display: inline-block; margin-left: 6px;
-  font-size: 9px; font-weight: 700; color: var(--danger);
-  background: var(--danger-soft); border: 1px solid var(--danger-border);
-  border-radius: var(--r-sm); padding: 0 4px;
-}
-
-/* .detail-card: dossier card on the key-detail mobile page. */
-.detail-card {
-  background: var(--panel); border: 1px solid var(--border);
-  border-radius: var(--r-md); padding: 16px; margin-bottom: 16px;
-}
-.detail-card .dc-statusrow { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-.detail-card .dc-statusrow .dc-dot { width: 8px; height: 8px; border-radius: var(--r-full); background: var(--ok); display: inline-block; margin-right: 6px; }
-.detail-card.disabled .dc-statusrow .dc-dot { background: var(--danger); }
-.detail-card .dc-keypill {
-  background: var(--muted-bg); border: 1px solid var(--border);
-  border-radius: var(--r-md); padding: 8px 10px; margin-bottom: 12px;
-  display: flex; align-items: center; gap: 8px;
-}
-.detail-card .dc-keypill .dc-keytext {
-  font-family: "Courier Prime", ui-monospace, Consolas, monospace;
-  font-size: 12px; color: var(--muted); flex: 1;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.detail-card .dc-keypill .dc-copy {
-  background: none; border: 1px solid var(--border); border-radius: var(--r-sm);
-  color: var(--muted); cursor: pointer; font-size: 14px; padding: 2px 8px;
-}
-.detail-card .dc-tiles {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px;
-}
-.detail-card .dc-tile {
-  background: var(--muted-bg); border-radius: var(--r-md); padding: 10px;
-}
-.detail-card .dc-tile .dc-tk { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 700; }
-.detail-card .dc-tile .dc-tv { font-size: 18px; font-weight: 700; line-height: 1.2; }
-.detail-card .dc-tile .dc-ts { font-size: 10px; color: var(--muted); }
-.detail-card .dc-prog { height: 4px; border-radius: var(--r-full); background: var(--muted-bg); overflow: hidden; margin-bottom: 4px; }
-.detail-card .dc-prog > span { display: block; height: 100%; background: var(--accent); }
-.detail-card .dc-progcap { text-align: center; font-size: 11px; color: var(--muted); }
-
-/* .mmodels: model accordion on key-detail mobile. */
-.mmodels { display: flex; flex-direction: column; gap: 8px; }
-.mmodels .mm-row {
-  background: var(--panel); border: 1px solid var(--border);
-  border-radius: var(--r-md); padding: 12px;
-}
-.mmodels .mm-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
-.mmodels .mm-name { font-weight: 600; font-size: 14px; }
-.mmodels .mm-badge {
-  font-size: 10px; font-weight: 700; letter-spacing: 0.04em;
-  padding: 2px 8px; border-radius: var(--r-full);
-  background: var(--muted-bg); color: var(--muted);
-}
-.mmodels .mm-badge.per_call { color: var(--accent); background: var(--accent-soft); }
-.mmodels .mm-target {
-  font-family: "Courier Prime", ui-monospace, Consolas, monospace;
-  font-size: 12px; color: var(--muted); margin-bottom: 4px;
-}
-.mmodels .mm-price {
-  font-family: "Courier Prime", ui-monospace, Consolas, monospace;
-  font-size: 11px; color: var(--muted);
-}
-.mmodels .mm-price.per_call { color: var(--accent); }
-
-/* .usage-hero-d: desktop summary hero on the KeyUsage page (3 stat tiles
- * + a usage progress bar). Mobile uses .usage-hero (ring chart) instead. */
-.usage-hero-d {
-  display: none;
-  background: var(--panel); border: 1px solid var(--border);
-  border-radius: var(--r-md); padding: 20px; margin-bottom: 16px;
-}
-.usage-hero-d .uhd-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 16px; }
-.usage-hero-d .uhd-tile { display: flex; flex-direction: column; gap: 4px; }
-.usage-hero-d .uhd-tk { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
-.usage-hero-d .uhd-tv { font-size: 26px; font-weight: 700; line-height: 1.1; font-family: "Courier Prime", ui-monospace, Consolas, monospace; }
-.usage-hero-d .uhd-tv.accent { color: var(--accent); }
-.usage-hero-d .uhd-bar { height: 6px; border-radius: var(--r-full); background: var(--muted-bg); overflow: hidden; margin-bottom: 6px; }
-.usage-hero-d .uhd-bar > span { display: block; height: 100%; border-radius: var(--r-full); background: var(--accent); }
-.usage-hero-d .uhd-bar.over > span { background: var(--danger); }
-.usage-hero-d .uhd-barcap { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
-.usage-hero-d .uhd-barcap .over { color: var(--danger); font-weight: 600; }
-@media (min-width: 641px) {
-  .usage-hero-d { display: block; }
-}
-
-/* Login centered card (desktop). Mobile keeps the old .app + .header. */
+/* Login centered card (desktop). Mobile keeps the standard .app layout. */
 .login-page {
   min-height: 100vh; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 16px;
@@ -807,79 +337,9 @@ td.strong { font-weight: 600; color: var(--text); }
   .login-page { min-height: auto; justify-content: flex-start; padding: 0; }
 }
 
-/* Model picker standalone page (desktop + mobile). */
-.model-pick-page { display: flex; flex-direction: column; gap: 16px; }
-.model-pick-page .mp-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.model-pick-page .mp-head h1 { margin: 0; font-size: 20px; font-weight: 700; flex: 1; min-width: 0; }
-.model-pick-page .mp-sub { font-size: 12px; color: var(--muted); margin-top: -8px; }
-.model-pick-page .mp-search { position: relative; }
-.model-pick-page .mp-search .input { padding-left: 34px; }
-.model-pick-page .mp-search .mp-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 16px; pointer-events: none; }
-.model-pick-page .mp-list { max-height: 60vh; overflow-y: auto; }
-.model-pick-page .mp-footer {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  position: sticky; bottom: 0; background: var(--bg); padding: 12px 0; border-top: 1px solid var(--border);
-}
-.model-pick-page .mp-footer .mp-count { font-size: 13px; color: var(--muted); }
-.model-pick-page .mp-footer .mp-btns { display: flex; gap: 8px; }
-
-/* Desktop form page: keep 2-col grids, card surface, h1 + actions row. */
-.form-page .fp-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
-.form-page .fp-head h1 { margin: 0; font-size: 20px; font-weight: 700; }
-.form-page .fp-head .fp-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.form-page .fp-idline { font-size: 12px; color: var(--muted); margin-bottom: 12px; font-family: "Courier Prime", ui-monospace, Consolas, monospace; }
-.form-page .fp-idline .fp-name { color: var(--text); margin-left: 8px; }
-.form-page .fp-foot { display: flex; align-items: center; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
-.form-page .fp-foot .fp-foot-right { margin-left: auto; display: flex; gap: 8px; }
-.form-page .fp-note { font-size: 12px; color: var(--muted); margin-top: 12px; line-height: 1.5; }
-/* Selected-model chips box on the form (replaces inline picker on desktop). */
-.model-chips-box {
-  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-  border: 1px solid var(--border); border-radius: var(--r-md);
-  padding: 12px; background: var(--bg); min-height: 48px;
-}
-.model-chips-box .mc-chip {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-size: 13px; padding: 4px 10px; border-radius: var(--r-full);
-  background: var(--accent-soft); color: var(--accent-3); border: 1px solid var(--accent-ring);
-}
-.model-chips-box .mc-chip .mc-x {
-  cursor: pointer; color: var(--muted); font-weight: 700; border: none; background: none; padding: 0; line-height: 1;
-}
-.model-chips-box .mc-chip .mc-x:hover { color: var(--danger); }
-.model-chips-box .mc-add {
-  font-size: 13px; padding: 6px 12px; border-radius: var(--r-md);
-  background: var(--muted-bg); color: var(--muted); border: 1px dashed var(--border-strong); cursor: pointer; font-family: inherit;
-}
-.model-chips-box .mc-add:hover { border-color: var(--accent); color: var(--accent); }
-.model-chips-box .mc-empty { font-size: 13px; color: var(--muted); }
-@media (max-width: 640px) {
-  .form-page .fp-head h1 { display: none; }
-}
-
-.section-label {
-  font-size: 11px; font-weight: 700; letter-spacing: 0.05em;
-  color: var(--muted); text-transform: uppercase;
-  margin: 16px 0 10px;
-}
-
-/* .sechead: section header row with optional chevron. */
-.sechead { display: flex; justify-content: space-between; align-items: center; margin: 16px 0 10px; }
-.sechead .sh-chevron { color: var(--muted); cursor: pointer; }
-
-/* Hide mobile-only blocks on desktop. .card-stack is NOT hidden — it
- * becomes the desktop card grid (see above). .usage-hero stays hidden on
- * desktop because the desktop usage page uses .usage-hero-d instead.
- * .seg is hidden on desktop globally, but the KeyUsage header's toggle is
- * un-hidden below so daily/weekly still works on desktop. */
 @media (min-width: 641px) {
-  .tabbar, .fab, .bar-rank,
-  .detail-card, .mmodels, .section-label, .sechead, .seg,
-  .mobile-only, .mobile-form-header { display: none !important; }
   /* The same navigation links are available at every viewport size. */
   .topnav { display: block; }
-  /* KeyUsage header keeps its daily/weekly toggle on desktop. */
-  .keyusage-header .seg { display: inline-flex !important; }
 }
 @media (max-width: 640px) {
   .topnav { display: block; position: static; margin: 0 -16px; padding: 0 16px; }
@@ -887,30 +347,20 @@ td.strong { font-weight: 600; color: var(--text); }
   .topnav-brand .tn-sub { display: none; }
   .topnav-brand .tn-logo { width: 28px; height: 28px; border-radius: 8px; }
   :root.embedded .topnav-brand { display: none; }
-  .topnav-actions { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); width: 100%; gap: 6px; }
+  .topnav-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; gap: 6px; }
   .topnav-actions .tn-link {
-    grid-column: span 2; display: flex; align-items: center; justify-content: center;
+    display: flex; align-items: center; justify-content: center;
     min-height: 44px; min-width: 0; padding: 8px 6px; box-sizing: border-box;
     border: 1px solid var(--border); border-radius: var(--r-md); background: var(--panel);
     font-size: 13px; line-height: 1.35; text-align: center; overflow-wrap: anywhere;
   }
-  .topnav-actions .tn-link:nth-last-child(-n+2) { grid-column: span 3; }
   .topnav-actions .tn-link.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
   .topnav-actions .tn-link:active { transform: scale(.97); }
 }
 
 /* ===== Mapping page ===== */
 .map-page { padding: 16px 0 24px; }
-.map-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
-.map-tab {
-  padding: 8px 20px; font-size: 14px; font-weight: 500; color: var(--muted);
-  border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent;
-  transition: color .15s, border-color .15s;
-}
-.map-tab:hover { color: var(--text); }
-.map-tab.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
 .map-toolbar { display: flex; justify-content: flex-end; margin-bottom: 16px; }
-.key-list-toolbar { gap: 8px; }
 .pricing-toolbar { justify-content: flex-end; align-items: center; gap: 10px; flex-wrap: wrap; }
 .pricing-toolbar .input { flex: 1 1 220px; }
 .pricing-table td { vertical-align: middle; }
@@ -1145,62 +595,8 @@ td.strong { font-weight: 600; color: var(--text); }
 }
 .native-binding-actions .switch { margin-right: auto; }
 .native-binding-free-hint { margin-right: auto; font-size: 12px; }
-.native-binding-editor .map-form-row input:not([type="checkbox"]),
-.native-binding-editor .map-form-row select { box-sizing: border-box; background: var(--panel); }
-.native-binding-editor .map-form-row input:not([type="checkbox"]):disabled,
-.native-binding-editor .map-form-row select:disabled { opacity: .65; cursor: not-allowed; }
-.native-binding-editor .native-binding-group-row { margin-bottom: 0; }
-.native-binding-editor .native-binding-group-row > label {
-  margin-bottom: 6px; font-size: 13px; font-weight: 600;
-}
-.native-binding-select-wrap { position: relative; }
-.native-binding-select-wrap::after {
-  content: ""; position: absolute; top: 50%; right: 13px; width: 7px; height: 7px;
-  border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted);
-  transform: translateY(-65%) rotate(45deg); pointer-events: none;
-}
-.native-binding-editor .map-form-row select.native-binding-group-select {
-  appearance: none; -webkit-appearance: none; width: 100%; height: 36px;
-  padding: 0 36px 0 11px; border: 1px solid var(--border-strong);
-  border-radius: var(--r-md); background: var(--bg); color: var(--text);
-  font-family: inherit; font-size: 13px; line-height: normal; cursor: pointer;
-  transition: border-color var(--t-fast), background-color var(--t-fast);
-}
-.native-binding-editor .map-form-row select.native-binding-group-select:disabled {
-  cursor: not-allowed;
-}
-.native-binding-select-wrap:has(.native-binding-group-select:disabled)::after { opacity: .45; }
-.native-binding-editor .map-form-row select.native-binding-group-select:invalid {
-  color: var(--placeholder);
-}
-.native-binding-editor .map-form-row select.native-binding-group-select option {
-  background: var(--panel); color: var(--text);
-}
-.native-binding-editor .map-form-row select.native-binding-group-select:focus {
-  outline: none; border-color: var(--accent); box-shadow: none;
-}
-.native-binding-editor .map-form-row select.native-binding-group-select:focus-visible {
-  box-shadow: 0 0 0 2px var(--accent-ring);
-}
-@media (hover: hover) and (pointer: fine) {
-  .native-binding-editor .map-form-row select.native-binding-group-select:hover:not(:disabled) {
-    border-color: var(--border-hover); background: var(--panel);
-  }
-}
-.native-binding-manual-group { margin-top: 10px; }
-.native-binding-editor .map-form-row .native-binding-manual-group input {
-  height: 36px; padding: 0 11px; border-color: var(--border-strong);
-  border-radius: var(--r-md); background: var(--bg); font-size: 13px;
-}
-.native-binding-editor .map-form-row .native-binding-manual-group input:focus {
-  border-color: var(--accent); box-shadow: none;
-}
-.native-binding-editor .map-form-row .native-binding-manual-group input:focus-visible {
-  box-shadow: 0 0 0 2px var(--accent-ring);
-}
-.native-binding-editor .native-binding-group-row .native-binding-field-hint {
-  margin-top: 5px; color: var(--placeholder); font-size: 12px; line-height: 1.4;
-}
+.native-binding-editor .map-form-row input:not([type="checkbox"]) { box-sizing: border-box; background: var(--panel); }
+.native-binding-editor .map-form-row input:not([type="checkbox"]):disabled { opacity: .65; cursor: not-allowed; }
 .native-binding-editor .map-form-row.native-binding-enable-row {
   margin: 2px 0 0; padding-top: 12px; border-top: 1px solid var(--border);
 }
@@ -1374,222 +770,16 @@ td.strong { font-weight: 600; color: var(--text); }
   padding: 24px 12px; text-align: center; font-size: 12px;
   background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-md);
 }
-
-/* Alias cards grid */
-.alias-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;
-}
-.alias-card {
-  display: flex; flex-direction: column; min-width: 0;
-  background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-md); padding: 16px;
-  transition: border-color .15s;
-}
-.alias-card:hover { border-color: var(--border-hover); }
-.alias-card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-.alias-card-name { font-family: var(--mono); font-size: 15px; font-weight: 600; }
-.alias-dispatch-badge {
-  font-size: 11px; padding: 2px 8px; border-radius: 999px;
-  background: var(--muted-bg); color: var(--muted);
-}
-.alias-card .rule-match-badge { margin-bottom: 8px; }
-.alias-targets {
-  display: flex; flex-direction: column; gap: 4px; margin: 2px 0 8px;
-  max-height: 200px; overflow-y: auto;
-  background: var(--muted-bg); border-radius: var(--r-md); padding: 10px 12px;
-}
-.alias-target-row {
-  font-family: var(--mono); font-size: 13px; color: var(--muted);
-  display: flex; align-items: center; gap: 6px; min-width: 0; overflow-wrap: anywhere;
-}
-.alias-target-group {
-  flex: none; font-size: 10px; padding: 1px 6px; border-radius: 999px;
-  background: var(--panel); color: var(--muted);
-}
-.alias-pricing { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-.alias-refs { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
-.alias-refs.zero { color: var(--muted); opacity: 0.6; }
-.alias-actions {
-  display: flex; gap: 8px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border);
-}
-.alias-actions .btn.sm { padding: 4px 12px; font-size: 12px; }
-.alias-actions .btn.danger-outline:disabled { opacity: 0.4; cursor: not-allowed; }
-
-/* Classify rule list */
-.rule-list { display: flex; flex-direction: column; gap: 12px; }
-/* Custom rules use the same card grid as the alias tab. Order still matters
- * (left→right, top→bottom), so each card shows its #position and the ← →
- * buttons move it earlier/later. Actions sit at the bottom of every card so
- * they line up across a row. */
-.rule-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 16px;
-}
-.rule-card {
-  display: flex; flex-direction: column; gap: 10px; min-width: 0;
-  background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-md); padding: 16px;
-  transition: border-color .15s;
-}
-.rule-card:hover { border-color: var(--border-hover); }
-.rule-card.disabled .rule-card-name,
-.rule-card.disabled .rule-card-cond,
-.rule-card.disabled .rule-card-target,
-.rule-card.disabled .rule-match-badge { opacity: .55; }
-.rule-card-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.rule-card-index {
-  flex: none; font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--muted);
-  background: var(--muted-bg); border-radius: 999px; padding: 1px 8px;
-}
-.rule-card-name {
-  flex: 1; min-width: 0; font-size: 15px; font-weight: 600;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.rule-card-head .switch { flex: none; }
-.rule-card-cond { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
-.rule-card-field {
-  flex: none; font-size: 11px; font-weight: 600; color: var(--muted); line-height: 18px;
-  background: var(--panel); border-radius: 4px; padding: 0 6px; margin-top: 1px;
-}
-.rule-card-pattern {
-  flex: 1; min-width: 0; font-family: var(--mono); font-size: 13px; line-height: 20px;
-  color: var(--text); background: none; padding: 0; overflow-wrap: anywhere;
-}
-.rule-card-target { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); min-width: 0; }
-.rule-card-group { font-family: var(--mono); font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
-.rule-match-badge {
-  align-self: flex-start; display: inline-flex; align-items: center; gap: 6px;
-  font: inherit; font-size: 12px; padding: 2px 10px; border: 0; border-radius: 999px;
-  background: var(--accent-soft); color: var(--accent); cursor: pointer;
-}
-.rule-match-badge.zero { opacity: 0.5; }
-.rule-match-caret { font-size: 10px; }
-.rule-detail {
-  display: flex; flex-direction: column; gap: 10px;
-  border-top: 1px solid var(--border); padding-top: 10px;
-}
-.rule-detail-def {
-  display: flex; flex-direction: column; gap: 8px;
-  background: var(--muted-bg); border-radius: var(--r-md); padding: 10px 12px;
-}
-.rule-card-actions {
-  display: flex; align-items: center; gap: 8px;
-  margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border);
-}
-.rule-card-order { display: flex; gap: 4px; margin-right: auto; }
-.rule-card-order button {
-  width: 30px; height: 30px; border: 1px solid var(--border); border-radius: var(--r-sm, 6px);
-  background: none; color: var(--muted); font-size: 14px; cursor: pointer;
-}
-.rule-card-order button:hover:not(:disabled) { border-color: var(--border-hover); color: var(--text); }
-.rule-card-order button:disabled { opacity: .35; cursor: not-allowed; }
-.rule-detail-files { display: flex; flex-direction: column; gap: 2px; max-height: 200px; overflow-y: auto; }
-.rule-detail-file {
-  font-family: var(--mono); font-size: 13px; color: var(--muted);
-  padding: 2px 0; display: flex; align-items: center; gap: 8px;
-}
-.rule-detail-file .prov-chip {
-  font-size: 10px; padding: 1px 6px; border-radius: 999px;
-  background: var(--muted-bg); color: var(--muted);
-}
-.rule-pager { display: flex; justify-content: center; align-items: center; gap: 16px; }
-.rule-pager button { padding: 4px 12px; font-size: 12px; }
-.rule-pager button:disabled { opacity: 0.4; cursor: not-allowed; }
-.rule-pager .page-info { font-family: var(--mono); font-size: 12px; color: var(--muted); }
-
-/* Alias/Rule edit form */
-/* Full content width like the 下游 Key form; .app already supplies the side padding. */
-.map-form-page { padding: 16px 0 24px; }
-.map-form-card {
-  background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 24px;
-}
-.map-form-head { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
-.map-form-head h1 { font-size: 18px; font-weight: 700; margin: 0; }
-.map-form-head .back-link { color: var(--accent); font-size: 14px; }
 .map-form-row { margin-bottom: 16px; }
 .map-form-row label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 4px; }
-.map-form-row input, .map-form-row select {
+.map-form-row input {
   width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px;
   font-size: 14px; background: var(--card); color: var(--text);
 }
-/* Alias/rule forms: same metrics as the global .input so selects and text
- * fields line up (scoped so the native binding editor keeps its own sizing). */
-.map-form-card .map-form-row input:not([type="checkbox"]), .map-form-card .map-form-row select {
-  height: 40px; padding: 0 12px; border-radius: var(--r-md); background-color: var(--bg);
-}
-/* Drop the platform chevron (it hugs the border and differs per OS) for one
- * drawn in the theme's muted color, with room reserved on the right. */
-.map-form-card .map-form-row select {
-  appearance: none; -webkit-appearance: none; padding-right: 36px; cursor: pointer; font-family: inherit;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5l3 3 3-3' fill='none' stroke='%236b665f' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat; background-position: right 12px center; background-size: 12px 12px;
-}
-:root[data-theme="dark"] .map-form-card .map-form-row select {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5l3 3 3-3' fill='none' stroke='%23b6b1a8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-}
-.map-form-card .map-form-row select option { background: var(--panel); color: var(--text); }
 .map-form-row input.mono { font-family: var(--mono); }
-.map-form-row input:focus, .map-form-row select:focus {
+.map-form-row input:focus {
   outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring);
 }
-.map-form-radio-group { display: flex; gap: 16px; }
-.map-form-radio { display: flex; flex-direction: column; gap: 2px; }
-.map-form-radio label { font-size: 14px; font-weight: 500; }
-.map-form-radio-desc { font-size: 12px; color: var(--muted); }
-
-/* Dispatch mode: card-style segmented control (replaces bare radios). */
-.map-dispatch-seg {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-.map-dispatch-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  text-align: left;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--panel, var(--card));
-  color: var(--text);
-  cursor: pointer;
-  font-family: inherit;
-  transition: border-color var(--t-fast, .15s), background var(--t-fast, .15s), box-shadow var(--t-fast, .15s);
-}
-.map-dispatch-btn:hover {
-  border-color: var(--border-hover, var(--border-strong, var(--border)));
-  background: var(--row-hover, var(--secondary-bg, var(--muted-bg)));
-}
-.map-dispatch-btn.active {
-  border-color: var(--accent);
-  background: var(--accent-soft, rgba(47, 107, 255, .10));
-  box-shadow: 0 0 0 3px var(--accent-ring, rgba(47, 107, 255, .18));
-}
-.map-dispatch-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-}
-.map-dispatch-btn.active .map-dispatch-title { color: var(--text); }
-.map-dispatch-desc {
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--muted);
-  font-weight: 400;
-}
-@media (max-width: 640px) {
-  .map-dispatch-seg { grid-template-columns: 1fr; }
-}
-.map-form-targets { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
-.map-form-target-row {
-  display: flex; align-items: center; gap: 8px; padding: 6px 12px;
-  background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-md);
-}
-.map-form-target-row .mono { font-family: var(--mono); font-size: 13px; flex: 1; }
-.map-form-target-row .remove-btn {
-  background: none; border: none; color: var(--danger); font-size: 16px; cursor: pointer;
-}
-.regex-valid { color: var(--ok); font-size: 12px; display: flex; align-items: center; gap: 4px; }
-.regex-invalid { color: var(--danger); font-size: 12px; }
 .map-form-foot { display: flex; gap: 12px; margin-top: 24px; }
 
 @media (max-width: 640px) {
@@ -1616,16 +806,9 @@ td.strong { font-weight: 600; color: var(--text); }
   .native-binding-actions > .btn { flex: 1 1 0; font-size: 12px; }
   .native-binding-card .native-key-copy { min-height: 44px; }
   .native-binding-account-toggle { min-height: 44px; }
-  .map-tabs { overflow-x: auto; }
-  .map-tab { flex: 0 0 auto; padding: 8px 14px; }
   .pricing-source-grid { grid-template-columns: 1fr; }
-  .alias-grid { grid-template-columns: 1fr; }
   .native-binding-grid { grid-template-columns: 1fr; }
   .native-binding-actions { flex-wrap: wrap; }
-  .native-binding-editor .map-form-row select.native-binding-group-select,
-  .native-binding-editor .map-form-row .native-binding-manual-group input {
-    height: 44px; font-size: 16px;
-  }
   .native-restriction-options { grid-template-columns: 1fr; }
   .native-credential-toolbar { align-items: stretch; }
   .native-binding-editor .native-credential-toolbar input { height: 44px; font-size: 16px; }
@@ -1637,21 +820,6 @@ td.strong { font-weight: 600; color: var(--text); }
   .native-model-actions { flex-wrap: wrap; }
   .native-model-actions > span { width: 100%; }
   .native-model-options { grid-template-columns: 1fr; }
-  .map-form-page { padding: 16px 0; }
-}
-
-/* KeyForm existing-aliases quick-pick section */
-.kf-alias-pick { margin-bottom: 12px; }
-.kf-alias-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.kf-alias-chip {
-  font-family: var(--mono); font-size: 12px; padding: 4px 12px;
-  border: 1px solid var(--border); border-radius: 999px; background: var(--card);
-  color: var(--muted); cursor: pointer; transition: all .15s;
-}
-.kf-alias-chip:hover { border-color: var(--border-hover); color: var(--text); }
-.kf-alias-chip.selected {
-  background: var(--accent-soft); border-color: var(--accent); color: var(--accent);
-  font-weight: 600;
 }
 
 /* Native binding usage limits */

@@ -65,9 +65,6 @@ function makeInventory(): NativeBindingBatchInventory {
         { id: "auth-old", provider: "codex", email: "old@example.test", source: "auth_file" },
       ],
       identitiesComplete: true,
-      groups: { team: ["auth-a"] },
-      unavailableGroups: [],
-      groupsAvailable: true,
     },
   };
 }
@@ -277,13 +274,6 @@ describe("NativeBindingBatch", () => {
     }));
   });
 
-  it("allows complete identities even when classification group preview is unavailable", async () => {
-    inventory.credentials.groupsAvailable = false;
-    inventory.credentials.groups = {};
-    await previewPair();
-    expect(client.preview).toHaveBeenCalledOnce();
-  });
-
   it("blocks preview when the initial identity inventory is incomplete", async () => {
     inventory.credentials.identitiesComplete = false;
     await mount();
@@ -480,6 +470,17 @@ describe("NativeBindingBatch", () => {
     if (phase === "preview") expect(client.previewRollback).not.toHaveBeenCalled();
     expect(client.rollback).not.toHaveBeenCalled();
     expect(container.querySelector('[role="alert"]')).toBeTruthy();
+  });
+
+  it.each(["group_unavailable", "group_unsupported"])("explains the legacy group restore conflict %s", async (code) => {
+    client.previewRollback.mockResolvedValue({
+      ...makePreview(), can_apply: false,
+      conflicts: [{ binding_id: "alpha", code }],
+    });
+    await mount("undo");
+    await click(button("预览恢复"));
+    expect(container.textContent).toContain("Alpha: 旧版凭证组已不再支持");
+    expect(button("确认恢复").disabled).toBe(true);
   });
 
   it("cannot force restoration over a server-reported conflict", async () => {

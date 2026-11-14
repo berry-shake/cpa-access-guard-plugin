@@ -11,7 +11,7 @@ vi.mock("../store/session", () => ({ getSession: mocks.getSession }));
 const keys = ["sk-synthetic-batch-api-alpha", "sk-synthetic-batch-api-beta"];
 const client = { get: mocks.get, post: mocks.post };
 const catalog = { entries: [{ key_index: 0, key_preview: "sk-sy...alpha" }], orphan_bindings: [] };
-const identities = { credentials: [{ id: "auth-a", provider: "codex" }], identitiesComplete: true, groups: {}, unavailableGroups: [], groupsAvailable: false };
+const identities = { credentials: [{ id: "auth-a", provider: "codex" }], identitiesComplete: true };
 const body = { api_keys: keys, selected_indices: [0], auth_ids: ["auth-a"], available_auth_ids: ["auth-a"], catalog_complete: true };
 const preview = { revision: "review-revision", changes: [], conflicts: [], can_apply: true, noop: false, warnings: [] };
 
@@ -21,7 +21,6 @@ beforeEach(() => {
   mocks.getSession.mockReturnValue({ baseUrl: "http://fixture.invalid", secretKey: "synthetic-management" });
   mocks.get.mockImplementation(async (path: string) => {
     if (path.endsWith("/api-keys")) return { data: { "api-keys": keys } };
-    if (path.endsWith("/classify-rules")) return { data: { rules: [] } };
     if (path.endsWith("/history")) return { data: { operations: [] } };
     throw new Error("unexpected path");
   });
@@ -33,7 +32,8 @@ describe("native binding batch API", () => {
   it("uses one captured authenticated client for key inventory, identities, preview and commit", async () => {
     const api = createNativeBindingBatchClient();
     await expect(api.loadInventory()).resolves.toEqual({ apiKeys: keys, catalog, credentials: identities });
-    expect(mocks.catalog).toHaveBeenCalledWith([], client);
+    expect(mocks.catalog).toHaveBeenCalledWith(client);
+    expect(mocks.get.mock.calls.map(([path]) => path)).toEqual(["/v0/management/api-keys"]);
     expect(mocks.post).toHaveBeenCalledWith("/plugin/native-key-bindings/catalog", { api_keys: keys });
     await expect(api.preview(body)).resolves.toEqual(preview);
     const commit = { ...body, expected_revision: preview.revision };
@@ -65,21 +65,11 @@ describe("native binding batch API", () => {
         mocks.getSession.mockReturnValue({ baseUrl: "http://changed-fixture.invalid", secretKey: "changed-management" });
         return { data: { "api-keys": keys } };
       }
-      return { data: { rules: [] } };
+      throw new Error("unexpected path");
     });
     await expect(api.loadInventory()).rejects.toThrow("batch_session_changed");
     expect(mocks.post).not.toHaveBeenCalled();
     expect(mocks.catalog).not.toHaveBeenCalled();
-  });
-
-  it("passes classification failure separately while retaining the identity completeness signal", async () => {
-    const api = createNativeBindingBatchClient();
-    mocks.get.mockImplementation(async (path: string) => {
-      if (path.endsWith("/classify-rules")) throw new Error("rules unavailable");
-      return { data: { "api-keys": keys } };
-    });
-    await expect(api.loadInventory()).resolves.toEqual({ apiKeys: keys, catalog, credentials: identities });
-    expect(mocks.catalog).toHaveBeenCalledWith(null, client);
   });
 
   it.each([{}, { "api-keys": "not-a-list" }, { "api-keys": [keys[0], null] }])(

@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
-import { fetchCatalog } from "../api/models";
+import { useMemo, useState } from "react";
 import { useT } from "../i18n";
 import type { CatalogModel, NativeAllowedModel, NativeModelAccessPolicy } from "../types";
 
 interface Props {
   value: NativeModelAccessPolicy;
   disabled?: boolean;
-  catalogOverride?: CatalogModel[];
-  onRefreshOverride?: () => void | Promise<void>;
+  // Models reported by the selected credentials; the parent loads them.
+  catalog: CatalogModel[];
+  loading?: boolean;
+  onRefresh: () => void | Promise<void>;
   onChange: (value: NativeModelAccessPolicy) => void;
 }
 
@@ -34,9 +35,8 @@ function normalizedModels(models: NativeAllowedModel[]): NativeAllowedModel[] {
   );
 }
 
-// Native-key model authorization is independent from credential tiers. The
-// same provider/model may appear in several catalog groups, so collapse those
-// rows before rendering checkboxes.
+// Several selected credentials may report the same provider/model, so collapse
+// those rows before rendering checkboxes.
 export function buildNativeModelGroups(catalog: CatalogModel[]): NativeModelGroup[] {
   const providers = new Map<string, Map<string, string>>();
   for (const row of catalog) {
@@ -60,51 +60,13 @@ export function buildNativeModelGroups(catalog: CatalogModel[]): NativeModelGrou
 export default function NativeModelAccessPicker({
   value,
   disabled = false,
-  catalogOverride,
-  onRefreshOverride,
+  catalog,
+  loading = false,
+  onRefresh,
   onChange,
 }: Props) {
   const t = useT();
-  const [catalog, setCatalog] = useState<CatalogModel[]>([]);
-  const [loading, setLoading] = useState(value.mode === "allowlist");
-  const [error, setError] = useState("");
   const [query, setQuery] = useState("");
-  const [reload, setReload] = useState(0);
-
-  useEffect(() => {
-    if (value.mode !== "allowlist") {
-      setLoading(false);
-      return;
-    }
-    if (catalogOverride !== undefined) {
-      setCatalog(catalogOverride);
-      setError("");
-      setLoading(false);
-      return;
-    }
-    let alive = true;
-    setLoading(true);
-    setError("");
-    const selectedProviders = new Set(value.models.map((model) => model.provider.trim().toLowerCase()));
-    void fetchCatalog(selectedProviders)
-      .then((rows) => {
-        if (alive) setCatalog(rows);
-      })
-      .catch((reason: unknown) => {
-        if (!alive) return;
-        const message = reason instanceof Error ? reason.message : String(reason);
-        setError(message || t("mapping.native.modelLoadFailed"));
-      })
-      .finally(() => {
-        if (alive) setLoading(false);
-      });
-    return () => {
-      alive = false;
-    };
-    // Reload only when entering allow-list mode or explicitly refreshing. A
-    // checkbox toggle must not refetch the whole CPA model catalog.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value.mode, reload, catalogOverride]);
 
   const groups = useMemo(() => buildNativeModelGroups(catalog), [catalog]);
   const selectedModels = useMemo(() => normalizedModels(value.models), [value.models]);
@@ -200,10 +162,7 @@ export default function NativeModelAccessPicker({
               className="btn sm"
               type="button"
               disabled={disabled || loading}
-              onClick={() => {
-                if (onRefreshOverride) void onRefreshOverride();
-                else setReload((current) => current + 1);
-              }}
+              onClick={() => { void onRefresh(); }}
             >
               {t("mapping.native.refreshModels")}
             </button>
@@ -232,7 +191,6 @@ export default function NativeModelAccessPicker({
               {t("mapping.native.noModelsSelectedWarning")}
             </div>
           )}
-          {error && <div className="error" role="alert">{error}</div>}
           {stale.length > 0 && (
             <div className="native-model-stale">
               <div className="native-model-provider-head">{t("mapping.native.staleModels")}</div>
@@ -254,9 +212,9 @@ export default function NativeModelAccessPicker({
           )}
           {loading && groups.length === 0 ? (
             <div className="muted native-model-empty">{t("mapping.native.loadingModels")}</div>
-          ) : groups.length === 0 && !error && stale.length === 0 ? (
+          ) : groups.length === 0 && stale.length === 0 ? (
             <div className="muted native-model-empty">{t("mapping.native.noModels")}</div>
-          ) : filtered.length === 0 && !error ? (
+          ) : filtered.length === 0 ? (
             <div className="muted native-model-empty">{t("mapping.native.noModelMatches")}</div>
           ) : (
             <div className="native-model-groups">

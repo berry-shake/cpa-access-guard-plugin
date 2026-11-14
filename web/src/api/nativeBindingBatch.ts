@@ -1,9 +1,10 @@
 import { apiClient, pluginPath } from "./client";
 import { fetchNativeBindingCredentialCatalog } from "./mappings";
 import { getSession } from "../store/session";
-import type { ClassifyRule, NativeBindingCredentialCatalog, NativeKeyBindingCatalog } from "../types";
+import type { NativeBindingCredentialCatalog, NativeKeyBindingCatalog } from "../types";
 
 export interface NativeBindingRestriction {
+  // Legacy credential group recorded by older versions; history display only.
   group?: string;
   auth_ids?: string[];
 }
@@ -81,10 +82,7 @@ export function createNativeBindingBatchClient() {
   return {
     async loadInventory(): Promise<NativeBindingBatchInventory> {
       checkSession();
-      const [keyResponse, ruleResponse] = await Promise.all([
-        client.get<{ "api-keys"?: unknown }>("/v0/management/api-keys"),
-        client.get<{ rules: ClassifyRule[] }>(pluginPath("/classify-rules")).catch(() => null),
-      ]);
+      const keyResponse = await client.get<{ "api-keys"?: unknown }>("/v0/management/api-keys");
       checkSession();
       const rawKeys = keyResponse.data["api-keys"];
       if (!Array.isArray(rawKeys) || rawKeys.some((key) => typeof key !== "string")) {
@@ -93,7 +91,7 @@ export function createNativeBindingBatchClient() {
       const apiKeys = Array.from(new Set((rawKeys as string[]).map((key) => key.trim()).filter(Boolean)));
       const [catalog, credentials] = await Promise.all([
         post<NativeKeyBindingCatalog>("/catalog", { api_keys: apiKeys }),
-        fetchNativeBindingCredentialCatalog(ruleResponse?.data.rules ?? null, client),
+        fetchNativeBindingCredentialCatalog(client),
       ]);
       checkSession();
       if (!Array.isArray(catalog.entries) || !Array.isArray(catalog.orphan_bindings)) {

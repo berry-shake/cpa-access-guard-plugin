@@ -244,7 +244,8 @@ export default function NativeBindingBatch({ initialView = "select", onClose, on
       ["catalog_incomplete", "conflictCatalog"], ["auth_unavailable", "conflictAuth"],
       ["host_key_missing", "conflictKey"], ["binding_changed", "conflictBinding"],
       ["binding_identity_changed", "conflictIdentity"], ["binding_modified", "conflictModified"],
-      ["group_unavailable", "conflictGroup"], ["invalid_restriction", "conflictRestriction"],
+      ["group_unavailable", "conflictGroup"], ["group_unsupported", "conflictGroup"],
+      ["invalid_restriction", "conflictRestriction"],
     ]);
     const binding = inventory?.catalog.entries.find((entry) => entry.binding?.id === conflict.binding_id)?.binding;
     const change = review?.preview.changes.find((item) => item.binding_id === conflict.binding_id);

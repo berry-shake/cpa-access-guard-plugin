@@ -6,26 +6,33 @@ import type { CatalogModel, NativeModelAccessPolicy } from "../types";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const modelMocks = vi.hoisted(() => ({ fetchCatalog: vi.fn() }));
-vi.mock("../api/models", () => ({ fetchCatalog: modelMocks.fetchCatalog }));
-
 import NativeModelAccessPicker, { buildNativeModelGroups } from "./NativeModelAccessPicker";
 
 let container: HTMLDivElement;
 let root: ReturnType<typeof createRoot> | null = null;
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+const credentialModels: CatalogModel[] = [
+  { provider: "codex", model: "gpt-5.6-luna" },
+  { provider: "codex", model: "GPT-5.6-LUNA" },
+  { provider: "codex", model: "gpt-5.5" },
+  { provider: "gemini", model: "gemini-2.5-pro" },
+];
+const refresh = vi.fn();
+
 function Harness({
   initial,
-  catalogOverride,
+  catalog = credentialModels,
+  loading,
 }: {
   initial: NativeModelAccessPolicy;
-  catalogOverride?: CatalogModel[];
+  catalog?: CatalogModel[];
+  loading?: boolean;
 }) {
   const [value, setValue] = useState(initial);
   return (
     <>
-      <NativeModelAccessPicker value={value} catalogOverride={catalogOverride} onChange={setValue} />
+      <NativeModelAccessPicker value={value} catalog={catalog} loading={loading} onRefresh={refresh} onChange={setValue} />
       <output data-testid="model-policy">{JSON.stringify(value)}</output>
     </>
   );
@@ -35,12 +42,6 @@ beforeEach(() => {
   _resetLocale("zh-CN");
   container = document.createElement("div");
   document.body.appendChild(container);
-  modelMocks.fetchCatalog.mockResolvedValue([
-    { provider: "codex", group: "team", model: "gpt-5.6-luna" },
-    { provider: "codex", group: "plus", model: "GPT-5.6-LUNA" },
-    { provider: "codex", group: "team", model: "gpt-5.5" },
-    { provider: "gemini", model: "gemini-2.5-pro" },
-  ] satisfies CatalogModel[]);
 });
 
 afterEach(() => {
@@ -51,10 +52,10 @@ afterEach(() => {
 });
 
 describe("buildNativeModelGroups", () => {
-  it("collapses credential tiers into exact provider/model rows", () => {
+  it("collapses rows reported by several credentials into exact provider/model rows", () => {
     expect(buildNativeModelGroups([
-      { provider: "codex", group: "team", model: "gpt-5.6-luna" },
-      { provider: "CODEX", group: "plus", model: "GPT-5.6-LUNA" },
+      { provider: "codex", model: "gpt-5.6-luna" },
+      { provider: "CODEX", model: "GPT-5.6-LUNA" },
       { provider: "gemini", model: "gemini-2.5-pro" },
     ])).toEqual([
       { provider: "codex", models: ["gpt-5.6-luna"] },
@@ -64,12 +65,12 @@ describe("buildNativeModelGroups", () => {
 });
 
 describe("NativeModelAccessPicker", () => {
-  it("uses only the selected direct credentials' runtime models when overridden", async () => {
+  it("lists only the models of the selected credentials", async () => {
     await act(async () => {
       root = createRoot(container);
       root.render(<Harness
         initial={{ mode: "allowlist", models: [{ provider: "codex", model: "gpt-5.6-luna" }] }}
-        catalogOverride={[
+        catalog={[
           { provider: "codex", model: "gpt-5.6-luna" },
           { provider: "codex", model: "gpt-5.5-unselected" },
         ]}
@@ -77,7 +78,6 @@ describe("NativeModelAccessPicker", () => {
       await tick();
     });
 
-    expect(modelMocks.fetchCatalog).not.toHaveBeenCalled();
     expect(container.textContent).toContain("gpt-5.6-luna");
     expect(container.textContent).toContain("gpt-5.5-unselected");
     expect(container.textContent).not.toContain("gemini-2.5-pro");
@@ -146,5 +146,24 @@ describe("NativeModelAccessPicker", () => {
     const value = JSON.parse(container.querySelector("output")?.textContent ?? "{}") as NativeModelAccessPolicy;
     expect(value).toEqual({ mode: "all", models: [] });
     expect(container.querySelector("#native-model-search")).toBeNull();
+  });
+
+  it("asks the parent to reload credential models and waits while they load", async () => {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<Harness initial={{ mode: "allowlist", models: [] }} catalog={[]} loading />);
+      await tick();
+    });
+    const button = () => Array.from(container.querySelectorAll("button"))
+      .find((item) => item.textContent === "刷新模型") as HTMLButtonElement;
+    expect(container.textContent).toContain("正在加载模型");
+    expect(button().disabled).toBe(true);
+
+    await act(async () => {
+      root?.render(<Harness initial={{ mode: "allowlist", models: [] }} />);
+      await tick();
+    });
+    await act(async () => { button().click(); });
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 });

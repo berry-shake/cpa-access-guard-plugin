@@ -13,15 +13,12 @@ vi.mock("./client", () => ({
 }));
 
 import {
-  canPreviewClassifyField,
-  classifyPreview,
   createNativeKeyBinding,
   deleteNativeKeyBinding,
-  fetchCredentialDescriptors,
   fetchNativeCredentialOptions,
   fetchNativeKeyBindingCatalog,
-  fetchNativeKeyBindings,
   fetchTopLevelAPIKeys,
+  readPlanType,
   updateNativeKeyBinding,
 } from "./mappings";
 
@@ -30,7 +27,7 @@ const binding = {
   name: "Client A",
   enabled: true,
   key_preview: "sk-ab...wxyz",
-  group: "classify:vip",
+  auth_ids: ["tenant/codex-b.json"],
 };
 
 beforeEach(() => {
@@ -209,15 +206,6 @@ describe("native key binding API", () => {
     expect(String(mocks.post.mock.calls[0][0])).not.toContain("sk-alpha-secret");
   });
 
-  it("lists native key bindings and tolerates an omitted list", async () => {
-    mocks.get.mockResolvedValueOnce({ data: { bindings: [binding] } });
-    await expect(fetchNativeKeyBindings()).resolves.toEqual([binding]);
-    expect(mocks.get).toHaveBeenCalledWith("/plugin/native-key-bindings");
-
-    mocks.get.mockResolvedValueOnce({ data: {} });
-    await expect(fetchNativeKeyBindings()).resolves.toEqual([]);
-  });
-
   it("creates a binding with the one-time plaintext key", async () => {
     mocks.post.mockResolvedValueOnce({ data: { binding } });
     const input = {
@@ -225,7 +213,7 @@ describe("native key binding API", () => {
       name: "Client A",
       enabled: true,
       key: "sk-secret",
-      group: "classify:vip",
+      auth_ids: ["tenant/codex-b.json"],
     };
 
     await expect(createNativeKeyBinding(input)).resolves.toEqual(binding);
@@ -261,71 +249,32 @@ describe("native key binding API", () => {
   });
 });
 
-describe("credential classification preview", () => {
-  it("copies only management fields that correspond to runtime Scheduler attributes", async () => {
-    mocks.get.mockResolvedValueOnce({
-      data: {
-        files: [
-          {
-            id: "tenant-a/codex.json",
-            provider: "CODEX",
-            id_token: { plan_type: "Team" },
-            tier: "must-not-be-copied-for-codex",
-            note: " tenant-a ",
-            path: "/auth/tenant-a/codex.json",
-            priority: 7,
-            weight: "3",
-            websockets: false,
-            email: "metadata-only@example.com",
-          },
-          {
-            id: "ag.json",
-            provider: "antigravity",
-            id_token: { plan_type: "must-not-be-copied-for-antigravity" },
-            tier: "Pro",
-          },
-        ],
+describe("readPlanType", () => {
+  // A live CPA ListAuthFiles response flattens the id_token claims directly
+  // onto id_token (id_token.plan_type), not under a nested "claims" key.
+  it("reads plan_type flattened directly on id_token (live shape)", () => {
+    const entry = {
+      name: "codex-3f40eabe-ultraman@example.com-team.json",
+      id_token: {
+        chatgpt_account_id: "abc",
+        plan_type: "team",
+        chatgpt_subscription_active_until: "2026-07-02T06:31:01+00:00",
       },
-    });
-
-    await expect(fetchCredentialDescriptors()).resolves.toEqual([
-      {
-        id: "tenant-a/codex.json",
-        provider: "codex",
-        attributes: {
-          plan_type: "team",
-          path: "/auth/tenant-a/codex.json",
-          weight: "3",
-        },
-      },
-      {
-        id: "ag.json",
-        provider: "antigravity",
-        attributes: { tier: "pro" },
-      },
-    ]);
+    };
+    expect(readPlanType(entry)).toBe("team");
   });
 
-  it("marks the exact UI-previewable field subset", () => {
-    for (const field of ["filename", "ID", "provider", "plan_type", "tier", "path", "weight"]) {
-      expect(canPreviewClassifyField(field)).toBe(true);
-    }
-    for (const field of ["note", "priority", "websockets", "auth_kind", "source_backend", "email", "access_token"]) {
-      expect(canPreviewClassifyField(field)).toBe(false);
-    }
+  it("tolerates a nested id_token.claims.plan_type shape", () => {
+    const entry = { id_token: { claims: { plan_type: "free" } } };
+    expect(readPlanType(entry)).toBe("free");
   });
 
-  it("distinguishes omitted rules from an explicitly empty draft rule set", async () => {
-    mocks.post.mockResolvedValue({ data: { groups: {}, group_counts: {}, rule_matches: {} } });
-    await classifyPreview([]);
-    expect(mocks.post).toHaveBeenNthCalledWith(1, "/plugin/classify-preview", { descriptors: [] });
-
-    await classifyPreview([], []);
-    expect(mocks.post).toHaveBeenNthCalledWith(2, "/plugin/classify-preview", { descriptors: [], rules: [] });
+  it("returns empty when no plan_type is present", () => {
+    expect(readPlanType({ id_token: { chatgpt_account_id: "x" } })).toBe("");
+    expect(readPlanType({ name: "codex-no-claim.json" })).toBe("");
   });
 
-  it("rejects an incompatible preview response instead of implying zero matches", async () => {
-    mocks.post.mockResolvedValueOnce({ data: { groups: {}, group_counts: {} } });
-    await expect(classifyPreview([])).rejects.toThrow("missing rule_matches");
+  it("lowercases and trims the plan value", () => {
+    expect(readPlanType({ id_token: { plan_type: "  Team  " } })).toBe("team");
   });
 });

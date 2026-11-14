@@ -8,15 +8,8 @@ import { clearSession, setSession } from "./store/session";
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 vi.mock("./pages/Login", () => ({ default: () => <main>login page</main> }));
-vi.mock("./pages/KeyList", () => ({ default: () => <main>downstream page</main> }));
-vi.mock("./pages/KeyNew", () => ({ default: () => <main>new key page</main> }));
-vi.mock("./pages/KeyEdit", () => ({ default: () => <main>edit key page</main> }));
-vi.mock("./pages/KeyUsage", () => ({ default: () => <main>key usage page</main> }));
-vi.mock("./pages/ModelPick", () => ({ default: () => <main>model picker page</main> }));
 vi.mock("./pages/Mapping", () => ({
   default: ({ section }: { section: string }) => <main>{section} page</main>,
-  AliasEditForm: () => <main>alias edit page</main>,
-  RuleEditForm: () => <main>rule edit page</main>,
 }));
 
 import App, { TopNav } from "./App";
@@ -50,16 +43,13 @@ async function renderAt(path: string, navOnly = false) {
 }
 
 describe("shared plugin navigation", () => {
-  it("exposes the five routes in one named nav and navigates each with one current-page marker", async () => {
+  it("exposes the two routes in one named nav and navigates each with one current-page marker", async () => {
     await renderAt("/native-keys");
     const nav = container.querySelector("nav.topnav-actions")!;
     expect(nav).toBeTruthy();
     expect(nav.getAttribute("aria-label")).toBe(translate("header.navigation"));
     expect(container.querySelectorAll("nav")).toHaveLength(1);
-    const routes = [
-      ["/native-keys", "native page"], ["/keys", "downstream page"],
-      ["/classify", "classify page"], ["/mapping", "alias page"], ["/pricing", "pricing page"],
-    ];
+    const routes = [["/native-keys", "native page"], ["/pricing", "pricing page"]];
     expect(Array.from(nav.querySelectorAll("a")).map((link) => link.getAttribute("href"))).toEqual(routes.map(([path]) => path));
     for (const [path, page] of routes) {
       const link = nav.querySelector<HTMLAnchorElement>(`a[href="${path}"]`)!;
@@ -74,21 +64,18 @@ describe("shared plugin navigation", () => {
   });
 
   it.each([
-    ["/keys/new", "/keys"], ["/keys/new/models", "/keys"],
-    ["/keys/client-a/edit", "/keys"], ["/keys/client-a/edit/models", "/keys"],
-    ["/keys/client-a/usage", "/keys"], ["/mapping/pick-target", "/mapping"],
-    ["/mapping/alias/translation", "/mapping"], ["/classify/rule/team", "/classify"],
-  ])("keeps the parent link current on subroute %s", async (path, parent) => {
+    "/keys", "/keys/new", "/keys/client-a/edit", "/keys/client-a/usage",
+    "/mapping", "/mapping/alias/translation", "/classify", "/classify/rule/team", "/unknown",
+  ])("redirects the removed path %s to the native key page", async (path) => {
     await renderAt(path);
+    expect(container.querySelector("main")?.textContent).toBe("native page");
     const current = container.querySelectorAll('nav a[aria-current="page"]');
     expect(current).toHaveLength(1);
-    expect(current[0].getAttribute("href")).toBe(parent);
-    expect(current[0].classList.contains("active")).toBe(true);
-    expect(container.querySelector("main")).toBeTruthy();
+    expect(current[0].getAttribute("href")).toBe("/native-keys");
   });
 
   it("does not mark a different path with the same leading letters active", async () => {
-    await renderAt("/keys-unrelated", true);
+    await renderAt("/pricing-unrelated", true);
     expect(container.querySelectorAll('nav a[aria-current="page"]')).toHaveLength(0);
     expect(container.querySelectorAll("nav .active")).toHaveLength(0);
   });

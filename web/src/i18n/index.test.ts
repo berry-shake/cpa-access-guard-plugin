@@ -16,24 +16,22 @@ describe("translate", () => {
   it("resolves nested dot-path keys in the current locale", () => {
     _resetLocale("zh-CN");
     expect(translate("login.submit")).toBe("登录");
-    expect(translate("keys.refresh")).toBe("刷新");
+    expect(translate("mapping.native.refresh")).toBe("刷新");
   });
 
   it("switches output when setLocale changes the locale", () => {
     _resetLocale("zh-CN");
-    expect(translate("keys.refresh")).toBe("刷新");
+    expect(translate("mapping.native.refresh")).toBe("刷新");
     setLocale("en");
-    expect(translate("keys.refresh")).toBe("Refresh");
+    expect(translate("mapping.native.refresh")).toBe("Refresh");
     setLocale("ru");
-    expect(translate("keys.refresh")).toBe("Обновить");
+    expect(translate("mapping.native.refresh")).toBe("Обновить");
   });
 
   it("interpolates {{name}} placeholders", () => {
     _resetLocale("en");
-    expect(translate("keys.rotateConfirm", { id: "team-a" })).toBe(
-      "Rotate the key for team-a? The old key becomes invalid immediately.",
-    );
-    expect(translate("edit.title", { id: "foo" })).toBe("Edit Key · foo");
+    expect(translate("mapping.native.toggleLabel", { id: "team-a" })).toBe("Toggle binding team-a");
+    expect(translate("mapping.native.topLevelKeyName", { index: 3 })).toBe("Top-level API key 3");
   });
 
   it("handles zh-CN <-> zh-TW divergence (simplified vs traditional)", () => {
@@ -55,8 +53,7 @@ describe("translate", () => {
         "mapping.native.defaultScheduling",
         "mapping.native.bindThisKey",
         "mapping.native.selectedKeyHint",
-        "mapping.native.restrictionMode",
-        "mapping.native.directMode",
+        "mapping.native.legacyGroup",
         "mapping.native.credentialSelection",
         "mapping.native.credentialHint",
         "mapping.native.authFileCredentials",
@@ -126,7 +123,7 @@ describe("translate", () => {
 
   it("ignores unknown interpolation names (leaves the placeholder)", () => {
     _resetLocale("en");
-    expect(translate("keys.rotateConfirm", { wrong: "x" })).toContain("{{id}}");
+    expect(translate("mapping.native.toggleLabel", { wrong: "x" })).toContain("{{id}}");
   });
 });
 

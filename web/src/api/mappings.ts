@@ -1,9 +1,5 @@
 import { apiClient, pluginPath } from "./client";
 import type {
-  AliasMapping,
-  ClassifyRule,
-  CredentialDescriptor,
-  ClassifyPreviewResponse,
   NativeKeyBinding,
   NativeKeyBindingCatalog,
   NativeKeyBindingCreateRequest,
@@ -11,121 +7,26 @@ import type {
   NativeCredentialOption,
   NativeBindingCredentialCatalog,
 } from "../types";
-import { readPlanType } from "./models";
 import { fetchAIProviderCredentials } from "./aiProviderCredentials";
-
-// --- Alias mapping CRUD ---
-
-export async function fetchAliases(): Promise<AliasMapping[]> {
-  const c = apiClient();
-  const { data } = await c.get<{ aliases: AliasMapping[] }>(pluginPath("/aliases"));
-  return data.aliases ?? [];
-}
-
-export async function upsertAlias(alias: AliasMapping): Promise<AliasMapping> {
-  const c = apiClient();
-  const { data } = await c.post<{ alias: AliasMapping }>(pluginPath("/aliases"), alias);
-  return data.alias;
-}
-
-export async function deleteAlias(aliasName: string): Promise<void> {
-  const c = apiClient();
-  await c.delete(pluginPath("/aliases"), { data: { alias: aliasName } });
-}
-
-// --- Classification rule CRUD ---
-
-export async function fetchClassifyRules(): Promise<ClassifyRule[]> {
-  const c = apiClient();
-  const { data } = await c.get<{ rules: ClassifyRule[] }>(pluginPath("/classify-rules"));
-  return data.rules ?? [];
-}
-
-export async function upsertClassifyRule(rule: ClassifyRule): Promise<ClassifyRule> {
-  const c = apiClient();
-  const { data } = await c.post<{ rule: ClassifyRule }>(pluginPath("/classify-rules"), rule);
-  return data.rule;
-}
-
-export async function deleteClassifyRule(name: string): Promise<void> {
-  const c = apiClient();
-  await c.delete(pluginPath("/classify-rules"), { data: { name } });
-}
-
-export async function reorderClassifyRules(names: string[]): Promise<void> {
-  const c = apiClient();
-  await c.post(pluginPath("/classify-rules/reorder"), { names });
-}
-
-// --- Classify preview ---
-
-export async function classifyPreview(
-  descriptors: CredentialDescriptor[],
-  rules?: ClassifyRule[],
-  client = apiClient(),
-): Promise<ClassifyPreviewResponse> {
-  const body: Record<string, unknown> = { descriptors };
-  if (rules !== undefined) body.rules = rules;
-  const { data } = await client.post<ClassifyPreviewResponse>(pluginPath("/classify-preview"), body);
-  // Older/incompatible backends may return only group aggregates. Treat that
-  // as unavailable: a missing per-rule result must never become a UI claim of
-  // "0 matches" for every rule.
-  const raw = data as unknown as Record<string, unknown> | null;
-  const ruleMatches = raw?.["rule_matches"];
-  if (!ruleMatches || typeof ruleMatches !== "object" || Array.isArray(ruleMatches)) {
-    throw new Error("classify-preview response is missing rule_matches");
-  }
-  return data;
-}
-
-// Fields that this UI can reconstruct closely enough from CPA's /auth-files
-// management response to preview. Runtime classification can use other safe
-// Scheduler Auth.Attributes too, but that endpoint does not expose provenance:
-// note/priority/websockets may be management Metadata fallbacks even when the
-// Scheduler candidate has no same-named Attribute. Do not show an exact count
-// for those fields; a false positive is worse than an explicit "unavailable".
-const CLASSIFY_PREVIEW_FIELDS = new Set([
-  "filename",
-  "id",
-  "provider",
-  "plan_type",
-  "tier",
-  "path",
-  "weight",
-]);
-
-export function canPreviewClassifyField(field: string): boolean {
-  return CLASSIFY_PREVIEW_FIELDS.has(field.trim().toLowerCase());
-}
-
-function copyDescriptorStringAttribute(
-  source: Record<string, unknown>,
-  target: Record<string, string>,
-  key: string,
-): void {
-  const value = source[key];
-  if (typeof value === "string" && value.trim()) {
-    target[key] = value.trim();
-  }
-}
-
-function copyDescriptorScalarAttribute(
-  source: Record<string, unknown>,
-  target: Record<string, string>,
-  key: string,
-): void {
-  const value = source[key];
-  if (typeof value === "string" && value.trim()) {
-    target[key] = value.trim();
-  } else if (typeof value === "number" && Number.isFinite(value)) {
-    target[key] = String(value);
-  } else if (typeof value === "boolean") {
-    target[key] = String(value);
-  }
-}
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+// Codex plan from one /auth-files row. A live CPA ListAuthFiles response
+// flattens the id_token claims onto id_token (id_token.plan_type); the nested
+// id_token.claims.plan_type shape is tolerated defensively. Returns "" when no
+// recognizable claim is present.
+export function readPlanType(entry: Record<string, unknown>): string {
+  const idToken = entry["id_token"];
+  if (!idToken || typeof idToken !== "object") return "";
+  const token = idToken as Record<string, unknown>;
+  const claims = token["claims"];
+  for (const plan of [token["plan_type"], claims && typeof claims === "object"
+    ? (claims as Record<string, unknown>)["plan_type"] : undefined]) {
+    if (typeof plan === "string" && plan.trim() !== "") return plan.trim().toLowerCase();
+  }
+  return "";
 }
 
 function authFileRows(payload: unknown): Record<string, unknown>[] | null {
@@ -142,20 +43,6 @@ function authFileInventoryShapeValid(payload: unknown, rows: Record<string, unkn
   const root = payload as Record<string, unknown>;
   const raw = root["files"] ?? root["auth-files"];
   return Array.isArray(raw) && raw.length === rows.length;
-}
-
-function authFileDescriptor(entry: Record<string, unknown>, allowNameFallback: boolean): CredentialDescriptor | undefined {
-  const id = optionalString(entry["id"]) ?? (allowNameFallback ? optionalString(entry["name"]) : undefined);
-  if (!id) return undefined;
-  const provider = (optionalString(entry["provider"]) ?? optionalString(entry["type"]) ?? "").toLowerCase();
-  const attributes: Record<string, string> = {};
-  const plan = provider === "codex" ? readPlanType(entry) : "";
-  if (plan) attributes["plan_type"] = plan;
-  const tier = optionalString(entry["tier"]);
-  if (provider === "antigravity" && tier) attributes["tier"] = tier.toLowerCase();
-  copyDescriptorStringAttribute(entry, attributes, "path");
-  copyDescriptorScalarAttribute(entry, attributes, "weight");
-  return { id, provider, attributes };
 }
 
 function authFileIdentity(entry: Record<string, unknown>): NativeCredentialOption | undefined {
@@ -221,26 +108,10 @@ function mergeNativeCredentialSources(
   return merged;
 }
 
-// fetchCredentialDescriptors pulls the auth-file list from CPA and builds
-// CredentialDescriptor[] for the classify-preview endpoint. It deliberately
-// copies only fields whose management representation corresponds to the
-// Scheduler Attribute used at runtime. Arbitrary auth JSON/Metadata fields are
-// not Scheduler Attributes and are therefore not guessed here.
-export async function fetchCredentialDescriptors(): Promise<CredentialDescriptor[]> {
-  const c = apiClient();
-  const { data } = await c.get<unknown>("/v0/management/auth-files");
-  const out: CredentialDescriptor[] = [];
-  for (const entry of authFileRows(data) ?? []) {
-    const descriptor = authFileDescriptor(entry, true);
-    if (descriptor) out.push(descriptor);
-  }
-  return out;
-}
-
-// Fetch exact runtime Auth IDs for direct native-key restrictions. Unlike the
-// classify preview adapter above, this path must never fall back from `id` to a
-// display/file name: the Scheduler compares candidate IDs exactly, and guessing
-// would create a binding that looks valid in the UI but can never match.
+// Fetch exact runtime Auth IDs for direct native-key restrictions. This path
+// must never fall back from `id` to a display/file name: the Scheduler compares
+// candidate IDs exactly, and guessing would create a binding that looks valid
+// in the UI but can never match.
 function credentialModelIDs(payload: unknown): string[] {
   const root = payload as Record<string, unknown> | null;
   const raw = root?.["models"];
@@ -304,95 +175,9 @@ export async function fetchNativeCredentialOptions(): Promise<NativeCredentialOp
   });
 }
 
-function nativeBindingCustomGroup(group: string): string {
-  const normalized = group.trim().toLowerCase();
-  return normalized.startsWith("classify:") ? normalized : "classify:" + normalized;
-}
-
-function descriptorBuiltinGroup(descriptor: CredentialDescriptor): string {
-  const attributes = descriptor.attributes ?? {};
-  return attributes["plan_type"]?.trim().toLowerCase()
-    || attributes["tier"]?.trim().toLowerCase()
-    || (["codex", "antigravity"].includes(descriptor.provider) ? "supported" : "");
-}
-
-function nativeBindingGroupCatalog(
-  descriptors: CredentialDescriptor[],
-  rules: ClassifyRule[],
-  preview: ClassifyPreviewResponse,
-  missingFields: Set<string>,
-): Pick<NativeBindingCredentialCatalog, "groups" | "unavailableGroups" | "groupsAvailable"> {
-  if (!preview.groups || typeof preview.groups !== "object" || Array.isArray(preview.groups)) {
-    return { groups: {}, unavailableGroups: [], groupsAvailable: false };
-  }
-  const knownIDs = new Set(descriptors.map(({ id }) => id));
-  const groups = new Map<string, Set<string>>();
-  const unavailable = new Set<string>();
-  const customMatches = new Set<string>();
-  const customNames = new Set<string>();
-  const builtinGroups = new Set(descriptors.map(descriptorBuiltinGroup).filter(Boolean));
-  let builtinAvailable = true;
-  const safeMembers = (raw: unknown, group: string): string[] => {
-    if (!Array.isArray(raw)) {
-      unavailable.add(group);
-      return [];
-    }
-    const ids: string[] = [];
-    for (const value of raw) {
-      if (typeof value !== "string" || !knownIDs.has(value)) {
-        unavailable.add(group);
-      } else {
-        ids.push(value);
-      }
-    }
-    return ids;
-  };
-  for (const rule of rules) {
-    if (!rule.enabled) continue;
-    const group = nativeBindingCustomGroup(rule.group);
-    customNames.add(rule.group.trim().toLowerCase());
-    customNames.add(group);
-    if (!groups.has(group)) groups.set(group, new Set());
-    const field = rule.field.trim().toLowerCase();
-    if (!canPreviewClassifyField(field) || missingFields.has(field)) {
-      unavailable.add(group);
-      builtinAvailable = false;
-      continue;
-    }
-    const ids = safeMembers(preview.rule_matches[rule.name.trim()], group);
-    if (unavailable.has(group)) builtinAvailable = false;
-    for (const id of ids) {
-      groups.get(group)!.add(id);
-      customMatches.add(id);
-    }
-  }
-
-  // Preview aggregates use raw custom names, which may collide with built-in
-  // tiers. Rule-specific results identify every known custom match to subtract
-  // before exposing built-in members; native runtime uses classify: prefixes.
-  for (const [rawGroup, rawMembers] of Object.entries(preview.groups)) {
-    const group = rawGroup.trim().toLowerCase();
-    if (!group || group.startsWith("classify:")) continue;
-    const members = safeMembers(rawMembers, group).filter((id) => !customMatches.has(id));
-    if (members.length === 0 && customNames.has(group)) continue;
-    builtinGroups.add(group);
-    groups.set(group, new Set(members));
-  }
-  if (!builtinAvailable) {
-    for (const group of builtinGroups) unavailable.add(group);
-  }
-  return {
-    groups: Object.fromEntries(Array.from(groups, ([group, ids]) => [group, Array.from(ids).sort()])),
-    unavailableGroups: Array.from(unavailable).sort(),
-    groupsAvailable: true,
-  };
-}
-
 // Load card identities once for the whole key list. This deliberately excludes
-// per-credential model discovery and never reconstructs regex matching in JS.
-// Missing classification data affects display only, never saved restrictions.
+// per-credential model discovery; a failed lookup affects display only.
 export async function fetchNativeBindingCredentialCatalog(
-  rules: ClassifyRule[] | null,
   c = apiClient(),
 ): Promise<NativeBindingCredentialCatalog> {
   const [authResult, aiResult] = await Promise.allSettled([
@@ -401,25 +186,11 @@ export async function fetchNativeBindingCredentialCatalog(
   ]);
   const rows = authResult.status === "fulfilled" ? authFileRows(authResult.value.data) : null;
   const byID = new Map<string, NativeCredentialOption>();
-  const descriptors = new Map<string, CredentialDescriptor>();
   for (const row of rows ?? []) {
     const identity = authFileIdentity(row);
-    const descriptor = authFileDescriptor(row, false);
-    if (!identity || !descriptor || byID.has(identity.id)) continue;
-    byID.set(identity.id, identity);
-    descriptors.set(identity.id, descriptor);
+    if (identity && !byID.has(identity.id)) byID.set(identity.id, identity);
   }
-  const missingFields = new Set<string>();
   const merged = mergeNativeCredentialSources(byID, aiResult.status === "fulfilled" ? aiResult.value : []);
-  for (const credential of merged.values()) {
-    if (!descriptors.has(credential.id)) {
-      // Configured API providers expose exact derived IDs and provider names,
-      // but their safe weight attribute is not part of this identity adapter.
-      // Do not treat that unknown value as a proven non-match for weight rules.
-      descriptors.set(credential.id, { id: credential.id, provider: credential.provider, attributes: {} });
-      missingFields.add("weight");
-    }
-  }
   const credentials = Array.from(merged.values()).sort((left, right) => {
     const a = left.email ?? left.label ?? left.name ?? left.id;
     const b = right.email ?? right.label ?? right.name ?? right.id;
@@ -428,19 +199,7 @@ export async function fetchNativeBindingCredentialCatalog(
   const identitiesComplete = authResult.status === "fulfilled"
     && authFileInventoryShapeValid(authResult.value.data, rows) && aiResult.status === "fulfilled"
     && rows.every((row) => optionalString(row["id"]) !== undefined);
-  const unavailable: NativeBindingCredentialCatalog = {
-    credentials, identitiesComplete, groups: {}, unavailableGroups: [], groupsAvailable: false,
-  };
-  if (rules === null || !identitiesComplete) {
-    return unavailable;
-  }
-  const input = Array.from(descriptors.values());
-  try {
-    const preview = await classifyPreview(input, rules, c);
-    return { credentials, identitiesComplete, ...nativeBindingGroupCatalog(input, rules, preview, missingFields) };
-  } catch {
-    return unavailable;
-  }
+  return { credentials, identitiesComplete };
 }
 
 // --- CPA top-level API-key binding CRUD ---
@@ -480,12 +239,6 @@ export async function fetchNativeKeyBindingCatalog(apiKeys: string[]): Promise<N
     entries: Array.isArray(data.entries) ? data.entries : [],
     orphan_bindings: Array.isArray(data.orphan_bindings) ? data.orphan_bindings : [],
   };
-}
-
-export async function fetchNativeKeyBindings(): Promise<NativeKeyBinding[]> {
-  const c = apiClient();
-  const { data } = await c.get<{ bindings: NativeKeyBinding[] }>(pluginPath("/native-key-bindings"));
-  return data.bindings ?? [];
 }
 
 export async function createNativeKeyBinding(
@@ -531,9 +284,6 @@ export interface PricingSourcesState {
 
 export interface PricingSyncResult {
   at: string;
-  updated: number;
-  unmatched: number;
-  skipped: number;
   catalog_updated?: number;
   catalog?: number;
   litellm?: number;

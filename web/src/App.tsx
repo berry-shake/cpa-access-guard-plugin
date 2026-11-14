@@ -3,12 +3,7 @@ import { useEffect, useState } from "react";
 import { isAuthed, subscribe, getSession, bootstrapFromPanel } from "./store/session";
 import { useT } from "./i18n";
 import Login from "./pages/Login";
-import KeyList from "./pages/KeyList";
-import KeyNew from "./pages/KeyNew";
-import KeyEdit from "./pages/KeyEdit";
-import KeyUsage from "./pages/KeyUsage";
-import ModelPick from "./pages/ModelPick";
-import Mapping, { AliasEditForm, RuleEditForm } from "./pages/Mapping";
+import Mapping from "./pages/Mapping";
 import Footer from "./components/Footer";
 
 function useAuthTick() {
@@ -26,9 +21,6 @@ export function TopNav() {
   // Active state: highlight the nav item matching the current path prefix.
   const onNativeKeys = loc.pathname === "/native-keys" || loc.pathname.startsWith("/native-keys/");
   const onPricing = loc.pathname === "/pricing" || loc.pathname.startsWith("/pricing/");
-  const onKeys = loc.pathname === "/keys" || loc.pathname.startsWith("/keys/");
-  const onClassify = loc.pathname === "/classify" || loc.pathname.startsWith("/classify/");
-  const onMapping = loc.pathname === "/mapping" || loc.pathname.startsWith("/mapping/");
   return (
     <div className="topnav">
       <div className="topnav-inner">
@@ -50,9 +42,6 @@ export function TopNav() {
         </div>
         <nav className="topnav-actions" aria-label={t("header.navigation")}>
           <Link to="/native-keys" className={"tn-link" + (onNativeKeys ? " active" : "")} aria-current={onNativeKeys ? "page" : undefined}>{t("header.nativeKeys")}</Link>
-          <Link to="/keys" className={"tn-link" + (onKeys ? " active" : "")} aria-current={onKeys ? "page" : undefined}>{t("header.downstreamKeys")}</Link>
-          <Link to="/classify" className={"tn-link" + (onClassify ? " active" : "")} aria-current={onClassify ? "page" : undefined}>{t("header.classify")}</Link>
-          <Link to="/mapping" className={"tn-link" + (onMapping ? " active" : "")} aria-current={onMapping ? "page" : undefined}>{t("header.aliasMapping")}</Link>
           <Link to="/pricing" className={"tn-link" + (onPricing ? " active" : "")} aria-current={onPricing ? "page" : undefined}>{t("header.modelPricing")}</Link>
         </nav>
       </div>
@@ -95,20 +84,8 @@ function Shell() {
     <div className="app">
       <TopNav />
       <Routes>
-        <Route path="/keys" element={<KeyList />} />
-        <Route path="/keys/new" element={<KeyNew />} />
-        <Route path="/keys/new/models" element={<ModelPick />} />
-        <Route path="/keys/:id/edit" element={<KeyEdit />} />
-        <Route path="/keys/:id/edit/models" element={<ModelPick />} />
-        <Route path="/mapping/pick-target" element={<ModelPick />} />
-        <Route path="/keys/:id/usage" element={<KeyUsage />} />
         <Route path="/native-keys" element={<Mapping section="native" />} />
         <Route path="/pricing" element={<Mapping section="pricing" />} />
-        <Route path="/classify" element={<Mapping section="classify" />} />
-        <Route path="/mapping" element={<Mapping section="alias" />} />
-        <Route path="/mapping/alias/:aliasName" element={<AliasEditForm />} />
-        <Route path="/classify/rule/:ruleName" element={<RuleEditForm />} />
-        <Route path="/mapping/rule/:ruleName" element={<Navigate to="/classify" replace />} />
         <Route path="*" element={<Navigate to="/native-keys" replace />} />
       </Routes>
       <Footer />
