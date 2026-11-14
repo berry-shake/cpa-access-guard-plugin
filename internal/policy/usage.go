@@ -13,8 +13,7 @@ const (
 )
 
 // usageLedger tracks per-account dollar usage with a daily window (UTC
-// midnight reset) and a weekly window. Usage is also broken down per model
-// (the by_alias JSON key predates the native-only release).
+// midnight reset) and a weekly window.
 //
 // It is the in-memory source of truth; a background flusher persists it to
 // the state JSON whenever it changed (see Store.FlushUsage).
@@ -83,7 +82,7 @@ func (l *usageLedger) snapshot() map[string]*UsageState {
 	return l.snapshotLocked()
 }
 
-// snapshotLocked also copies per-model maps so concurrent recording cannot
+// snapshotLocked deep-copies every account so concurrent recording cannot
 // mutate a snapshot while it is being serialized. Caller must hold l.mu.
 func (l *usageLedger) snapshotLocked() map[string]*UsageState {
 	out := make(map[string]*UsageState, len(l.entries))
@@ -101,12 +100,6 @@ func cloneUsageState(st *UsageState) *UsageState {
 	if st.WeeklyResetAnchor != nil {
 		anchor := *st.WeeklyResetAnchor
 		cp.WeeklyResetAnchor = &anchor
-	}
-	if st.ByAlias != nil {
-		cp.ByAlias = make(map[string]AliasUsageWindows, len(st.ByAlias))
-		for alias, windows := range st.ByAlias {
-			cp.ByAlias[alias] = windows
-		}
 	}
 	return &cp
 }
@@ -142,11 +135,8 @@ func advanceFixedWeeklyWindow(w *UsageWindow, start time.Time) {
 func (l *usageLedger) entryLocked(id string) *UsageState {
 	st := l.entries[id]
 	if st == nil {
-		st = &UsageState{ByAlias: make(map[string]AliasUsageWindows)}
+		st = &UsageState{}
 		l.entries[id] = st
-	}
-	if st.ByAlias == nil {
-		st.ByAlias = make(map[string]AliasUsageWindows)
 	}
 	return st
 }
@@ -174,28 +164,14 @@ func (l *usageLedger) ensureWeeklyWindowLocked(st *UsageState, now, anchor time.
 	}
 }
 
-// ensureAliasWindow applies the same window logic to a per-alias daily/weekly slice.
-func (l *usageLedger) ensureAliasWindowLocked(w *UsageWindow, daily bool, now time.Time) {
-	if daily {
-		startOfDay := now.UTC().Truncate(dayWindow)
-		if w.WindowStart.IsZero() || !sameDay(w.WindowStart, startOfDay) {
-			*w = UsageWindow{WindowStart: startOfDay}
-		}
-		return
-	}
-	if w.WindowStart.IsZero() || now.Sub(w.WindowStart) >= weekWindow {
-		*w = UsageWindow{WindowStart: now.UTC()}
-	}
-}
-
 func sameDay(a, b time.Time) bool {
 	a = a.UTC()
 	b = b.UTC()
 	return a.Year() == b.Year() && a.Month() == b.Month() && a.Day() == b.Day()
 }
 
-// RecordCost adds a dollar amount for a key+alias to the daily, weekly, and
-// per-alias buckets, advancing windows as needed. It also accumulates the
+// RecordCost adds a dollar amount for an account to its daily and weekly
+// buckets, advancing windows as needed. It also accumulates the
 // cache-specific counters (cache-read tokens, cache spend, non-cache input
 // tokens) used for the cache hit-rate / spend report — these do NOT feed limit
 // enforcement, only the Summary the UI reads.
@@ -209,7 +185,7 @@ func sameDay(a, b time.Time) bool {
 // count for the record; inputTokens is the non-cache input-token count charged
 // at the regular input price (the denominator partner for hit-rate);
 // outputTokens is the completion-token count charged at the output price.
-func (l *usageLedger) RecordCost(id, alias string, amount, cacheCost float64, cacheReadTokens int64, cacheWriteCost float64, cacheWriteTokens, inputTokens, outputTokens int64, callCount int64) {
+func (l *usageLedger) RecordCost(id string, amount, cacheCost float64, cacheReadTokens int64, cacheWriteCost float64, cacheWriteTokens, inputTokens, outputTokens int64, callCount int64) {
 	if id == "" {
 		return
 	}
@@ -250,31 +226,6 @@ func (l *usageLedger) RecordCost(id, alias string, amount, cacheCost float64, ca
 		st.Daily.OutputTokens += outputTokens
 		st.Weekly.OutputTokens += outputTokens
 	}
-
-	aliasEntry := st.ByAlias[alias]
-	l.ensureAliasWindowLocked(&aliasEntry.Daily, true, now)
-	if anchor.IsZero() {
-		l.ensureAliasWindowLocked(&aliasEntry.Weekly, false, now)
-	} else {
-		advanceFixedWeeklyWindow(&aliasEntry.Weekly, st.Weekly.WindowStart)
-	}
-	aliasEntry.Daily.TotalUSD += amount
-	aliasEntry.Weekly.TotalUSD += amount
-	aliasEntry.Daily.CallCount += callCount
-	aliasEntry.Weekly.CallCount += callCount
-	aliasEntry.Daily.CacheReadTokens += cacheReadTokens
-	aliasEntry.Weekly.CacheReadTokens += cacheReadTokens
-	aliasEntry.Daily.CacheCostUSD += cacheCost
-	aliasEntry.Weekly.CacheCostUSD += cacheCost
-	aliasEntry.Daily.CacheWriteTokens += cacheWriteTokens
-	aliasEntry.Weekly.CacheWriteTokens += cacheWriteTokens
-	aliasEntry.Daily.CacheWriteCostUSD += cacheWriteCost
-	aliasEntry.Weekly.CacheWriteCostUSD += cacheWriteCost
-	aliasEntry.Daily.InputTokens += inputTokens
-	aliasEntry.Weekly.InputTokens += inputTokens
-	aliasEntry.Daily.OutputTokens += outputTokens
-	aliasEntry.Weekly.OutputTokens += outputTokens
-	st.ByAlias[alias] = aliasEntry
 }
 
 // UsageSummary is the live usage of one ledger account. Windows are
@@ -301,7 +252,6 @@ func (l *usageLedger) Summary(id string) UsageSummary {
 		return summary
 	}
 	ensureSt := *st
-	ensureSt.ByAlias = nil
 	l.ensureDailyWindowLocked(&ensureSt, now)
 	anchor := nativeWeeklyResetAnchor(id, st)
 	l.ensureWeeklyWindowLocked(&ensureSt, now, anchor)

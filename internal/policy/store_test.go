@@ -222,23 +222,58 @@ func TestConfigureDropsRemovedFeatureState(t *testing.T) {
 	}
 }
 
-// TestUsageStateLegacyByAliasMigrates: by_alias written as a single window per
-// model loads into the dual-window form with the old value in Daily.
-func TestUsageStateLegacyByAliasMigrates(t *testing.T) {
-	raw := []byte(`{"daily":{"total_usd":0.8},"weekly":{"total_usd":0.8},"by_alias":{"fast":{"total_usd":0.8,"call_count":2,"input_tokens":800000},"new":{"daily":{"total_usd":1},"weekly":{"total_usd":2}}}}`)
-	var state UsageState
-	if err := json.Unmarshal(raw, &state); err != nil {
+// TestUsageStateDropsLegacyByAlias: both by_alias shapes written by older
+// releases load without error, keep the account totals, and disappear from
+// the state file on the next usage write.
+func TestUsageStateDropsLegacyByAlias(t *testing.T) {
+	now := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
+	path := filepath.Join(t.TempDir(), "state.json")
+	store := newBoundStore(t, path, now)
+	account := storeTestLedgerID()
+	store.StopUsageFlusher()
+	legacy := `{"daily":{"total_usd":0.8,"window_start":"2026-11-14T00:00:00Z","call_count":2},"weekly":{"total_usd":1.5,"window_start":"2026-11-13T00:00:00Z","call_count":3},` +
+		`"by_alias":{"fast":{"total_usd":0.8,"call_count":2},"new":{"daily":{"total_usd":1},"weekly":{"total_usd":2}}}}`
+	var raw map[string]any
+	data, err := os.ReadFile(path)
+	if err != nil {
 		t.Fatal(err)
 	}
-	fast := state.ByAlias["fast"]
-	if !nearly(fast.Daily.TotalUSD, 0.8) || fast.Daily.CallCount != 2 || fast.Daily.InputTokens != 800_000 {
-		t.Fatalf("migrated daily = %+v", fast.Daily)
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
 	}
-	if fast.Weekly.TotalUSD != 0 {
-		t.Fatalf("migrated weekly = %+v, want zero", fast.Weekly)
+	var usage map[string]any
+	if err := json.Unmarshal([]byte(`{"`+account+`":`+legacy+`}`), &usage); err != nil {
+		t.Fatal(err)
 	}
-	if current := state.ByAlias["new"]; current.Daily.TotalUSD != 1 || current.Weekly.TotalUSD != 2 {
-		t.Fatalf("dual-window entry = %+v", current)
+	raw["usage"] = usage
+	if data, err = json.Marshal(raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted := NewStore()
+	restarted.SetClock(func() time.Time { return now })
+	if err := restarted.Configure(Config{Enabled: true, StateFile: path}); err != nil {
+		t.Fatal(err)
+	}
+	if sum := restarted.usage.Summary(account); !nearly(sum.DailyUSD, 0.8) || !nearly(sum.WeeklyUSD, 1.5) || sum.DailyCallCount != 2 || sum.WeeklyCallCount != 3 {
+		t.Fatalf("legacy totals = %+v", sum)
+	}
+	restarted.RecordUsage(storeTestKey, "m", "m", false, UsageDetail{InputTokens: 1_000_000})
+	if err := restarted.FlushUsage(); err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "by_alias") {
+		t.Fatalf("by_alias survived the next usage write: %s", data)
+	}
+	if sum := restarted.usage.Summary(account); !nearly(sum.DailyUSD, 1.8) || sum.DailyCallCount != 3 {
+		t.Fatalf("totals after record = %+v", sum)
 	}
 }
 

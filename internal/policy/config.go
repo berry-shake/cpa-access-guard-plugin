@@ -1,7 +1,6 @@
 package policy
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -47,84 +46,16 @@ type PricingSyncConfig struct {
 	URL string `yaml:"url,omitempty" json:"url,omitempty"`
 }
 
-// UsageState holds per-key dollar usage accounting persisted in the state JSON.
-// It carries rolling daily/weekly windows plus a per-alias breakdown
-// (ByAlias). The per-alias breakdown tracks BOTH a daily and a weekly window
-// (see AliasUsageWindows) so the key detail page can show per-alias today /
-// rolling-week figures.
-//
-// Legacy state files stored ByAlias as map[string]UsageWindow (a single
-// window per alias). UsageState.UnmarshalJSON auto-migrates that shape into
-// the dual-window form (old value → Daily; Weekly zeroed).
+// UsageState holds one account's dollar usage in rolling daily / weekly
+// windows, persisted in the state JSON. Older releases also kept a per-model
+// breakdown under "by_alias"; nothing reads it any more, so it is ignored on
+// load and dropped by the next write.
 type UsageState struct {
-	Daily   UsageWindow                  `json:"daily"`
-	Weekly  UsageWindow                  `json:"weekly"`
-	ByAlias map[string]AliasUsageWindows `json:"by_alias,omitempty"`
+	Daily  UsageWindow `json:"daily"`
+	Weekly UsageWindow `json:"weekly"`
 	// WeeklyResetAnchor fixes native-key weekly periods to the last successful
 	// manual reset. Missing anchors retain the legacy first-use window behavior.
 	WeeklyResetAnchor *time.Time `json:"weekly_reset_anchor,omitempty"`
-}
-
-// AliasUsageWindows holds the daily and rolling-weekly usage windows for a
-// single alias under a key. Replaces the legacy single-window ByAlias map;
-// old state files are auto-migrated on load (see UsageState.UnmarshalJSON).
-type AliasUsageWindows struct {
-	Daily  UsageWindow `json:"daily"`
-	Weekly UsageWindow `json:"weekly"`
-}
-
-// UnmarshalJSON migrates the legacy ByAlias shape (map[string]UsageWindow,
-// a single window per alias) into the current dual-window form
-// (map[string]AliasUsageWindows). Detection is per-entry: an entry carrying a
-// "daily" or "weekly" key is read as the new form; otherwise it is read as a
-// bare UsageWindow and placed into Daily (Weekly zeroed). Unknown shapes are
-// skipped rather than failing the whole load.
-func (s *UsageState) UnmarshalJSON(raw []byte) error {
-	var p struct {
-		Daily             UsageWindow     `json:"daily"`
-		Weekly            UsageWindow     `json:"weekly"`
-		ByAlias           json.RawMessage `json:"by_alias,omitempty"`
-		WeeklyResetAnchor *time.Time      `json:"weekly_reset_anchor,omitempty"`
-	}
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return err
-	}
-	s.Daily = p.Daily
-	s.Weekly = p.Weekly
-	s.WeeklyResetAnchor = p.WeeklyResetAnchor
-	s.ByAlias = make(map[string]AliasUsageWindows)
-	if len(p.ByAlias) == 0 || string(p.ByAlias) == "null" {
-		return nil
-	}
-	var entries map[string]json.RawMessage
-	if err := json.Unmarshal(p.ByAlias, &entries); err != nil {
-		return err
-	}
-	for alias, rawEntry := range entries {
-		if len(rawEntry) == 0 || string(rawEntry) == "null" {
-			continue
-		}
-		if hasJSONKey(rawEntry, "daily") || hasJSONKey(rawEntry, "weekly") {
-			var w AliasUsageWindows
-			if err := json.Unmarshal(rawEntry, &w); err == nil {
-				s.ByAlias[alias] = w
-			}
-			continue
-		}
-		// Legacy single-window format: migrate into Daily (weekly zeroed).
-		var w UsageWindow
-		if err := json.Unmarshal(rawEntry, &w); err == nil {
-			s.ByAlias[alias] = AliasUsageWindows{Daily: w}
-		}
-	}
-	return nil
-}
-
-// hasJSONKey reports whether a JSON object literal contains the given object
-// key. It is a cheap substring check on the quoted key form, sufficient for
-// migration-time shape detection (not a full parse).
-func hasJSONKey(raw json.RawMessage, key string) bool {
-	return bytes.Contains(raw, []byte(`"`+key+`"`))
 }
 
 // UsageWindow tracks a dollar total bound to a window-start timestamp, plus

@@ -64,20 +64,15 @@ func (s *Store) findNativeBindingByScope(callerScope string) *NativeKeyBinding {
 
 // recordNativeUsage bills one finalized usage record against a native
 // binding's ledger account. Pricing comes only from the standalone pricing
-// JSON (upstream model id, then the client-requested name). Alias mapping
-// prices are ignored. Unpriced requests record 0 USD but still increment
-// CallCount. Returns the billed amount (0 when unpriced or failed).
+// JSON (upstream model id, then the client-requested name). Unpriced
+// requests record 0 USD but still increment CallCount. Returns the billed amount (0 when unpriced or failed).
 func (s *Store) recordNativeUsage(binding NativeKeyBinding, alias, model string, failed bool, detail UsageDetail) float64 {
 	if failed {
 		return 0
 	}
 	requested := strings.TrimSpace(alias)
 	upstream := strings.TrimSpace(model)
-	resolved := upstream
-	if resolved == "" {
-		resolved = requested
-	}
-	if resolved == "" {
+	if upstream == "" && requested == "" {
 		return 0
 	}
 	_, usageLedger := s.runtimeComponents()
@@ -128,7 +123,7 @@ func (s *Store) recordNativeUsage(binding NativeKeyBinding, alias, model string,
 	// Record even when unpriced (priced=false → cost 0) so CallCount and
 	// token volume stay visible in the UI; USD stays 0 until the model is
 	// in the pricing JSON.
-	usageLedger.RecordCost(account, resolved, cost, cacheCost, cacheReadTokens, cacheWriteCost, cacheWriteTokens, nonCacheInput, int64(detail.OutputTokens), 1)
+	usageLedger.RecordCost(account, cost, cacheCost, cacheReadTokens, cacheWriteCost, cacheWriteTokens, nonCacheInput, int64(detail.OutputTokens), 1)
 	return cost
 }
 
@@ -298,7 +293,6 @@ func resetNativeQuotaAccounts(accounts []string, usage *usageLedger, limiter *Ra
 				Daily:             UsageWindow{WindowStart: resetAt.Truncate(dayWindow)},
 				Weekly:            UsageWindow{WindowStart: resetAt},
 				WeeklyResetAnchor: &anchor,
-				ByAlias:           make(map[string]AliasUsageWindows),
 			}
 		}
 	}

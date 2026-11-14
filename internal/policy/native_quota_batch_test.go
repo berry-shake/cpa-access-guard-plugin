@@ -24,7 +24,6 @@ func quotaBatchResetState(resetAt time.Time) *UsageState {
 		Daily:             UsageWindow{WindowStart: anchor.Truncate(dayWindow)},
 		Weekly:            UsageWindow{WindowStart: anchor},
 		WeeklyResetAnchor: &anchor,
-		ByAlias:           make(map[string]AliasUsageWindows),
 	}
 }
 
@@ -54,8 +53,8 @@ func quotaBatchFixture(t *testing.T) (*Store, string, []NativeKeyBinding) {
 		accounts = append(accounts, nativeUsageLedgerID(binding.CallerScope))
 	}
 	for i, account := range accounts {
-		usage.RecordCost(account, "spark-xxx", float64(i+1), 0.2, 30, 0.3, 40, 50, 60, 2)
-		usage.RecordCost(account, "spark-other", float64(i+2), 0.4, 70, 0.5, 80, 90, 100, 3)
+		usage.RecordCost(account, float64(i+1), 0.2, 30, 0.3, 40, 50, 60, 2)
+		usage.RecordCost(account, float64(i+2), 0.4, 70, 0.5, 80, 90, 100, 3)
 		if !limiter.Allow(account, 20) || !limiter.Allow(account, 20) {
 			t.Fatal("fixture RPM acquisition failed")
 		}
@@ -243,7 +242,7 @@ func TestResetNativeKeyQuotasAcceptsInputBoundaries(t *testing.T) {
 			binding := createTestBinding(t, store, "alpha", nil)
 			_, usage := store.runtimeComponents()
 			account := nativeUsageLedgerID(binding.CallerScope)
-			usage.RecordCost(account, "spark", 1, 0, 0, 0, 0, 10, 20, 1)
+			usage.RecordCost(account, 1, 0, 0, 0, 0, 10, 20, 1)
 			ids := make([]string, tc.count)
 			for i := range ids {
 				ids[i] = tc.raw
@@ -360,7 +359,7 @@ func TestResetNativeKeyQuotas4096DistinctBindings(t *testing.T) {
 	limiter, usage := store.runtimeComponents()
 	for _, binding := range before {
 		account := nativeUsageLedgerID(binding.CallerScope)
-		usage.RecordCost(account, "spark-xxx", 1, 0.1, 20, 0.2, 30, 40, 50, 1)
+		usage.RecordCost(account, 1, 0.1, 20, 0.2, 30, 40, 50, 1)
 		if !limiter.Allow(account, 5) {
 			t.Fatal("large fixture RPM acquisition failed")
 		}
@@ -430,7 +429,7 @@ func TestResetNativeKeyQuotasMemoryOnlyStore(t *testing.T) {
 			store.nativeKeyBindingsByScope[binding.CallerScope] = &binding
 			limiter, usage := store.runtimeComponents()
 			account := nativeUsageLedgerID(binding.CallerScope)
-			usage.RecordCost(account, "spark", 1, 0.1, 20, 0.2, 30, 40, 50, 1)
+			usage.RecordCost(account, 1, 0.1, 20, 0.2, 30, 40, 50, 1)
 			if !limiter.Allow(account, binding.RPM) {
 				t.Fatal("memory-only fixture RPM acquisition failed")
 			}

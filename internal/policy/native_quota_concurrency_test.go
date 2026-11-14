@@ -21,8 +21,8 @@ func TestNativeQuotaResetQueuesNewUsageAndRPMUntilCommit(t *testing.T) {
 			})
 			account := nativeUsageLedgerID(binding.CallerScope)
 			usage, limiter := store.usage, store.limiter
-			usage.RecordCost(account, "model", 1, 0, 0, 0, 0, 10, 3, 1)
-			usage.RecordCost("other", "model", 2, 0, 0, 0, 0, 20, 6, 1)
+			usage.RecordCost(account, 1, 0, 0, 0, 0, 10, 3, 1)
+			usage.RecordCost("other", 2, 0, 0, 0, 0, 20, 6, 1)
 			limiter.Allow(account, 100)
 			if err := store.FlushUsage(); err != nil {
 				t.Fatal(err)
@@ -79,7 +79,7 @@ func TestNativeQuotaResetQueuesNewUsageAndRPMUntilCommit(t *testing.T) {
 			}()
 			go func() {
 				started <- struct{}{}
-				usage.RecordCost("other", "model", 2, 0, 0, 0, 0, 20, 6, 1)
+				usage.RecordCost("other", 2, 0, 0, 0, 0, 20, 6, 1)
 				finished <- struct{}{}
 			}()
 			go func() {
@@ -193,21 +193,22 @@ func TestNativeQuotaQueuedFlushCannotResurrectReset(t *testing.T) {
 		t.Fatal(err)
 	}
 	usage := state.Usage[account]
-	if usage == nil || usage.Daily.CallCount != 1 || len(usage.ByAlias) != 1 || usage.ByAlias["new-model"].Daily.CallCount != 1 {
+	if usage == nil || usage.Daily.CallCount != 1 {
 		t.Fatalf("queued flush restored stale usage: %+v", usage)
 	}
 	reloaded := newNativeQuotaStore(t, path)
-	if got := reloaded.usage.snapshot()[account]; got == nil || got.ByAlias["new-model"].Daily.CallCount != 1 {
+	if got := reloaded.usage.snapshot()[account]; got == nil || got.Daily.CallCount != 1 {
 		t.Fatalf("reset did not survive restart: %+v", got)
 	}
 }
 
-func TestNativeQuotaUsageSnapshotOwnsModelMaps(t *testing.T) {
+func TestNativeQuotaUsageSnapshotOwnsAccounts(t *testing.T) {
 	usage := newUsageLedger(time.Now)
-	usage.RecordCost("account", "model", 1, 0, 0, 0, 0, 10, 3, 1)
+	usage.RecordCost("account", 1, 0, 0, 0, 0, 10, 3, 1)
 	snapshot := usage.snapshot()
-	delete(snapshot["account"].ByAlias, "model")
-	if got := usage.snapshot()["account"].ByAlias["model"].Daily.CallCount; got != 1 {
+	snapshot["account"].Daily.CallCount = 99
+	delete(snapshot, "account")
+	if got := usage.snapshot()["account"]; got == nil || got.Daily.CallCount != 1 {
 		t.Fatal("snapshot mutation changed the ledger")
 	}
 	snapshot = usage.snapshot()
@@ -216,7 +217,7 @@ func TestNativeQuotaUsageSnapshotOwnsModelMaps(t *testing.T) {
 	go func() {
 		defer wait.Done()
 		for i := 0; i < 300; i++ {
-			usage.RecordCost("account", fmt.Sprintf("model-%d", i), 1, 0, 0, 0, 0, 10, 3, 1)
+			usage.RecordCost("account", 1, 0, 0, 0, 0, 10, 3, 1)
 		}
 	}()
 	for i := 0; i < 100; i++ {
@@ -225,7 +226,7 @@ func TestNativeQuotaUsageSnapshotOwnsModelMaps(t *testing.T) {
 		}
 	}
 	wait.Wait()
-	if len(snapshot["account"].ByAlias) != 1 || snapshot["account"].Daily.CallCount != 1 {
+	if snapshot["account"].Daily.CallCount != 1 {
 		t.Fatal("concurrent recording mutated an existing persistence snapshot")
 	}
 }
@@ -290,7 +291,7 @@ func TestNativeQuotaConcurrentPublicResetRecordAndFlush(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := state.Usage[nativeUsageLedgerID(selected.CallerScope)]; got == nil || got.Daily.CallCount != 1 || got.ByAlias["after-reset"].Daily.CallCount != 1 {
+	if got := state.Usage[nativeUsageLedgerID(selected.CallerScope)]; got == nil || got.Daily.CallCount != 1 {
 		t.Fatalf("post-reset record missing or old counters restored: %+v", got)
 	}
 	if state.Usage[nativeUsageLedgerID(unselected.CallerScope)].Daily.CallCount != 500 {

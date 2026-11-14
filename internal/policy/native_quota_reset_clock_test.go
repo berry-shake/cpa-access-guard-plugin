@@ -93,9 +93,8 @@ func TestNativeQuotaResetClockStartsImmediatelyAndSurvivesReload(t *testing.T) {
 	if got := restarted.NativeBindingUsage(binding); got.WeeklyCalls != 1 || got.DailyCalls != 1 {
 		t.Fatalf("late first call was lost: %+v", got)
 	}
-	got := restarted.usage.snapshot()[account]
-	if !got.ByAlias["late-first-model"].Weekly.WindowStart.Equal(anchor) {
-		t.Fatal("late first model started a separate weekly period")
+	if got := restarted.usage.snapshot()[account]; !got.Weekly.WindowStart.Equal(anchor) {
+		t.Fatal("late first call started a separate weekly period")
 	}
 }
 
@@ -140,7 +139,7 @@ func TestNativeQuotaResetClockBatchSamplesOnceAndRepeatRestartsPeriod(t *testing
 	}
 }
 
-func TestNativeQuotaResetClockFixedPeriodsAlignModelUsage(t *testing.T) {
+func TestNativeQuotaResetClockFixedPeriods(t *testing.T) {
 	store, clock, bindings, path := resetClockFixture(t)
 	binding := resetClockBinding(t, bindings, "one")
 	account := nativeUsageLedgerID(binding.CallerScope)
@@ -148,14 +147,12 @@ func TestNativeQuotaResetClockFixedPeriodsAlignModelUsage(t *testing.T) {
 	if err := store.ResetNativeKeyQuota(binding.ID); err != nil {
 		t.Fatal(err)
 	}
-	record := func(model string) { store.usage.RecordCost(account, model, 3, 1, 20, 0.5, 10, 80, 40, 1) }
+	record := func(model string) { store.usage.RecordCost(account, 3, 1, 20, 0.5, 10, 80, 40, 1) }
 	record("first-model")
 	clock.set(anchor.Add(6 * dayWindow))
 	record("day-six-model")
-	for _, row := range resetClockModelWindows(store.usage, account) {
-		if !row.Weekly.WindowStart.Equal(anchor) || row.Weekly.CallCount != 1 {
-			t.Fatalf("model period is not aligned before boundary: %+v", row)
-		}
+	if st := store.usage.snapshot()[account]; !st.Weekly.WindowStart.Equal(anchor) || st.Weekly.CallCount != 2 {
+		t.Fatalf("period is not aligned before boundary: %+v", st.Weekly)
 	}
 	for _, test := range []struct {
 		name           string
@@ -179,14 +176,6 @@ func TestNativeQuotaResetClockFixedPeriodsAlignModelUsage(t *testing.T) {
 			if test.wantCalls == 0 && summary.WeeklyUSD != 0 {
 				t.Fatalf("expired aggregate counters retained: %+v", summary)
 			}
-			for _, row := range resetClockModelWindows(store.usage, account) {
-				if !row.Weekly.WindowStart.Equal(test.wantStart) {
-					t.Fatalf("model window drift: %+v", row)
-				}
-				if test.wantCalls == 0 && row.Weekly != (UsageWindow{WindowStart: test.wantStart}) {
-					t.Fatalf("expired model counters retained: %+v", row)
-				}
-			}
 			if !reflect.DeepEqual(before, store.usage.snapshot()) {
 				t.Fatal("read-only projection changed live ledger")
 			}
@@ -201,24 +190,24 @@ func TestNativeQuotaResetClockFixedPeriodsAlignModelUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertResetClockDeadline(t, restarted, binding, anchor.Add(4*weekWindow))
-	restarted.usage.RecordCost(account, "after-idle", 2, 0, 0, 0, 0, 30, 10, 1)
+	restarted.usage.RecordCost(account, 2, 0, 0, 0, 0, 30, 10, 1)
 	st := restarted.usage.snapshot()[account]
 	if !st.Weekly.WindowStart.Equal(anchor.Add(3*weekWindow)) || st.Weekly.TotalUSD != 2 || st.Weekly.CallCount != 1 {
 		t.Fatalf("first record after idle shifted period or retained old charge: %+v", st.Weekly)
 	}
-	if !st.Daily.WindowStart.Equal(clock.now().Truncate(dayWindow)) || !st.ByAlias["after-idle"].Weekly.WindowStart.Equal(st.Weekly.WindowStart) {
-		t.Fatal("daily midnight or model weekly alignment changed")
+	if !st.Daily.WindowStart.Equal(clock.now().Truncate(dayWindow)) {
+		t.Fatal("daily midnight alignment changed")
 	}
 	clock.set(anchor.Add(3 * weekWindow))
-	restarted.usage.RecordCost(account, "after-idle", 1, 0, 0, 0, 0, 1, 1, 1)
+	restarted.usage.RecordCost(account, 1, 0, 0, 0, 0, 1, 1, 1)
 	if got := restarted.usage.snapshot()[account].Weekly; got.TotalUSD != 3 || got.CallCount != 2 {
 		t.Fatalf("backward clock within period cleared usage: %+v", got)
 	}
 	clock.set(anchor.Add(dayWindow))
-	restarted.usage.RecordCost(account, "after-clock-rollback", 1, 0, 0, 0, 0, 1, 1, 1)
+	restarted.usage.RecordCost(account, 1, 0, 0, 0, 0, 1, 1, 1)
 	assertResetClockDeadline(t, restarted, binding, anchor.Add(4*weekWindow))
 	st = restarted.usage.snapshot()[account]
-	if st.Weekly.TotalUSD != 4 || !st.ByAlias["after-clock-rollback"].Weekly.WindowStart.Equal(st.Weekly.WindowStart) {
+	if st.Weekly.TotalUSD != 4 {
 		t.Fatal("clock rollback rewound period or lost consumed amount")
 	}
 }
@@ -230,7 +219,7 @@ func TestNativeQuotaResetClockFailurePreservesPreviousAnchorAndCounters(t *testi
 	}
 	for _, id := range []string{"one", "two"} {
 		account := nativeUsageLedgerID(resetClockBinding(t, bindings, id).CallerScope)
-		store.usage.RecordCost(account, "model", 2, 0, 0, 0, 0, 20, 10, 1)
+		store.usage.RecordCost(account, 2, 0, 0, 0, 0, 20, 10, 1)
 		store.limiter.Allow(account, 50)
 	}
 	if err := store.FlushUsage(); err != nil {
@@ -262,9 +251,9 @@ func TestNativeQuotaResetClockLegacyAndDownstreamRemainUnchanged(t *testing.T) {
 	now := anchor
 	l := newUsageLedger(func() time.Time { return now })
 	native := nativeUsageLedgerID(NativeCallerScope("legacy"))
-	l.RecordCost(native, "model", 7, 0, 0, 0, 0, 50, 10, 1)
-	l.RecordCost("downstream", "model", 9, 0, 0, 0, 0, 50, 10, 1)
-	l.RecordCost("native-scope:downstream-label", "model", 9, 0, 0, 0, 0, 50, 10, 1)
+	l.RecordCost(native, 7, 0, 0, 0, 0, 50, 10, 1)
+	l.RecordCost("downstream", 9, 0, 0, 0, 0, 50, 10, 1)
+	l.RecordCost("native-scope:downstream-label", 9, 0, 0, 0, 0, 50, 10, 1)
 	before := l.snapshot()
 	if before[native].WeeklyResetAnchor != nil || before["downstream"].WeeklyResetAnchor != nil {
 		t.Fatal("ordinary usage created manual reset anchors")
@@ -295,7 +284,7 @@ func TestNativeQuotaResetClockLegacyAndDownstreamRemainUnchanged(t *testing.T) {
 func TestNativeQuotaResetClockSerializationAndSnapshotOwnership(t *testing.T) {
 	anchor := time.Date(2026, 10, 1, 9, 30, 0, 123, time.UTC)
 	stateAnchor := anchor
-	state := &UsageState{WeeklyResetAnchor: &stateAnchor, Weekly: UsageWindow{WindowStart: anchor}, ByAlias: map[string]AliasUsageWindows{}}
+	state := &UsageState{WeeklyResetAnchor: &stateAnchor, Weekly: UsageWindow{WindowStart: anchor}}
 	raw, err := json.Marshal(state)
 	if err != nil {
 		t.Fatal(err)
@@ -304,11 +293,12 @@ func TestNativeQuotaResetClockSerializationAndSnapshotOwnership(t *testing.T) {
 	if err := json.Unmarshal(raw, &restored); err != nil || !reflect.DeepEqual(state, &restored) {
 		t.Fatalf("anchor round trip failed: %v %+v", err, restored)
 	}
-	if err := json.Unmarshal([]byte(`{"daily":{},"weekly":{},"by_alias":{"legacy-model":{"total_usd":5}}}`), &restored); err != nil {
+	var legacy UsageState
+	if err := json.Unmarshal([]byte(`{"daily":{"total_usd":5},"weekly":{},"by_alias":{"legacy-model":{"total_usd":5}}}`), &legacy); err != nil {
 		t.Fatal(err)
 	}
-	if restored.WeeklyResetAnchor != nil || restored.ByAlias["legacy-model"].Daily.TotalUSD != 5 {
-		t.Fatal("legacy decode retained a previous anchor or lost old amounts")
+	if legacy.WeeklyResetAnchor != nil || legacy.Daily.TotalUSD != 5 {
+		t.Fatal("legacy decode invented an anchor or lost old amounts")
 	}
 	account := nativeUsageLedgerID("fixture")
 	l := newUsageLedger(time.Now)
@@ -348,7 +338,7 @@ func TestNativeQuotaResetClockQueuedRecordUsesCommittedPeriod(t *testing.T) {
 		}
 	}()
 	go func() {
-		store.usage.RecordCost(account, "queued-model", 2, 0, 0, 0, 0, 10, 2, 1)
+		store.usage.RecordCost(account, 2, 0, 0, 0, 0, 10, 2, 1)
 		close(recorded)
 	}()
 	// Wait until the record actually waits on the reset's ledger lock before
@@ -380,34 +370,5 @@ func TestNativeQuotaResetClockQueuedRecordUsesCommittedPeriod(t *testing.T) {
 	if st.WeeklyResetAnchor == nil || !st.WeeklyResetAnchor.Equal(anchor) || !st.Weekly.WindowStart.Equal(anchor.Add(weekWindow)) || st.Weekly.CallCount != 1 || st.Weekly.TotalUSD != 2 {
 		t.Fatalf("queued record lost or assigned wrong period: %+v", st)
 	}
-	if !st.ByAlias["queued-model"].Weekly.WindowStart.Equal(st.Weekly.WindowStart) {
-		t.Fatal("queued model counter did not follow committed aggregate period")
-	}
 	assertResetClockDeadline(t, store, binding, anchor.Add(2*weekWindow))
-}
-
-// resetClockModelWindows re-evaluates one account's per-model windows on
-// copies, the way a reader would, without mutating the ledger.
-func resetClockModelWindows(l *usageLedger, id string) map[string]AliasUsageWindows {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	now := l.now()
-	out := make(map[string]AliasUsageWindows)
-	st := l.entries[id]
-	if st == nil {
-		return out
-	}
-	anchor := nativeWeeklyResetAnchor(id, st)
-	current := *st
-	l.ensureWeeklyWindowLocked(&current, now, anchor)
-	for model, w := range st.ByAlias {
-		l.ensureAliasWindowLocked(&w.Daily, true, now)
-		if anchor.IsZero() {
-			l.ensureAliasWindowLocked(&w.Weekly, false, now)
-		} else {
-			advanceFixedWeeklyWindow(&w.Weekly, current.Weekly.WindowStart)
-		}
-		out[model] = w
-	}
-	return out
 }
