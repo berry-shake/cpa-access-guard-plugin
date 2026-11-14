@@ -36,7 +36,7 @@ plugins:
       #   litellm_url: "https://cdn.jsdelivr.net/gh/BerriAI/litellm@main/model_prices_and_context_window.json"
       #   models_dev_url: "https://models.dev/api.json"
 
-      # Optional first-boot seed for keys in CPA's top-level `api-keys`. Prefer
+      # Optional first-boot seed for CPA client API keys (`access.api-keys`). Prefer
       # the Web UI / Management API: it accepts the plaintext key once and
       # persists only the caller scope plus a redacted preview. A YAML-seeded
       # caller_scope can be returned by CPA's generic, Management-key-protected

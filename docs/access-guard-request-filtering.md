@@ -1,6 +1,6 @@
 # Access Guard 请求过滤原理
 
-本文说明 Access Guard `v0.4.4-fork.26` 如何处理 CPA 顶层 `api-keys` 里的原生 Key。fork.26 起插件只做这一件事：下游 Key、别名映射和凭证归类都已删除，绑定只能指定具体凭证。
+本文说明 Access Guard `v0.4.4-fork.26` 如何处理 CPA 的客户端 API 密钥（`access.api-keys`，旧版配置是顶层 `api-keys`）。fork.26 起插件只做这一件事：下游 Key、别名映射和凭证归类都已删除，绑定只能指定具体凭证。
 
 ## 1. 插件注册了哪些钩子
 
@@ -12,9 +12,9 @@
 
 插件不再注册前端认证、模型路由和响应拦截，所以 CPA 不会把请求体或响应体发给插件。每个请求只有上面两次调用。
 
-## 2. `caller_scope`：原生 Key 的不可逆身份
+## 2. `caller_scope`：API 密钥的不可逆身份
 
-CPA 认证顶层 Key 后算出：
+CPA 认证 API 密钥后算出：
 
 ```text
 caller_scope = hex(SHA-256("cli-proxy-api:caller-scope:v1\x00" + trim(api-key)))
@@ -108,7 +108,7 @@ native-scope:<caller_scope>
 
 ## 7. 停用或删除绑定
 
-停用或删除后，CPA 顶层 Key 仍然有效，只是不再受凭证和额度限制，CPA 恢复默认调度。要真正撤销访问，必须同时从 CPA 顶层 `api-keys` 删除这把 Key。
+停用或删除后，这把 API 密钥在 CPA 里仍然有效，只是不再受凭证和额度限制，CPA 恢复默认调度。要真正撤销访问，必须同时从 CPA 的客户端 API 密钥里删除它。
 
 ## 8. 插件以外的边界
 

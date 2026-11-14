@@ -1,6 +1,6 @@
 # Access Guard
 
-Binds [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) top-level `api-keys` to exact credentials, with per-key model access, RPM / USD limits and usage billing.
+Binds [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) client API keys (`access.api-keys`; top-level `api-keys` in older configs) to exact credentials, with per-key model access, RPM / USD limits and usage billing.
 
 | | |
 |---|---|
@@ -10,9 +10,9 @@ Binds [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) top-level `api
 | **Lineage** | Derived from [origin652/cpa-plugin-key-policy](https://github.com/origin652/cpa-plugin-key-policy) under the MIT license |
 | **中文说明** | [README.zh-CN.md](./README.zh-CN.md) |
 
-## v0.4.4-fork.26: native keys only
+## v0.4.4-fork.26: API key bindings only
 
-fork.26 removes **downstream keys**, **alias mapping** and **credential classification**, and binds native keys to **exact credentials** only:
+fork.26 removes **downstream keys**, **alias mapping** and **credential classification**, and binds API keys to **exact credentials** only:
 
 - The plugin no longer registers frontend auth, the model router or the response interceptor. CPA stops sending full request bodies (and non-stream response bodies) to the plugin; each request costs one small `scheduler.pick` and one `usage.handle` call.
 - `scheduler.pick` decodes only candidate ID / provider / priority / status. Usage is written to `state_file` only after it changed, instead of every 15 s. Pricing catalogs are decoded as a stream, and the memory used by a sync is returned right away. Built with Go 1.26.
@@ -23,7 +23,7 @@ fork.26 removes **downstream keys**, **alias mapping** and **credential classifi
 ## How it works
 
 ```text
-top-level api-key → CPA native auth → caller_scope (SHA-256, one-way)
+API key → CPA's own auth → caller_scope (SHA-256, one-way)
                   → binding → model_access AND auth_ids → RPM / USD quota
                   → pick only among the bound credentials
 ```
@@ -54,7 +54,7 @@ The plugin stores only the caller scope, a redacted key preview and the policy �
 - Not enforced on paths that skip `scheduler.pick` or omit `caller_scope`: Home scheduling (`-home-jwt`), direct plugin executors, Alpha Search, Codex Live/Realtime.
 - If the plugin is disabled, unloaded or fails to load, CPA may still accept the key with default scheduling.
 - `/v1/models` cannot be filtered per key; execution is enforced at `scheduler.pick`.
-- Top-level config and plugin state are separate. For strict rotation: bind the new key, add it to CPA, test it, remove the old key, then delete the old binding.
+- CPA config and plugin state are separate. For strict rotation: bind the new key, add it to CPA, test it, remove the old key, then delete the old binding.
 
 ## Web UI
 
@@ -64,7 +64,7 @@ http://<cpa-host>:<port>/v0/resource/plugins/access-guard/index.html
 
 Log in with the CPA management key. Inside a same-origin CPA or CPAMP panel with **Remember password**, the saved login is reused (`enc::v1::` and both `enc::v2::` formats).
 
-- **Native keys** — every current top-level key as a redacted card (copy the full key on demand), binding editor with credential and model pickers, account emails and Codex plans, 7-day quota bar, name sync from CPA key notes, batch binding with preview / undo / history (50 records), batch quota reset. Orphan bindings stay visible.
+- **API keys** — every current CPA client API key as a redacted card (copy the full key on demand), binding editor with credential and model pickers, account emails and Codex plans, 7-day quota bar, name sync from CPA key notes, batch binding with preview / undo / history (50 records), batch quota reset. Orphan bindings stay visible.
 - **Model pricing** — LiteLLM (primary) and models.dev (fallback) sync status, search, manual overrides, deletion tombstones and restore-automatic.
 
 ## Config
@@ -110,7 +110,7 @@ curl -X POST "$CPA/v0/management/plugins/access-guard/native-key-bindings" \
   -H "Authorization: Bearer $MANAGEMENT_KEY" -H "Content-Type: application/json" \
   -d '{
     "id": "client-a", "name": "Client A", "enabled": true,
-    "key": "sk-an-existing-top-level-api-key",
+    "key": "sk-an-existing-client-api-key",
     "auth_ids": ["tenant-a/codex-01.json", "tenant-a/codex-02.json"],
     "model_access": {"mode": "allowlist", "models": [{"provider": "codex", "model": "gpt-5.6-luna"}]},
     "weekly_usd": 100

@@ -1,6 +1,6 @@
 # Access Guard（中文说明）
 
-把 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 顶层 `api-keys` 绑定到指定凭证，并按 Key 限制可用模型、RPM / 美元额度，统计用量。
+把 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 的客户端 API 密钥（`access.api-keys`，旧版配置是顶层 `api-keys`）绑定到指定凭证，并按 Key 限制可用模型、RPM / 美元额度，统计用量。
 
 | | |
 |---|---|
@@ -10,9 +10,9 @@
 | **沿袭** | 基于 MIT 协议的 [origin652/cpa-plugin-key-policy](https://github.com/origin652/cpa-plugin-key-policy) 演进而来 |
 | **English** | [README.md](./README.md) |
 
-## v0.4.4-fork.26：只保留原生 Key
+## v0.4.4-fork.26：只保留 API 密钥绑定
 
-fork.26 删除了「下游 Key」「别名映射」「凭证归类」，原生 Key 只能绑定**指定凭证**：
+fork.26 删除了「下游 Key」「别名映射」「凭证归类」，API 密钥只能绑定**指定凭证**：
 
 - 插件不再注册前端认证、模型路由和响应拦截。CPA 不再把完整请求体（以及非流式响应体）发给插件，每个请求只剩一次很小的 `scheduler.pick` 和一次 `usage.handle`。
 - `scheduler.pick` 只解码候选凭证的 ID、供应商、优先级和状态；用量有变化才写入 `state_file`，不再每 15 秒写一次；价格目录按流解析，同步结束立即归还内存；改用 Go 1.26 编译。
@@ -23,7 +23,7 @@ fork.26 删除了「下游 Key」「别名映射」「凭证归类」，原生 K
 ## 工作方式
 
 ```text
-顶层 api-key → CPA 原生认证 → caller_scope（SHA-256，不可逆）
+API 密钥 → CPA 自身认证 → caller_scope（SHA-256，不可逆）
             → 绑定 → model_access 且 auth_ids → RPM / 美元额度
             → 只在绑定的凭证里选
 ```
@@ -54,7 +54,7 @@ fork.26 删除了「下游 Key」「别名映射」「凭证归类」，原生 K
 - 不经过 `scheduler.pick` 或不带 `caller_scope` 的路径不受约束：Home 调度（`-home-jwt`）、直接插件执行器、Alpha Search、Codex Live/Realtime。
 - 插件被停用、卸载或加载失败时，CPA 仍可能用默认调度接受这把 Key。
 - `/v1/models` 无法按 Key 过滤，实际执行在 `scheduler.pick` 拦截。
-- 顶层配置和插件状态是两套系统。严格轮换时：先为新 Key 建绑定，再加进 CPA、测试，然后删掉旧 Key，最后删旧绑定。
+- CPA 配置和插件状态是两套系统。严格轮换时：先为新 Key 建绑定，再加进 CPA、测试，然后删掉旧 Key，最后删旧绑定。
 
 ## 管理页
 
@@ -64,7 +64,7 @@ http://<cpa-host>:<port>/v0/resource/plugins/access-guard/index.html
 
 用 CPA 管理密钥登录。嵌在同源的 CPA 或 CPAMP 面板里且勾选了「记住密码」时，会直接沿用面板保存的登录（支持 `enc::v1::` 和两种 `enc::v2::`）。
 
-- **原生 Key**：当前所有顶层 Key 以打码卡片显示（需要时可复制完整 Key）；绑定编辑器带凭证和模型选择；显示账号邮箱和 Codex 套餐、7 天额度条；可从 CPA Key 备注同步名称；批量绑定支持预览、撤销和历史（保留 50 条）；批量重置额度。找不到 Key 的孤立绑定也会显示。
+- **API 密钥**：CPA 当前所有客户端 API 密钥以打码卡片显示（需要时可复制完整 Key）；绑定编辑器带凭证和模型选择；显示账号邮箱和 Codex 套餐、7 天额度条；可从 CPA Key 备注同步名称；批量绑定支持预览、撤销和历史（保留 50 条）；批量重置额度。找不到 Key 的孤立绑定也会显示。
 - **模型价格**：LiteLLM（主）和 models.dev（补充）同步状态、搜索、手工覆盖、删除墓碑、恢复自动。
 
 ## 配置
@@ -110,7 +110,7 @@ curl -X POST "$CPA/v0/management/plugins/access-guard/native-key-bindings" \
   -H "Authorization: Bearer $MANAGEMENT_KEY" -H "Content-Type: application/json" \
   -d '{
     "id": "client-a", "name": "Client A", "enabled": true,
-    "key": "sk-an-existing-top-level-api-key",
+    "key": "sk-an-existing-client-api-key",
     "auth_ids": ["tenant-a/codex-01.json", "tenant-a/codex-02.json"],
     "model_access": {"mode": "allowlist", "models": [{"provider": "codex", "model": "gpt-5.6-luna"}]},
     "weekly_usd": 100

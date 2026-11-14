@@ -586,7 +586,7 @@ describe("NativeKeyBindingsTab copy and credential identities", () => {
     expect(container.querySelector(".native-binding-card")).toBeTruthy();
     expect(container.textContent).toContain("凭据身份加载失败");
     expect(container.textContent).toContain("轮询并发");
-    expect(container.textContent).not.toContain("顶层 Key 列表加载失败");
+    expect(container.textContent).not.toContain("API 密钥列表加载失败");
     const editButton = Array.from(container.querySelectorAll("button"))
       .find((button) => button.textContent?.includes("编辑 / 轮换"))!;
     await act(async () => { editButton.click(); await tick(); });
@@ -1063,8 +1063,8 @@ describe("NativeKeyBindingsTab", () => {
 
     expect(container.textContent).toContain("Client A");
     expect(container.textContent).toContain("sk-ab...wxyz");
-    expect(container.textContent).toContain("仅用于 CPA 顶层 api-keys");
-    expect(container.textContent).toContain("请在 CPA 顶层 api-keys 中移除它");
+    expect(container.textContent).toContain("仅用于 CPA 的客户端 API 密钥（access.api-keys）");
+    expect(container.textContent).toContain("请在 CPA 客户端 API 密钥中移除它");
     expect(container.textContent).toContain("该 Key 仍然有效");
     expect(container.textContent).toContain("恢复默认/自由调度");
     const bindButton = Array.from(container.querySelectorAll("button"))
@@ -1120,7 +1120,7 @@ describe("NativeKeyBindingsTab", () => {
     });
 
     expect(container.querySelectorAll('[data-testid="native-key-row-unbound"]')).toHaveLength(3);
-    expect(container.textContent).toContain("共 3 个顶层 Key · 0 个已配置绑定");
+    expect(container.textContent).toContain("共 3 个 API 密钥 · 0 个已配置绑定");
     for (const preview of previews) expect(container.textContent).toContain(preview);
     for (const secret of secrets) {
       expect(container.textContent).not.toContain(secret);
@@ -1554,8 +1554,8 @@ describe("NativeKeyBindingsTab", () => {
     });
 
     expect(container.querySelectorAll('[data-testid="native-key-row-orphan"]')).toHaveLength(1);
-    expect(container.textContent).toContain("顶层已删除");
-    expect(container.textContent).toContain("已不在 CPA 顶层 api-keys 中");
+    expect(container.textContent).toContain("已从 CPA 删除");
+    expect(container.textContent).toContain("已不在 CPA 的客户端 API 密钥中");
     expect(container.textContent).toContain("Client A");
   });
 
@@ -1569,8 +1569,8 @@ describe("NativeKeyBindingsTab", () => {
     });
 
     expect(container.querySelector('[role="alert"]')?.textContent).toContain("management unavailable");
-    expect(container.textContent).toContain("顶层 Key 列表加载失败");
-    expect(container.textContent).not.toContain("CPA 尚未配置顶层 API Key");
+    expect(container.textContent).toContain("API 密钥列表加载失败");
+    expect(container.textContent).not.toContain("CPA 尚未配置 API 密钥");
     expect(apiMocks.fetchNativeKeyBindingCatalog).not.toHaveBeenCalled();
   });
 });

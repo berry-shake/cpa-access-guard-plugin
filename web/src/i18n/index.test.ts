@@ -31,7 +31,7 @@ describe("translate", () => {
   it("interpolates {{name}} placeholders", () => {
     _resetLocale("en");
     expect(translate("mapping.native.toggleLabel", { id: "team-a" })).toBe("Toggle binding team-a");
-    expect(translate("mapping.native.topLevelKeyName", { index: 3 })).toBe("Top-level API key 3");
+    expect(translate("mapping.native.topLevelKeyName", { index: 3 })).toBe("API key 3");
   });
 
   it("handles zh-CN <-> zh-TW divergence (simplified vs traditional)", () => {
@@ -42,7 +42,7 @@ describe("translate", () => {
   });
 
   it.each(["zh-CN", "zh-TW", "en", "ru"] as const)(
-    "fully translates the top-level key catalog UI in %s",
+    "fully translates the API key catalog UI in %s",
     (locale) => {
       _resetLocale(locale);
       for (const key of [
@@ -95,7 +95,7 @@ describe("translate", () => {
     ["en", "remains valid", "default/free scheduling"],
     ["ru", "действительн", "стандартной/свободной диспетчеризации"],
   ] as const)(
-    "states that disable/delete keeps the top-level key active in %s",
+    "states that disable/delete keeps the API key active in %s",
     (locale, validFragment, schedulingFragment) => {
       _resetLocale(locale);
       for (const key of [
