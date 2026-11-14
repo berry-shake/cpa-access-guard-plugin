@@ -1,9 +1,9 @@
 # Example CLIProxyAPI snippet for Access Guard.
 # Replace placeholders. Do not commit real secrets or production hosts.
 
-# Required for native-key auth-file isolation. When enabled, CPA's
+# Required for native-key credential isolation. When enabled, CPA's
 # Antigravity credits fallback bypasses plugin Scheduler selection and can
-# choose an auth outside the binding group.
+# choose a credential outside the binding.
 quota-exceeded:
   antigravity-credits: false
 
@@ -14,20 +14,19 @@ plugins:
     access-guard:
       enabled: true
       # CPA activates only the highest-priority Scheduler plugin. Keep this
-      # above any other Scheduler when auth-file isolation is required.
+      # above any other Scheduler when credential isolation is required.
       # Native-key bindings require the normal scheduler.pick path with
       # caller_scope metadata. Do not run CPA with -home-jwt (Home scheduling),
       # or use Alpha Search, Codex Live/Realtime, direct plugin-executor, or
       # another special path that bypasses Scheduler or omits caller_scope.
       priority: 100
-      # Runtime source of truth once created (keys, native-key bindings,
-      # aliases, classify rules, usage).
+      # Runtime source of truth once created (native-key bindings, usage).
       # Relative paths resolve against the CPA process working directory, not
       # the plugin directory. Prefer an absolute, backed-up path in production.
       state_file: "cpa-access-guard-state.json"
-      # Standalone model price catalog (USD per 1M tokens). Billing falls back
-      # here when an alias has no prices. Relative paths resolve like state_file.
-      # Omit to place cpa-access-guard-model-pricing.json next to state_file.
+      # Standalone model price catalog (USD per 1M tokens) used to bill
+      # native-key usage. Relative paths resolve like state_file. Omit to place
+      # cpa-access-guard-model-pricing.json next to state_file.
       pricing_file: "cpa-access-guard-model-pricing.json"
       # Dual-source catalog refresh: LiteLLM is primary and models.dev fills
       # only model IDs absent from LiteLLM. Always runs at startup, then every
@@ -37,86 +36,32 @@ plugins:
       #   litellm_url: "https://cdn.jsdelivr.net/gh/BerriAI/litellm@main/model_prices_and_context_window.json"
       #   models_dev_url: "https://models.dev/api.json"
 
-      # Prefer creating keys/native bindings/aliases/classify rules via the Web
-      # UI or Management API.
-      # Seed keys below are mainly for first boot when state_file does not exist.
-      keys:
-        - id: "team-a"
-          name: "Team A"
-          enabled: true
-          key_hash: "sha256:replace-with-hash"
-          key_preview: "cpa_abc...xyz"
-          rpm: 60
-          # Either bind models directly…
-          models:
-            - alias: "fast"
-              provider: "codex"
-              target_model: "gpt-5.4-mini"
-              group: "free" # built-in tier; custom groups use classify:name
-            - alias: "compat-demo"
-              provider: "cerebras" # openai-compatibility channel name
-              target_model: "gpt-oss-120b"
-          # …or reference global aliases created in the UI / POST /aliases:
-          # aliases:
-          #   - alias: "cheap-chat"
-
-      # Optional first-boot global alias seed. Token prices default to
-      # pricing_mode: auto and may be refreshed from the model catalog. Use
-      # pricing_mode: manual to preserve explicitly configured alias prices.
-      # aliases:
-      #   - alias: "cheap-chat"
-      #     pricing_mode: "manual"
-      #     targets:
-      #       - provider: "codex"
-      #         target_model: "gpt-5.4-mini"
-      #     input_price_per_million: 0.75
-      #     output_price_per_million: 4.5
-
-      # Optional first-boot seed for keys that remain in CPA's top-level
-      # `api-keys`. Do not put the plaintext key here. The caller_scope is:
-      # SHA-256("cli-proxy-api:caller-scope:v1\\x00" + trim(api-key)), encoded
-      # as 64 lowercase hex characters. The Management API/UI computes this
-      # automatically and persists only the scope plus a redacted preview.
-      # Once state_file exists, its native_key_bindings array is authoritative.
-      # Prefer the API/UI: a YAML-seeded caller_scope can be returned by CPA's
-      # generic, Management-key-protected plugin-config endpoint.
-      # Keep this seed commented unless you have computed a real 64-character
-      # lowercase caller_scope. The Web UI / Management API is safer because it
-      # accepts the plaintext key once and computes the scope automatically.
+      # Optional first-boot seed for keys in CPA's top-level `api-keys`. Prefer
+      # the Web UI / Management API: it accepts the plaintext key once and
+      # persists only the caller scope plus a redacted preview. A YAML-seeded
+      # caller_scope can be returned by CPA's generic, Management-key-protected
+      # plugin-config endpoint.
+      # caller_scope = SHA-256("cli-proxy-api:caller-scope:v1\x00" + trim(api-key))
+      # as 64 lowercase hex characters. Once state_file exists, its
+      # native_key_bindings array is authoritative.
       # native_key_bindings:
       #   - id: "native-client-a"
       #     name: "Native Client A"
       #     enabled: true
       #     caller_scope: "0000000000000000000000000000000000000000000000000000000000000000" # synthetic example only
       #     key_preview: "sk-nati...ent-a"
-      #     group: "classify:client-a"
+      #     # Exact, case-sensitive Scheduler auth IDs from /management/auth-files.
+      #     auth_ids:
+      #       - "tenant-a/codex-01.json"
+      #       - "tenant-a/codex-02.json"
+      #     # Optional rotation among the highest-priority bound credentials.
+      #     round_robin: false
       #     model_access:
       #       mode: "allowlist" # "all" or "allowlist"
       #       models:
       #         - provider: "codex"
       #           model: "gpt-5.6-luna"
-      #   # Direct mode is an alternative to group; do not set both. Values are
-      #   # exact, case-sensitive Scheduler Auth IDs from /management/auth-files.
-      #   - id: "native-client-b"
-      #     name: "Native Client B"
-      #     enabled: true
-      #     caller_scope: "1111111111111111111111111111111111111111111111111111111111111111" # synthetic example only
-      #     key_preview: "sk-nati...ent-b"
-      #     auth_ids:
-      #       - "tenant-b/codex-01.json"
-      #       - "tenant-b/codex-02.json"
-      #     # Optional per-key rotation; omitted/false preserves existing routing.
-      #     # Use equal credential priorities to include all bound credentials.
-      #     round_robin: false
-      #     model_access:
-      #       mode: "all"
-
-      # The custom group above should classify the exact Scheduler auth IDs
-      # allowed for this native key. Despite the historical field name,
-      # `filename` matches CPA's auth ID (which may include a subdirectory).
-      classify_rules:
-        - name: "client-a-auth-files"
-          field: "filename"
-          pattern: "^(?:tenant-a/codex-01\\.json|tenant-a/codex-02\\.json)$"
-          group: "client-a"
-          enabled: true
+      #     # Optional limits; 0 or omitted = unlimited.
+      #     rpm: 60
+      #     daily_usd: 0
+      #     weekly_usd: 100

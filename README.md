@@ -1,8 +1,6 @@
 # Access Guard
 
-Downstream **API key policy** plugin for [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI).
-
-In plain words: you issue your own `cpa_…` keys to clients. Each key only sees the models you allow, can be rate-limited and budget-limited, and is routed to real CPA upstream providers (Codex, Claude, OpenAI-compat channels, etc.). CPA’s top-level native `api-keys` can also be bound to specific auth-file groups — **do not put plugin-issued keys into `api-keys`**, or you bypass the plugin-key model, RPM, and budget policies.
+Binds [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) top-level `api-keys` to exact credentials, with per-key model access, RPM / USD limits and usage billing.
 
 | | |
 |---|---|
@@ -12,534 +10,120 @@ In plain words: you issue your own `cpa_…` keys to clients. Each key only sees
 | **Lineage** | Derived from [origin652/cpa-plugin-key-policy](https://github.com/origin652/cpa-plugin-key-policy) under the MIT license |
 | **中文说明** | [README.zh-CN.md](./README.zh-CN.md) |
 
-**v0.4.4-fork.24** syncs server-side native API key notes from compatible CPA forks. Open or refresh the Native Keys page to use CPA notes as display names and save them over existing binding names. When a key has no CPA note, its saved name remains editable and new bindings can start blank. Stock CPA continues to support manual names.
+## v0.4.4-fork.26: native keys only
 
-**v0.4.4-fork.23:** fixes the plugin page asking for the management password on every refresh after the official CPA panel switched to `enc::v2::` storage. The official panel and CPAMP share the `enc::v2::` prefix but use different obfuscation keys; the plugin now recognizes both, and legacy v1 remains supported. The official panel discards old-format logins when it upgrades, so if the password is still requested, log in to the panel once more with **Remember password** enabled.
+fork.26 removes **downstream keys**, **alias mapping** and **credential classification**, and binds native keys to **exact credentials** only:
 
-**v0.4.4-fork.22:** fixes `503 no auth available` when an unrelated higher-priority credential hides a bound supply before plugin selection. On compatible CPA hosts, Access Guard requests available candidates across priority tiers, applies credential restrictions first, and then chooses the highest priority within the allowed pool. Ordinary unbound keys retain CPA scheduling and session affinity.
+- The plugin no longer registers frontend auth, the model router or the response interceptor. CPA stops sending full request bodies (and non-stream response bodies) to the plugin; each request costs one small `scheduler.pick` and one `usage.handle` call.
+- `scheduler.pick` decodes only candidate ID / provider / priority / status. Usage is written to `state_file` only after it changed, instead of every 15 s. Pricing catalogs are decoded as a stream, and the memory used by a sync is returned right away. Built with Go 1.26.
+- On first start the state file is rewritten without `keys`, `aliases` and `classify_rules`, and usage of removed downstream keys is dropped. Price rows that came from aliases stay as protected manual rows.
+- A binding saved with a credential group (built-in tier or `classify:`) still loads but **rejects every request (503)** until you select credentials again; the page shows the old group next to the prompt. Batch history that would restore a group is refused (`group_unsupported`).
+- Downgrading to fork.25 keeps exact-credential bindings working: their encoded fail-closed group is still written.
 
-**v0.4.4-fork.21:** correctly separates configured AI-provider supplies from authentication files on newer CPA versions. Native-key pickers and cards display recognizable names such as Codex #1 / #2 while preserving runtime IDs, models, and status. Empty configuration and failed loading are distinguished, and saved bindings survive refresh failures. Existing provider routing, OAuth isolation, billing, and quota timing are unchanged.
-
-**v0.4.4-fork.20:** native-key weekly quotas start their seven-day period when a single or batch quota reset succeeds. The reset time is persisted and displayed immediately, even with zero requests. Refreshing, restarting, or delaying the first request does not move the deadline; idle periods advance in exact seven-day intervals. Older releases did not retain manual reset timestamps, so reset once after upgrading to establish the new schedule.
-
-**v0.4.4-fork.19:** reset quotas for all current native-key bindings or a selected subset from one dialog. The reset has the same scope as each card's existing action: RPM, daily/weekly spend, calls, tokens, and model usage. Configured limits, credential restrictions, model permissions, enabled state, round-robin settings, and binding history remain unchanged.
-
-**v0.4.4-fork.18.1:** restores automatic login inside CPAMP panels that save credentials in `enc::v2::` format, while retaining legacy v1 support. Saved credentials are verified before the plugin publishes an authenticated session, so an expired or invalid password returns to the login screen without repeated verification. The panel must be same-origin with **Remember password** enabled; the plugin never creates another persisted copy of the credential.
-
-**v0.4.4-fork.18:** batch-bind all current native keys or a selected subset to one or more credentials, preview changes, undo the last batch, and restore earlier operations from persistent history. Existing bindings keep their round-robin setting, model permissions, limits, enabled state, and usage. Phone layouts expose all five navigation destinations inside CPA, collapse the long help text, and improve touch controls. Billing formulas and credential scheduling are unchanged. See [Batch binding and history restore](#batch-binding-and-history-restore) for restore boundaries.
-
-**v0.4.4-fork.17:** native-key cards use a separate account panel on the right for emails and recognized Codex plans. Long lists scroll within a bounded height, and narrow cards can expand or collapse the accounts. Plans come from existing CPA credential data; missing or unknown values stay hidden, and Pro is never inferred to mean Pro5x / Pro20x. Complete-key copying and classification-group display are retained.
-
-**Routing inherited from v0.4.4-fork.15:** per-native-key Concurrent round robin, off by default. Session-affinity changes and single-credential optimizations are deferred. With the switch off, multi-credential bindings retain highest-priority selection and use the lowest Auth ID to break ties; they do not gain CPA session affinity. Single-credential bindings retain their existing path. Unbound native keys keep CPA's native scheduling and affinity. No CPA SDK dependency or request interceptor/lifecycle hooks are added.
-
----
-
-## What it does (human version)
-
-1. **Issue keys** — create many downstream keys; each has an allow-list of models (or shared aliases).
-2. **Route** — client calls with alias name `fast`; plugin rewrites to e.g. `codex` + `gpt-5.4-mini`.
-3. **Limit** — per-key RPM, optional daily/weekly USD caps, token or per-call billing.
-4. **Isolate credentials (tiers / groups)** — pin a request to Codex free/team/… or to a **custom classify group** so it never lands on the wrong auth file.
-5. **Multi-target aliases** — one alias can point at several backends (priority or round-robin).
-6. **Bind native CPA keys** — retain top-level `api-keys` authentication while limiting each key to auth files or configured AI-provider credentials.
-7. **Web UI** — manage keys, native-key bindings, global aliases, and credential classification inside CPA.
-
----
-
-## Concepts
-
-### Downstream key
-
-A plugin-owned secret (`cpa_…`). Authenticated only by this plugin. Holds:
-
-- allowed **models** and/or **aliases**
-- RPM
-- optional daily / weekly dollar limits
-- optional `allow_models_endpoint` (see below)
-
-### Alias (global mapping table)
-
-A reusable name like `fast` that expands to one or more **targets**:
-
-| Field | Meaning |
-|--------|---------|
-| `provider` | CPA provider id (`codex`, `claude`, or an openai-compatibility **name** such as `cerebras`) |
-| `target_model` | Real upstream model id |
-| `group` | Optional credential filter (see [Credential groups](#credential-groups-tiers--classify)) |
-| `dispatch` | `priority` (always first usable target) or `round-robin` |
-| billing | `tokens` (per-million prices) or `per_call` (fixed USD) |
-
-Keys can **reference** aliases instead of duplicating targets. Multi-target aliases expand to several rules with the same alias name; auth and routing share one pick per request so the `group` filter matches the chosen target.
-
-### Credential groups (tiers + classify)
-
-Two sources of “which auth file may serve this request”:
-
-| Kind | How it appears in the picker | Stored in mapping as |
-|------|------------------------------|----------------------|
-| **Built-in tier** (Codex `plan_type`, Antigravity `tier`) | e.g. Free tier / Team | bare name: `free`, `team`, `supported` |
-| **Custom classify rule** | e.g. **Custom · vip** | prefixed: `classify:vip` |
-
-**Runtime rule on the normal Scheduler path:** if a mapping sets a group, the plugin scheduler **only** picks auth files in that group. No match → hard failure (`auth_not_found`); this plugin does not fall back to another tier. CPA's special Antigravity credits fallback bypasses the Scheduler, so strict isolation also requires `quota-exceeded.antigravity-credits: false`.
-
-**Custom classification** (Web UI → Mapping → Credential Classification):
-
-- Match auth-file fields (`filename`, `provider`, `plan_type`, `tier`, …) with a regex.
-- Assign a **group name** you choose (stored bare on the rule).
-- Catalog and mappings use `classify:<name>` so it never collides with built-in `free` / `team`.
-- One file can match **multiple** custom groups (shown under each).
-- Rules are combined as a union. Multiple rules assigning the same group widen that group's allow-list; use one anchored auth-ID regex and avoid overlapping rules for strict isolation.
-- If no custom rule matches → built-in tier (for Codex/Antigravity) or flat (no group) for other auth-file providers.
-- OpenAI-compat / API-key channels stay **flat** (no groups).
-
-Upgrade note: from v0.5.0, `supported` is only the built-in unknown tier for Codex/Antigravity. If an older hand-written mapping assigned `group: supported` to Claude, Gemini, OpenAI-compatible, or another non-tier provider, it now fails with `auth_not_found`; remove that group to restore flat scheduling, or replace it with an explicit `classify:<name>` group.
-
-#### What “custom field name” actually reads
-
-It is not an arbitrary auth-JSON field selector. The exact runtime mapping is:
-
-| UI field | Runtime value |
-|----------|---------------|
-| `filename` | `SchedulerAuthCandidate.ID` — CPA's **Auth ID**, not the display FileName |
-| `id` | Exactly the same as `filename` |
-| `provider` | The candidate's runtime provider; openai-compat may use the internal `openai-compatible-<name>` key |
-| Any other lowercase field | `SchedulerAuthCandidate.Attributes[field]` |
-
-Custom names are trimmed and lowercased, then looked up as an exact Attribute key. They do **not** read `Auth.Metadata` / `Candidate.Metadata`, and adding an arbitrary top-level field to an auth JSON file does not automatically make it classifiable. Common—but source/version-dependent—safe Attributes include:
+## How it works
 
 ```text
-plan_type  tier  auth_kind  note  priority  weight  websockets
-path  source  source_backend  config_index  runtime_only
-codex_alpha_search  plugin_virtual  virtual_source  auth_index_seed
+top-level api-key → CPA native auth → caller_scope (SHA-256, one-way)
+                  → binding → model_access AND auth_ids → RPM / USD quota
+                  → pick only among the bound credentials
 ```
 
-Actual keys depend on the credential source, provider plugin, and CPA version. Fields such as `email` or `project_id` may exist only in Metadata/Label and must not be assumed to reach the Scheduler. CPA also removes Attributes whose names contain any of these sensitive fragments, so they cannot drive runtime classification:
+The plugin stores only the caller scope, a redacted key preview and the policy — never the plaintext key. Keys stay in CPA's `api-keys`; a binding is authorization, not authentication.
+
+| Request | Result |
+|---|---|
+| Bound key, allowed model, usable bound credential | Highest priority bound credential (lowest ID on ties), or round robin when enabled |
+| Bound key, model outside `model_access` | `model_not_allowed` / 403, no RPM spent |
+| Bound key over RPM / daily / weekly USD | `quota_exceeded` / 429 |
+| Bound key, no usable bound credential | `auth_not_found` / 503; never falls back outside the binding |
+| Bound key, legacy group binding | `auth_not_found` / 503 until credentials are reselected |
+| Unbound key or disabled binding | CPA's own scheduling |
+
+- `model_access.mode: all` allows current and future models; `allowlist` allows only exact provider + model pairs (a thinking suffix like `(high)` inherits the base model). An empty allow-list denies everything. New bindings in the UI start with an empty allow-list.
+- **Round robin** (`round_robin`, default off) rotates among the highest-priority usable bound credentials, with a cursor per key, provider pool and model. Give credentials equal priority to rotate across all of them.
+- On CPA versions supporting `scheduler_across_priorities`, the plugin sees candidates from every priority tier and filters by the binding before choosing a priority.
+- `auth_ids` are exact, case-sensitive Scheduler auth IDs (auth files and configured AI-provider supplies such as Codex API keys). Missing IDs stay visible; if all are gone, requests fail closed.
+- Usage is billed from CPA's `usage.handle` token counts with the model price catalog (upstream model first, then the requested model). Unpriced models count calls and tokens at $0.
+- Weekly quotas run in seven-day periods starting from the last manual reset; daily usage resets at UTC midnight.
+
+**Requirements and limits**
+
+- CLIProxyAPI **v7.2.101 or newer** (Scheduler metadata carries `caller_scope`).
+- Access Guard must be the highest-priority Scheduler plugin.
+- Set `quota-exceeded.antigravity-credits: false`; that fallback bypasses plugin scheduling.
+- Not enforced on paths that skip `scheduler.pick` or omit `caller_scope`: Home scheduling (`-home-jwt`), direct plugin executors, Alpha Search, Codex Live/Realtime.
+- If the plugin is disabled, unloaded or fails to load, CPA may still accept the key with default scheduling.
+- `/v1/models` cannot be filtered per key; execution is enforced at `scheduler.pick`.
+- Top-level config and plugin state are separate. For strict rotation: bind the new key, add it to CPA, test it, remove the old key, then delete the old binding.
+
+## Web UI
 
 ```text
-api_key  apikey  token  secret  cookie  credential  password
-storage  authorization  auth_header  proxy_url
+http://<cpa-host>:<port>/v0/resource/plugins/access-guard/index.html
 ```
 
-Example by credential kind (only when the candidate really exposes `auth_kind`):
+Log in with the CPA management key. Inside a same-origin CPA or CPAMP panel with **Remember password**, the saved login is reused (`enc::v1::` and both `enc::v2::` formats).
 
-```json
-{
-  "name": "oauth-only",
-  "field": "auth_kind",
-  "pattern": "^oauth$",
-  "group": "oauth-only",
-  "enabled": true
-}
-```
-
-Example using `note` (only when the real Scheduler candidate exposes that Attribute; the management page may show a Metadata fallback instead):
-
-```json
-{
-  "name": "tenant-a-note",
-  "field": "note",
-  "pattern": "^tenant-a$",
-  "group": "tenant-a",
-  "enabled": true
-}
-```
-
-Patterns use Go RE2: matching is case-sensitive and substring-based by default; use `^...$` for a full value and `(?i)^...$` for case-insensitive matching. RE2 does not support lookahead, lookbehind, or backreferences. The Web UI now validates with the server's RE2 engine on save instead of substituting JavaScript RegExp semantics.
-
-The Web UI shows match counts only for `filename` / `id`, `provider`, `plan_type`, `tier`, `path`, and `weight`. CPA's `/auth-files` response may synthesize management fields such as `note`, `priority`, and `websockets` from Metadata even when the Scheduler candidate has no same-named Attribute. Those and other custom fields therefore show “Preview unavailable”; a value visible on the management page is not runtime-classification proof. Preview also ignores credential health, model capability, priority pre-filtering, and which Scheduler plugin wins. Verify the final isolation boundary with the `auth_id` from a real request.
-
-For a strict file allow-list, prefer `filename` and anchor the exact `id` values returned by `/v0/management/auth-files`:
-
-```json
-{
-  "name": "tenant-a-files",
-  "field": "filename",
-  "pattern": "^(?:tenant-a/codex-01\\.json|tenant-a/codex-02\\.json)$",
-  "group": "tenant-a",
-  "enabled": true
-}
-```
-
-Configure classify rules in the UI, or via management API (`/classify-rules`, `/classify-preview`, `/catalog`). You do not need to hand-edit state JSON for normal use.
-
-### CPA-native top-level key bindings
-
-Native-key bindings are deliberately separate from plugin-owned downstream keys:
-
-| Key type | Authentication owner | What this plugin enforces |
-|----------|----------------------|---------------------------|
-| Plugin key (`cpa_…` or a plugin-owned custom `sk-…`) | `access-guard` | model/alias policy, RPM, budgets, billing, and optional credential group |
-| CPA top-level `api-keys` entry | CPA's built-in config API-key provider | model access, auth-file group or exact Auth ID allow-list, plus optional RPM/USD limits |
-
-After CPA authenticates a native key, it derives a stable one-way `caller_scope`. The plugin persists only that scope, a redacted preview, and the credential restriction — never the plaintext top-level key:
-
-```text
-top-level api-key → CPA native auth → caller_scope
-                  → native binding → model_access AND (group or auth_ids)
-                  → pick only within the allowed credentials
-```
-
-Requirements and behavior:
-
-- Requires CLIProxyAPI **v7.2.101 or newer**, where Scheduler metadata includes `caller_scope`.
-- The Web UI loads the current top-level list from CPA's Management-key-protected `GET /v0/management/api-keys` endpoint and shows every key as a redacted row, including keys with no binding. A binding whose key was removed from the host remains visible as an orphan record.
-- Selecting an unbound row avoids manual copy/paste. Cards remain redacted; **Copy full key** copies the complete current host key. Orphan bindings cannot recover plaintext and cannot be copied. Plaintext stays in page memory and user-initiated copy operations; it is never placed in URLs, browser storage, or plugin state, or returned by plugin APIs. The HTTP clipboard fallback clears and removes its temporary input immediately.
-- Wide cards list bound credential emails in a separate account panel on the right, falling back to a name or exact Auth ID when email is absent. Lists scroll above a 240px height limit; narrow cards start collapsed and support keyboard expansion and scrolling. Group bindings reuse the plugin's classification rules to list matching credentials and report when a reliable preview is unavailable. These are binding/group members; actual requests remain subject to model, status, and priority constraints.
-- Codex plan badges use existing CPA credential data and recognize Free, Plus, Team, Pro, Enterprise, and Edu; they are not a live subscription lookup. Missing, unknown, or non-Codex plans have no badge. Pro is not guessed to mean Pro5x / Pro20x without a reliable multiplier field.
-- Phone layouts display all five navigation destinations at the top, including inside the CPA iframe. The native-key explanation starts collapsed with its essential disable-binding notice still visible; batch actions and card controls use touch-sized layouts.
-- The key must remain in CPA's top-level `api-keys`; a binding is authorization metadata, not authentication.
-- A bound, enabled key with no usable candidate in its group or direct allow-list fails closed with `auth_not_found` (503). It never falls back outside the restriction.
-- `model_access.mode: all` permits current and future models. `allowlist` permits only the exact, case-insensitive `provider` + base-model pairs in `models`; the same model name under another provider remains denied. A terminal CPA thinking suffix such as `(high)` inherits the base model permission.
-- An empty model allow-list intentionally denies every model. A disallowed request returns `model_not_allowed` (403) before RPM is consumed or an upstream credential is selected. Candidate providers are checked again so a multi-provider route cannot bypass the allow-list.
-- Existing pre-fork.13 bindings with no `model_access` field migrate to `all`, preserving their prior behavior. New Web-UI bindings start as an empty allow-list and must be checked explicitly, or switched to **All models**.
-- When a caller scope matches an enabled native binding, its group / `auth_ids` restriction takes precedence over generic Scheduler `group` metadata.
-- Unbound native keys and disabled bindings keep CPA's existing unrestricted scheduling behavior.
-- Top-level config and plugin state are not updated atomically. For a strict-isolation rotation, create a second temporary binding for the new key, add and test that key in CPA, remove the old top-level key, and only then delete the old binding.
-- Use a high-entropy native key and do not reuse the same plaintext as a plugin-owned key or another authentication principal. CPA's `caller_scope` identifies the principal text, but does not include the authentication-provider name.
-- CPA activates only the highest-priority Scheduler plugin. `access-guard` must be the winning Scheduler for isolation to run.
-- On CPA versions supporting `scheduler_across_priorities`, Access Guard requests available candidates from every auth-priority tier. It filters them by the binding first, then selects the highest priority inside the allowed pool. An unrelated higher-priority credential can no longer hide a bound lower-priority credential. Older hosts that ignore this capability retain their priority pre-filter; align priorities on those hosts or upgrade CPA to a version supporting the capability.
-- Native-key isolation is enforced only on CPA's normal AuthManager / `scheduler.pick` path when the request forwards `caller_scope` to the Scheduler. **CPA Home scheduling currently bypasses plugin Scheduler selection**; do not start CPA with `-home-jwt` when relying on these bindings. Direct plugin-executor, Alpha Search (`/v1/alpha/search` and `/backend-api/codex/alpha/search`), all Codex Live/Realtime routes (`/v1/live*` and `/v1/realtime*`), and any other route that bypasses `scheduler.pick` or omits `caller_scope` are unsupported.
-- Explicitly set CPA's top-level `quota-exceeded.antigravity-credits: false`. When enabled, that last-resort Antigravity credits path bypasses plugin Scheduler selection and enumerates Antigravity credentials directly, so a request can land outside the bound group. The current plugin ABI cannot enforce a binding inside that fallback.
-- If this plugin is disabled, unloaded, or fails to load, CPA may still accept the top-level key and use default scheduling. A host-enforced required-policy/fail-closed mechanism is needed if plugin failure itself must never bypass the boundary.
-- Back up `state_file` before downgrading below v0.5.0. Older releases do not understand `native_key_bindings` and can discard them when rewriting state.
-- Do not downgrade a state containing `model_access.mode: allowlist` to fork.12 or older: those builds ignore and may erase the model policy, which makes the binding unrestricted by model. Switch the binding off or remove the top-level key before such a downgrade, and keep a backup.
-
-For normal operation, create bindings through this plugin's Management API or Web UI. A first-boot YAML seed necessarily contains `caller_scope`; CPA's generic, Management-key-protected plugin-config endpoint can return that YAML field. The dedicated native-binding list API and UI never return it.
-
-Each binding must use exactly one credential restriction:
-
-- **Credential group** uses the same syntax as alias targets: built-ins such as `free`, `team`, `plus`, or `supported`, and `classify:<name>` for custom groups. It is best for a dynamically maintained pool shared by multiple keys.
-- **Direct credentials** persist one or more exact, case-sensitive Scheduler Auth IDs without creating a classify rule. The picker separates auth-directory credentials from configured CPA AI-provider supplies, including Codex API-key services and OpenAI-compatible channels. Both sources can be selected together. This is best for a small per-key allow-list. Selection defines the allowed pool, not its rotation order, and new credentials are not added automatically.
-
-Native bindings have an optional **Concurrent round robin** switch (`round_robin`, default `false`). Enable it on a dedicated translation key and keep its model allow-list restricted to the desired model. Requests rotate among that binding's eligible credentials at the highest available priority within the binding, with a separate cursor for each caller scope, provider pool, and model. Concurrent requests can execute on different credentials; one request still selects only one credential at a time. Set bound credentials to the same priority if all should participate in normal rotation; lower-priority members remain fallback candidates when the higher tier is unavailable.
-
-Rotation follows the next available credential ID and continues across requests and temporary candidate changes. A direct credential joins only after it is added to the binding. Removing a credential from the binding excludes it from subsequent selections; updating a binding does not itself cancel requests already sent. The switch is persisted, while cursors live only in memory and may restart after reload. CPA still controls error classification, retries, and cooldowns; its retry-credential cap and the binding's RPM limit can restrict failover.
-
-On an enabled native binding, the switch rotates each request without pinning sessions to a credential or sending one request to several credentials at once. **When off, the binding keeps the existing highest-priority selection with the lowest Auth ID as the tie-breaker; it does not use CPA's native session-affinity selector.** Single-credential bindings keep their existing path. No global CPA routing or session-affinity setting is changed, and unbound native keys still defer to CPA. The plugin always returns an explicitly allowed credential, never delegates a restricted binding back to CPA's unrestricted pool.
-
-The Web UI reads exact runtime IDs from CPA's `/v0/management/auth-files`. Newer CPA versions include configuration-backed supplies in this directory and identify them with `concurrency_config: true`. These entries appear under AI providers; their runtime ID, provider, status, and models remain authoritative. Configuration metadata only supplements the display name and safe index of the same exact ID. A `runtime_only` flag alone does not identify an AI-provider supply.
-
-For older CPA versions that omit configured supplies from the runtime directory, an isolated browser adapter temporarily processes CPA's existing Management response, derives the exact Scheduler Auth ID with CPA's stable-ID algorithm, and verifies it while reading runtime models through `/v0/management/auth-files/models?name=<Auth ID>`. Provider API keys never enter component state, URLs, browser storage, plugin state, plugin-backend requests, or logs. Only the ID, safe display metadata, and models leave the adapter; the management response's `account` field is not used because it can contain an API key. An unverified legacy entry remains visible but cannot be selected. Failed provider reads are reported as loading errors rather than empty configuration.
-
-To bind a Codex API supply, first save its API key, service URL, and model configuration on CPA's **AI providers → Codex** page. Then edit a native-key binding, choose **Direct credentials**, refresh the credential list, and select the supply under **AI providers**. Saving a plugin binding does not create an upstream service. If CPA has no configured supplies, the picker explains where to add one.
-
-The picker never guesses identity from a display filename, array position, or masked key. If an auth file is removed, renamed, or moved—or an AI-provider key/base URL/proxy/prefix/header identity changes—its saved ID remains visible as missing so unrelated edits cannot silently change authorization. If every ID is stale, requests fail closed. Group mode can still use an anchored `filename` classify rule; despite that historical field name, it also matches the Scheduler **auth ID**, which may include a relative directory and may differ from the UI display name.
-
-Direct mode also persists a lowercase-safe redundant encoding of the exact IDs inside an internal reserved group. A legacy plugin that ignores and removes the additive `auth_ids` field still fails closed, while a fixed release can reconstruct the selection after the legacy state is rewritten. The dedicated Management API and Web UI hide that internal value. A state already reduced to the older unencoded marker cannot reveal which credentials were selected; the UI explicitly asks the operator to reselect them once and the binding remains fail-closed until repaired. Still back up `state_file` and preferably convert direct bindings to group mode before downgrading; the general default-scheduling risk when the plugin is disabled, unloaded, or fails to load remains unchanged.
-
-The model picker collapses credential-tier duplicates into one provider/model checkbox. **Select all** saves a snapshot of the current catalog; models added later remain denied until selected. Saved models missing from the current catalog stay visible and removable. CPA's plugin ABI cannot filter `/v1/models` per native key, so that endpoint may still show the global catalog; actual execution is enforced at `scheduler.pick`.
-
-#### Batch binding and history restore
-
-The native-key page provides batch binding, undo for the last batch, and binding history. Select all current host keys or a subset, choose one or more exact credential IDs, preview each change, and replace their credential restrictions in one operation.
-
-- Existing bindings retain their names, enabled state, model policies, round-robin settings, limits, and live usage. Disabled bindings stay disabled.
-- Previously unbound keys receive enabled bindings with all models, round robin off, and no additional limits, as explained in the preview. Orphan bindings are excluded.
-- Up to 50 recent batch and restore records (also bounded by a 4 MiB history size limit) persist in the plugin `state_file` together with each binding transaction. History contains no plaintext keys. Keep the same persistent file across restarts; an older plugin that rewrites state may discard history it does not understand.
-- Restore previews return the selected operation's targets to their previous credential restrictions. Restores also create reversible history. Later recorded batch changes can be crossed; conflicting manual edits, key rotation or deletion, and missing credentials block the entire restore.
-- A key that was previously unbound can return to unbound, unless later edits to its new binding's model policy, limits, or other settings would be lost. Keys added after an operation are not included in its restore.
-- Restoring a classification group restores its selector under current classification rules, not a past membership snapshot. Data changes after preview require another preview.
-
-The UI refreshes CPA's key and credential catalogs before committing. Each plugin transaction is atomic; host configuration and plugin state remain separate systems, so avoid concurrent host key or credential rotation/deletion during a batch operation.
-
-#### Batch quota reset
-
-The native-key toolbar's **Batch reset quotas** action selects all current host keys with plugin bindings by default. Search or deselect keys before confirming once. Disabled bindings are included; unbound host keys and orphan bindings are excluded. The dialog refreshes the host catalog before submission and rejects stale selected identities instead of silently adding new keys.
-
-This clears only the selected bindings' plugin RPM and usage counters, including daily/weekly dollars, calls, token totals, and model breakdowns. The saved limits and policies are preserved. It does not reset upstream account quotas or delete CPA/CPAMP request history. The reset cannot be undone through binding history. Requests completed after the reset start accumulating usage again.
-
-From fork.20, each successful manual reset also starts a new seven-day quota period immediately. All bindings in one batch share the same reset time. The next reset is seven days later, even if no request has been made; subsequent periods retain that schedule through idle weeks and restarts. Resetting manually again starts a new schedule. Daily usage still resets at UTC midnight. A failed save changes neither counters nor the schedule. Existing usage is preserved on upgrade; historical manual reset timestamps discarded by older versions cannot be recovered.
-
-The backend validates every selected binding before applying changes and persists the batch before publishing the cleared counters. Missing IDs or a persistence failure leave the entire batch unchanged. Continue using the same persistent `state_file` across restarts.
-
-### OpenAI-compatibility providers
-
-Channels under CPA `openai-compatibility` (e.g. a named proxy) use the **channel name** as `provider`. The plugin maps it to CPA’s internal key `openai-compatible-<name>` when routing. Models must be listed on that channel in CPA config, or the host reports no auth for that model.
-
----
-
-## Capabilities (plugin hooks)
-
-| Hook | Role |
-|------|------|
-| Frontend auth | Know plugin keys; enforce alias allow-list, RPM, budget; stamp route + group metadata |
-| Model router | Alias → provider + target model |
-| Scheduler | Filter auth candidates by tier / `classify:` group or exact `auth_ids` allow-list |
-| Response interceptor | Non-stream JSON: rewrite top-level `model` back to the alias |
-| Usage | Token / per-call billing into the state file |
-| Management API + embedded Web UI | Keys, native-key bindings, aliases, classify rules, status |
-
----
-
-## Build
-
-Linux `.so` needs cgo and a matching toolchain:
-
-```bash
-make test
-make build-linux          # builds web UI, then linux amd64/arm64 .so
-# or
-make web-build
-mkdir -p dist/linux/amd64
-GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -buildvcs=false -tags cshared \
-  -buildmode=c-shared -o dist/linux/amd64/access-guard.so ./cmd/cpa-access-guard
-```
-
-On Windows, build the `.so` via WSL/Linux. `go test ./...` uses a non-cgo stub so unit tests run without a shared-library toolchain.
-
-Copy the library into CPA's matching platform directory, for example
-`plugins/linux/amd64/access-guard.so`, and enable the plugin in config.
-The library basename must be `access-guard` (optionally
-`access-guard-v<version>`); putting `_linux_amd64` in the basename changes
-the plugin ID and prevents `plugins.configs.access-guard` from matching it.
-
----
+- **Native keys** — every current top-level key as a redacted card (copy the full key on demand), binding editor with credential and model pickers, account emails and Codex plans, 7-day quota bar, name sync from CPA key notes, batch binding with preview / undo / history (50 records), batch quota reset. Orphan bindings stay visible.
+- **Model pricing** — LiteLLM (primary) and models.dev (fallback) sync status, search, manual overrides, deletion tombstones and restore-automatic.
 
 ## Config
 
-Minimal shape (see also [`config.example.yaml`](./config.example.yaml)):
-
 ```yaml
 quota-exceeded:
-  # Required for native-key auth-file isolation. The Antigravity credits
-  # fallback bypasses plugin Scheduler selection when enabled.
   antigravity-credits: false
-
 plugins:
   enabled: true
   dir: "plugins"
   configs:
     access-guard:
       enabled: true
-      priority: 100 # must beat other Scheduler plugins for credential isolation
-      state_file: "cpa-access-guard-state.json"
-      pricing_file: "cpa-access-guard-model-pricing.json"
+      priority: 100
+      state_file: "/data/access-guard-state.json"
+      # pricing_file: next to state_file by default
+      # pricing_sync: {interval_hours: 24, litellm_url: ..., models_dev_url: ...}
 ```
 
-Notes:
+- Once `state_file` exists it is the source of truth for bindings, history and usage; `native_key_bindings` in YAML only seeds the first boot (see [`config.example.yaml`](./config.example.yaml)). Prefer creating bindings in the UI or API.
+- Relative paths resolve against CPA's working directory. Files are written atomically with mode `0600`. `GET …/status` shows the resolved paths.
+- Pricing syncs at startup and every 24 h. A failed source keeps its last values marked stale. Manual edits win over both sources.
 
-- If `state_file` exists, it is the source of truth for keys / native-key bindings / aliases / classify rules / usage.
-- `pricing_file` is the standalone model price catalog (USD per 1M tokens). Billing uses alias prices first and falls back to this catalog. Omit it to place `cpa-access-guard-model-pricing.json` next to `state_file`.
-- The plugin syncs two sources at startup and on a timer: [LiteLLM](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json) is primary, while [models.dev](https://models.dev) fills only model IDs absent from LiteLLM. A model known to LiteLLM but lacking a published price is marked known-unpriced and never receives a questionable fallback price.
-- `pricing_sync.interval_hours`, `pricing_sync.litellm_url`, and `pricing_sync.models_dev_url` override the default 24h interval and source URLs; legacy `pricing_sync.url` remains a models.dev URL override. If either source fails, its last successful values remain available and are marked stale instead of clearing the catalog.
-- Manual edits in Model Pricing beat both remote sources. Deletions create tombstones, so later syncs cannot resurrect the row; Restore Automatic clears the override/tombstone and immediately resyncs. Alias token prices default to `pricing_mode: auto`; select Manual Override or set `pricing_mode: manual` to preserve the prices entered on an alias.
-- Version-1 pricing files remain readable in place. Legacy rows that exactly match an incoming source are migrated to sourced automatic rows; unrecognized values stay protected as legacy manual values. Image-model source rates are displayed, but are never treated as text-token billing rates.
-- A relative `state_file` / `pricing_file` is resolved against the **CPA process working directory**, not the plugin `.so` directory. Use an absolute path in production and ensure the CPA user can write it. `GET /v0/management/plugins/access-guard/status` reports the resolved `state_file` and `pricing_file`.
-- When upgrading from `cpa-key-policy` while relying on its default relative state filename, Access Guard copies a valid sibling `cpa-key-policy-state.json` to `cpa-access-guard-state.json` once. The legacy file is retained as a recovery backup. Explicit `state_file` paths are never auto-migrated; copy those files deliberately while CPA is stopped.
-- The plugin creates the state directory with mode `0700` and atomically writes the file with mode `0600`. Back it up, and never place a plaintext top-level API key in it manually.
-- Prefer creating keys, native bindings, and aliases in the **Web UI** or Management API; seed YAML is mainly for first boot.
-- Never commit real key hashes, management secrets, or live host URLs into public docs.
+## Management API
 
----
+Base `/v0/management/plugins/access-guard`, CPA management bearer token.
 
-## Web Management UI
-
-Embedded in the plugin. After load, open:
-
-```text
-http://<your-cpa-host>:<api-port>/v0/resource/plugins/access-guard/index.html
-```
-
-Login with the CPA **management** secret (`remote-management.secret-key` / management password). A manual login stays in memory only. When embedded in a same-origin CPA or CPAMP panel with **Remember password** enabled, the plugin can restore the panel's saved login after re-entry or refresh; legacy `enc::v1::` and both the official panel's and CPAMP's `enc::v2::` storage are supported. It only reads that existing value and never persists or migrates credentials itself. CPAMP's saved administrator key is used through its configured management proxy.
-
-UI areas:
-
-| Tab / page | Use for |
-|------------|---------|
-| Keys | Create / edit / rotate / delete keys; bind models or aliases; RPM & budgets |
-| Mapping → Aliases | Global multi-target aliases, dispatch, pricing |
-| Mapping → Classification | Custom credential groups + match preview |
-| Mapping → Native key bindings | Copy complete current host keys from redacted cards; view bound credential emails; select credential restrictions; view weekly quota remaining; retain orphan bindings for review |
-| Model Pricing | LiteLLM primary and models.dev fallback status; search, manual overrides, deletion tombstones, and automatic restore |
-| Model picker | Catalog of providers; tier / **Custom · …** subgroups |
-
-Enabled native-key cards show a 7D remaining-quota bar only when a weekly USD cap is configured; an empty or zero weekly cap hides the entire block. The balance uses the plugin's billed USD usage. Green indicates more than 20% remaining, amber 5–20%, and red less than 5%; exhausted quotas show 0%. The next reset time is displayed in your browser's local timezone, including immediately after a manual reset with zero requests. If no actual reset time is available, the card shows a neutral placeholder rather than inventing a deadline. The display updates when you refresh the list, save a binding, or reset its quota.
-
-Dev UI without rebuilding the `.so`:
-
-```bash
-cd web
-npm install
-VITE_CPA_BASE=http://127.0.0.1:8317 npm run dev
-```
-
----
-
-## Management API (summary)
-
-Exact paths (no path templates). Auth: CPA management bearer token.
-
-**Keys**
-
-- `GET/POST/PATCH/DELETE …/keys` (`id` in query or body for mutate)
-- `POST …/keys/rotate?id=…`
-- `POST …/keys/reset-rpm?id=…`
-- `GET …/keys/usage?id=…`
-- `GET …/status`
-
-**Aliases**
-
-- `GET/POST/DELETE …/aliases`
-
-**Model pricing**
-
-- `GET/POST/DELETE …/pricing`
-- `POST …/pricing/restore-auto`
-- `GET …/pricing-sync`
-- `POST …/pricing-sync/run`
-
-**Classify**
-
-- `GET/POST/DELETE …/classify-rules`
-- `POST …/classify-rules/reorder`
-- `POST …/classify-preview` — de-duplicated group unions plus per-rule `rule_matches`; explicit draft rules are validated strictly by server-side Go/RE2
-- `POST …/catalog` — body: auth-file credentials + models; response: picker `entries` with `classify:` groups
-
-**CPA-native key bindings**
-
-- `GET/POST/PATCH/DELETE …/native-key-bindings`
-- `POST …/native-key-bindings/catalog` — Management-UI helper: accepts the current `api_keys` array in a JSON body, matches bindings by exact `caller_scope`, and returns only redacted entries plus orphan bindings. It never returns the supplied keys or caller scopes.
-- `POST …/native-key-bindings/reset-quota` — Reset one binding's plugin quota counters using `{ "id": "binding-id" }`.
-- `POST …/native-key-bindings/reset-quota-batch` — Reset selected bindings using a nonempty `{ "ids": ["binding-a", "binding-b"] }` array (maximum 4096 entries). Returns `{ "reset": true, "ids": [...], "count": N }`; IDs are normalized and deduplicated. Omitting IDs never means reset all.
-- `GET …/native-key-bindings/history` — Recent batch and restore operations, newest first, with redacted changes only.
-- `POST …/native-key-bindings/batch-preview` / `batch` — Preview or atomically commit replacement restrictions using current `api_keys`, `selected_indices`, target `auth_ids`, complete `available_auth_ids`, and `catalog_complete`. A commit also requires the preview's `expected_revision`.
-- `POST …/native-key-bindings/rollback-preview` / `rollback` — Preview or commit a restore selected by `operation_id`, with current host keys and credential inventory. Commits require `expected_revision`; conflicts return 409 without partially applying the operation.
-
-Create a binding (the plaintext key appears only in this request; neither it nor the full caller scope is returned):
+| Route | Purpose |
+|---|---|
+| `GET /status` | Runtime status and resolved file paths |
+| `GET/POST/PATCH/DELETE /native-key-bindings` | List / create / update / delete (`id` in body or query) |
+| `POST /native-key-bindings/catalog` | Match current `api_keys` to bindings; returns redacted entries and orphans |
+| `POST /native-key-bindings/sync-names` | Copy CPA key notes into binding names |
+| `POST /native-key-bindings/reset-quota`, `/reset-quota-batch` | Reset RPM and usage for one / selected bindings |
+| `GET /native-key-bindings/history` | Batch and restore history |
+| `POST /native-key-bindings/batch-preview`, `/batch` | Preview / commit a credential replacement |
+| `POST /native-key-bindings/rollback-preview`, `/rollback` | Preview / commit a restore |
+| `GET/POST/DELETE /pricing`, `POST /pricing/restore-auto` | Model price catalog |
+| `GET /pricing-sync`, `POST /pricing-sync/run` | Sync status / run now |
 
 ```bash
 curl -X POST "$CPA/v0/management/plugins/access-guard/native-key-bindings" \
-  -H "Authorization: Bearer $MANAGEMENT_KEY" \
-  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $MANAGEMENT_KEY" -H "Content-Type: application/json" \
   -d '{
-    "id": "client-a-native",
-    "name": "Client A",
-    "key": "sk-replace-with-an-existing-top-level-api-key",
-    "enabled": true,
-    "group": "classify:client-a",
-    "model_access": {
-      "mode": "allowlist",
-      "models": [{"provider": "codex", "model": "gpt-5.6-luna"}]
-    }
+    "id": "client-a", "name": "Client A", "enabled": true,
+    "key": "sk-an-existing-top-level-api-key",
+    "auth_ids": ["tenant-a/codex-01.json", "tenant-a/codex-02.json"],
+    "model_access": {"mode": "allowlist", "models": [{"provider": "codex", "model": "gpt-5.6-luna"}]},
+    "weekly_usd": 100
   }'
 ```
 
-For direct credentials, send `auth_ids` instead of `group`:
+The key is used once to derive the caller scope and is never returned. In PATCH, omit `key` to keep the scope; a non-empty `auth_ids` replaces the credentials. Sending `group` returns `400 group_unsupported`.
+
+## Build
 
 ```bash
-curl -X POST "$CPA/v0/management/plugins/access-guard/native-key-bindings" \
-  -H "Authorization: Bearer $MANAGEMENT_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "id": "client-b-native",
-    "name": "Client B",
-    "key": "sk-replace-with-an-existing-top-level-api-key",
-    "enabled": true,
-    "auth_ids": [
-      "tenant-b/codex-01.json",
-      "tenant-b/codex-02.json"
-    ]
-  }'
+make test
+make build-linux   # web UI, then linux amd64/arm64 .so
 ```
 
-Rotate the key or change the binding:
-
-```bash
-curl -X PATCH "$CPA/v0/management/plugins/access-guard/native-key-bindings" \
-  -H "Authorization: Bearer $MANAGEMENT_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "id": "client-a-native",
-    "key": "sk-the-new-top-level-key",
-    "group": "classify:client-a",
-    "enabled": true
-  }'
-```
-
-Omit `key` (or send an empty string) in PATCH to keep the existing scope. A non-empty `auth_ids` atomically switches to direct mode and clears the business group; a non-empty `group` switches back and clears `auth_ids`; sending both non-empty returns `400`. Directly replacing `key` changes the bound scope immediately and is not atomic with CPA's top-level configuration. For strict isolation, use this safe sequence instead:
-
-1. Create a second temporary binding for the new key and the same group / `auth_ids` restriction.
-2. Add the new key to CPA's top-level `api-keys`.
-3. Send a real request with the new key and verify the selected `auth_id` belongs to the restriction.
-4. Remove the old key from CPA's top-level `api-keys`.
-5. Delete the old binding.
-
-Create key (plain key returned **once**):
-
-```bash
-curl -X POST "$CPA/v0/management/plugins/access-guard/keys" \
-  -H "Authorization: Bearer $MANAGEMENT_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "id": "team-a",
-    "name": "Team A",
-    "rpm": 60,
-    "models": [
-      {"alias":"fast","provider":"codex","target_model":"gpt-5.4-mini","group":"free"}
-    ]
-  }'
-```
-
-Create a multi-target alias:
-
-```bash
-curl -X POST "$CPA/v0/management/plugins/access-guard/aliases" \
-  -H "Authorization: Bearer $MANAGEMENT_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "alias": "cheap-chat",
-    "dispatch": "priority",
-    "billing_mode": "tokens",
-    "targets": [
-      {"provider":"cerebras","target_model":"gpt-oss-120b"},
-      {"provider":"codex","target_model":"gpt-5.4-mini","group":"free"}
-    ]
-  }'
-```
-
----
-
-## Client request behavior
-
-| Case | Result |
-|------|--------|
-| Known key + allowed alias | Auth OK → route → optional group filter → upstream |
-| Known key + unknown model | Auth rejected |
-| RPM / budget exceeded | Rejected |
-| Group set, no matching auth file | `auth_not_found` / unavailable (no cross-tier leak) |
-| Bound native key + usable in-group auth | Only an auth ID in that group is selected |
-| Bound native key + no in-group auth | `auth_not_found` / 503; no out-of-group fallback |
-| Bound native key + selected provider/model | Credential restriction is applied, then upstream may run |
-| Bound native key + unselected provider/model | `model_not_allowed` / 403; no quota or upstream use |
-| Unbound native key or disabled binding | Existing CPA unrestricted scheduling behavior |
-| Unknown key | Plugin declines; CPA may try native `api-keys` |
-| Non-stream chat response | Top-level `model` rewritten to alias |
-| Stream | Body not rewritten (v1) |
-
-### `/v1/models` on CPA main port
-
-Per-key `allow_models_endpoint`: **binary** — deny (401) or full global list. CPA cannot filter that list per plugin key on the main port.
-
-
----
-
-## Setup checklist
-
-1. Build / install the `.so` into CPA `plugins.dir`.
-2. Enable `plugins` + `access-guard` in CPA config; set `state_file`.
-3. Open the Web UI with the management secret.
-4. (Optional) Define **classify rules** if you need custom credential buckets.
-5. (Optional) Bind existing CPA top-level native keys to those groups.
-6. Create **aliases** (multi-target / pricing) and/or pick models per plugin key (with tier or Custom group).
-7. Create plugin keys, save the one-time `plain_key`, and hand them out to clients.
-8. Client: OpenAI-compatible base URL = CPA; `Authorization: Bearer cpa_…`; `model` = alias name.
-9. Ensure openai-compat channels list the models you map; empty model lists → host “no auth” errors.
-
----
-
-## Tests
-
-```bash
-go test ./...
-cd web && npm test && npm run build
-```
+Copy the library to `plugins/<os>/<arch>/access-guard.so`; the basename must stay `access-guard` so `plugins.configs.access-guard` matches. `go test ./...` uses a non-cgo stub. Web dev server: `cd web && npm install && VITE_CPA_BASE=http://127.0.0.1:8317 npm run dev`.

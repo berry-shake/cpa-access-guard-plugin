@@ -1,8 +1,6 @@
 # Access Guard（中文说明）
 
-面向 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 的**下游 API Key 策略插件**。
-
-用人话说：你可以给客户发自己的 `cpa_…` 钥匙。每把钥匙只能用你允许的模型，还能限速、限额，并转到 CPA 真实上游（Codex、Claude、openai-compatibility 通道等）。CPA 自带的顶层 `api-keys` 也可以单独绑定到指定认证文件组；**不要把插件下发的 key 再写进 `api-keys`**，否则会绕过插件 Key 的模型、RPM 和额度策略。
+把 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 顶层 `api-keys` 绑定到指定凭证，并按 Key 限制可用模型、RPM / 美元额度，统计用量。
 
 | | |
 |---|---|
@@ -12,516 +10,120 @@
 | **沿袭** | 基于 MIT 协议的 [origin652/cpa-plugin-key-policy](https://github.com/origin652/cpa-plugin-key-policy) 演进而来 |
 | **English** | [README.md](./README.md) |
 
-**v0.4.4-fork.24** 支持同步兼容 CPA 二开版的原生 API Key 服务端备注。打开或刷新原生 Key 页面时，有备注的 Key 优先显示 CPA 备注，并将其保存为绑定名称。没有备注时可继续手动修改已保存的名称，新绑定默认留空。官方 CPA 仍支持手动命名。
+## v0.4.4-fork.26：只保留原生 Key
 
-**v0.4.4-fork.23：** 修复官方 CPA 面板升级到 `enc::v2::` 存储格式后，每次刷新插件页面都要求重新输入管理密码的问题。官方面板与 CPAMP 共用 `enc::v2::` 前缀但混淆密钥不同，插件现在两种都能识别，旧版 v1 仍然兼容。官方面板升级时会清除旧格式的登录记录，如仍需输入密码，请在面板中勾选“记住密码”重新登录一次。
+fork.26 删除了「下游 Key」「别名映射」「凭证归类」，原生 Key 只能绑定**指定凭证**：
 
-**v0.4.4-fork.22：** 修复组外高优先级凭据提前遮住已绑定供应、导致 `503 no auth available` 的问题。在支持跨优先级候选的 CPA 上，插件先按绑定范围过滤，再选择授权池内的最高优先级；只绑定 AI 供应商也可独立调用。未绑定 Key 保留 CPA 原生调度与会话粘滞。
+- 插件不再注册前端认证、模型路由和响应拦截。CPA 不再把完整请求体（以及非流式响应体）发给插件，每个请求只剩一次很小的 `scheduler.pick` 和一次 `usage.handle`。
+- `scheduler.pick` 只解码候选凭证的 ID、供应商、优先级和状态；用量有变化才写入 `state_file`，不再每 15 秒写一次；价格目录按流解析，同步结束立即归还内存；改用 Go 1.26 编译。
+- 首次启动时状态文件会去掉 `keys`、`aliases`、`classify_rules`，已删除的下游 Key 的用量一并清掉。来自别名的价格行保留为受保护的手工行。
+- 旧版按凭证组（内置等级或 `classify:`）保存的绑定仍能加载，但在重新选择凭证前**拒绝全部请求（503）**，页面会在提示旁显示原来的组名。批量历史里要恢复成凭证组的操作会被拒绝（`group_unsupported`）。
+- 回退到 fork.25 时，指定凭证的绑定照常生效：编码后的 fail-closed 组仍会写入。
 
-**v0.4.4-fork.21：** 修复新版 CPA 的配置供应被误归入认证文件的问题。原生 Key 选择器分组显示“认证文件”和“AI 提供商供应”，卡片与选择器使用 `Codex #1 / #2` 等可辨认名称，同时保留运行时真实 ID、模型和状态。区分尚未配置与加载失败，刷新失败不清除既有绑定。供应调用、OAuth 隔离、计费与额度计时逻辑保持原样。
-
-**v0.4.4-fork.20：** 原生 Key 的周额度在单个或批量“重置额度”成功时立即开始七天计时，并保存重置时间；即使尚无请求，卡片也会立即显示下次重置日期。刷新、重启或延后首次请求不会推迟日期；闲置期间也按固定七天周期推进。旧版没有保留手动重置时间，升级后再重置一次即可建立新周期。
-
-**v0.4.4-fork.19：** 新增“批量重置额度”，支持默认全选当前已绑定的原生 Key，或只重置选中的部分 Key。重置范围与卡片上的原有按钮一致：RPM、日/周消费、调用次数、Token 和模型用量；保留设定限额、凭据绑定、模型权限、启用状态、轮询开关及绑定历史。
-
-**v0.4.4-fork.18.1：** 修复新版 CPAMP 使用 `enc::v2::` 保存登录信息时，进入插件仍需重复输入密码的问题，兼容旧版 v1。已保存的凭据验证成功后才建立插件登录状态，密码过期或错误时稳定回到登录页，不再循环验证。需同域嵌入且面板已勾选“记住密码”；插件不会另存一份凭据。
-
-**v0.4.4-fork.18：** 支持给当前全部或选中的原生 Key 批量绑定一个或多个凭据，先预览再应用，并可撤销上次批量操作或从持久化历史中恢复。已有绑定的轮询并发开关、模型权限、限额、启用状态和用量保持不变。手机在 CPA 内也能看到全部五个导航入口，长说明默认折叠，按钮适配触屏。本版不修改计费公式和凭据调度逻辑；回滚范围和冲突处理见下方“批量绑定与历史恢复”。
-
-**v0.4.4-fork.17：** 原生 Key 卡片使用右侧独立账号区显示邮箱和可识别的 Codex 套餐，多账号列表限制高度并支持滚动，窄卡片可展开或收起账号。套餐读取 CPA 已有凭据信息；缺失或未知值不显示，不把 Pro 推算为 Pro5x / Pro20x。保留完整 Key 复制和分类绑定展示。
-
-**沿用 v0.4.4-fork.15 的路由行为：** 每个原生 Key 独立的“轮询并发”开关默认关闭；会话粘滞改动和单凭据优化暂不发布。关闭开关的多凭据绑定仍使用“最高优先级，同级取最小 Auth ID”的原有选择方式，不会为其补上 CPA 会话粘滞。单凭据绑定保留旧流程，未绑定的原生 Key 保持 CPA 自身的调度与粘滞。不引入 CPA SDK 依赖，也不增加请求拦截或请求生命周期钩子。
-
----
-
-## 它能干什么
-
-1. **发钥匙** — 批量创建下游 key，每把绑定可用模型 / 别名。
-2. **做映射** — 客户端写 `model: fast`，插件转到例如 `codex` + `gpt-5.4-mini`。
-3. **做限制** — 单 key 的 RPM、可选每日/每周美元额度，按 token 或按次计费。
-4. **凭证分档 / 归类** — 请求可以钉死在 Codex free/team 等内置档，或你自定义的归类组，**不会串到别的凭证文件**。
-5. **多目标别名** — 一个别名挂多个后端（优先 或 轮询）。
-6. **原生 Key 绑定** — 保留 CPA 顶层 `api-keys` 鉴权，同时限制每把 Key 能使用的认证文件或已配置的 AI 提供商凭据。
-7. **网页管理** — 在 CPA 里管 key、原生 Key 绑定、全局别名、凭证归类。
-
----
-
-## 核心概念
-
-### 下游 Key
-
-插件自己发的密钥（`cpa_…`），只由本插件鉴权。上面可以配置：
-
-- 允许的 **模型** 和/或 **别名**
-- RPM
-- 每日 / 每周美元上限（可选）
-- 是否允许主端口访问 `/v1/models`（见下文）
-
-### 别名（全局映射表）
-
-可复用的名字，例如 `fast`，展开成一条或多条 **目标**：
-
-| 字段 | 含义 |
-|------|------|
-| `provider` | CPA 提供商标识（`codex`、`claude`，或 openai-compatibility 的 **name**，如 `cerebras`） |
-| `target_model` | 上游真实模型 id |
-| `group` | 可选，限制用哪一类凭证（见下节） |
-| `dispatch` | `priority`（始终尝试第一个）或 `round-robin`（轮询） |
-| 计费 | `tokens`（百万 token 单价）或 `per_call`（每次固定金额） |
-
-Key 可以**引用**别名，不必重复填目标。多目标别名会展开成多条同名规则；**同一次请求**里鉴权与路由共用同一次选择，保证 `group` 与真实目标一致。
-
-### 凭证组：内置档位 + 自定义归类
-
-| 类型 | 选择器里长什么样 | 写进映射的 group |
-|------|------------------|------------------|
-| **内置档**（Codex `plan_type`、Antigravity `tier`） | 如「免费档 / Team」 | 裸名：`free`、`team`、`supported` |
-| **自定义归类** | 如 **「自定义 · vip」** | 带前缀：`classify:vip` |
-
-**正常 Scheduler 路径的运行时规则：** 映射里写了 group，调度就**只**在该组凭证里选文件。没有可用文件 → 直接失败（`auth_not_found`），不会由本插件落到其他档。CPA 的 Antigravity credits 特殊回退会绕过 Scheduler，因此严格隔离必须同时设置 `quota-exceeded.antigravity-credits: false`。
-
-**自定义归类**（网页 → 映射 → 凭证归类）：
-
-- 用正则匹配凭证字段（`filename`、`provider`、`plan_type`、`tier` 等）。
-- 规则上保存你起的**组名**（裸名）。
-- 目录与映射使用 `classify:组名`，避免和内置的 `free`/`team` 撞名。
-- 一个文件可命中**多个**自定义组（选择器里每组都会出现）。
-- 多条规则按并集合并；同一个组写多条规则会扩大白名单。严格隔离时应使用一条锚定 Auth ID 的正则，并避免重叠规则误收文件。
-- 没命中自定义规则 → Codex/Antigravity 走内置档；其它 auth-file 渠道默认扁平（无组）。
-- openai-compat / API Key 类通道保持**扁平**，不拆组。
-
-升级兼容提醒：v0.5.0 起，`supported` 只属于 Codex/Antigravity 的内置未识别档。若旧配置曾给 Claude、Gemini、OpenAI-compatible 等非内置分档 provider 手工写 `group: supported`，升级后会返回 `auth_not_found`；删除该 group 可恢复扁平调度，或改为明确的 `classify:<组名>`。
-
-#### “自定义字段名”到底读取什么
-
-它不是任意认证 JSON 字段选择器。运行时的准确映射是：
-
-| 网页字段名 | 实际读取值 |
-|------------|------------|
-| `filename` | `SchedulerAuthCandidate.ID`，也就是 CPA 的 **Auth ID**；不是展示用 FileName |
-| `id` | 与 `filename` 完全相同 |
-| `provider` | Scheduler 候选的运行时 provider；openai-compat 可能是内部名 `openai-compatible-<name>` |
-| 其它小写字段名 | `SchedulerAuthCandidate.Attributes[field]` |
-
-自定义字段名会先去首尾空白并转为小写，再精确查找同名 Attribute。它**不会**读取 `Auth.Metadata` / `Candidate.Metadata`，认证文件里随手增加一个 JSON 字段也不会自动变成可分类字段。常见但不保证存在的安全 Attributes 包括：
+## 工作方式
 
 ```text
-plan_type  tier  auth_kind  note  priority  weight  websockets
-path  source  source_backend  config_index  runtime_only
-codex_alpha_search  plugin_virtual  virtual_source  auth_index_seed
+顶层 api-key → CPA 原生认证 → caller_scope（SHA-256，不可逆）
+            → 绑定 → model_access 且 auth_ids → RPM / 美元额度
+            → 只在绑定的凭证里选
 ```
 
-实际键由凭证来源、provider 插件和 CPA 版本决定。`email`、`project_id` 等字段有时只存在于 Metadata/Label，不能假定 Scheduler 一定会传。CPA 还会过滤键名包含以下片段的敏感 Attributes，因此它们不能用于运行时归类：
+插件只保存 caller scope、打码的 Key 预览和策略，从不保存明文 Key。Key 仍写在 CPA 的 `api-keys` 里；绑定只做授权，不做认证。
+
+| 请求 | 结果 |
+|---|---|
+| 已绑定，模型允许，有可用的绑定凭证 | 选优先级最高的绑定凭证（同优先级取 ID 最小），开启轮询时轮流选 |
+| 已绑定，模型不在 `model_access` 内 | `model_not_allowed` / 403，不消耗 RPM |
+| 已绑定，超出 RPM / 日 / 周美元额度 | `quota_exceeded` / 429 |
+| 已绑定，没有可用的绑定凭证 | `auth_not_found` / 503，绝不落到绑定以外 |
+| 已绑定，旧版凭证组绑定 | `auth_not_found` / 503，重新选择凭证后恢复 |
+| 未绑定或绑定已停用 | 走 CPA 自己的调度 |
+
+- `model_access.mode: all` 允许现有和以后新增的模型；`allowlist` 只允许列出的供应商 + 模型（`(high)` 这类思考后缀沿用基础模型的权限）。空的允许列表拒绝一切。页面上新建的绑定默认是空允许列表。
+- **并发轮询**（`round_robin`，默认关）在优先级最高的可用绑定凭证之间轮流，每个 Key、供应商池、模型各有一个游标。想让所有凭证都参与，就把它们设成同一优先级。
+- 在支持 `scheduler_across_priorities` 的 CPA 上，插件能拿到所有优先级的候选，先按绑定过滤再选优先级。
+- `auth_ids` 是区分大小写的 Scheduler 凭证 ID（认证文件，以及 Codex API Key 等 AI 提供商供应）。找不到的 ID 会继续显示；全部失效时请求一律拒绝。
+- 用量按 CPA `usage.handle` 给的 token 数和模型价格表计费（先查上游模型，再查请求的模型）。没有价格的模型照样计调用次数和 token，金额记 0。
+- 周额度从最近一次手动重置起按七天周期滚动；日用量在 UTC 零点清零。
+
+**要求与限制**
+
+- CLIProxyAPI **v7.2.101 或更新**（Scheduler 元数据带 `caller_scope`）。
+- Access Guard 必须是优先级最高的 Scheduler 插件。
+- 设置 `quota-exceeded.antigravity-credits: false`，否则这条兜底路径会绕过插件调度。
+- 不经过 `scheduler.pick` 或不带 `caller_scope` 的路径不受约束：Home 调度（`-home-jwt`）、直接插件执行器、Alpha Search、Codex Live/Realtime。
+- 插件被停用、卸载或加载失败时，CPA 仍可能用默认调度接受这把 Key。
+- `/v1/models` 无法按 Key 过滤，实际执行在 `scheduler.pick` 拦截。
+- 顶层配置和插件状态是两套系统。严格轮换时：先为新 Key 建绑定，再加进 CPA、测试，然后删掉旧 Key，最后删旧绑定。
+
+## 管理页
 
 ```text
-api_key  apikey  token  secret  cookie  credential  password
-storage  authorization  auth_header  proxy_url
+http://<cpa-host>:<port>/v0/resource/plugins/access-guard/index.html
 ```
 
-例如按 OAuth/API-key 类型归类（仅当当前凭证候选确实带 `auth_kind`）：
+用 CPA 管理密钥登录。嵌在同源的 CPA 或 CPAMP 面板里且勾选了「记住密码」时，会直接沿用面板保存的登录（支持 `enc::v1::` 和两种 `enc::v2::`）。
 
-```json
-{
-  "name": "oauth-only",
-  "field": "auth_kind",
-  "pattern": "^oauth$",
-  "group": "oauth-only",
-  "enabled": true
-}
-```
-
-按 `note` 归类（仅当真实 Scheduler 候选确实带同名 Attribute；管理页显示的 note 可能只是 Metadata 回退）：
-
-```json
-{
-  "name": "tenant-a-note",
-  "field": "note",
-  "pattern": "^tenant-a$",
-  "group": "tenant-a",
-  "enabled": true
-}
-```
-
-正则由 Go RE2 执行：默认区分大小写，`MatchString` 默认是子串匹配；完整值必须写 `^...$`，忽略大小写可写 `(?i)^...$`。RE2 不支持 lookahead、lookbehind 或反向引用。网页保存时也由服务端 RE2 校验，不再用 JavaScript RegExp 代替。
-
-网页只对 `filename` / `id`、`provider`、`plan_type`、`tier`、`path`、`weight` 显示命中计数。CPA 的 `/auth-files` 管理响应可能从 Metadata 回退生成 `note`、`priority`、`websockets` 等字段，即使 Scheduler 候选没有同名 Attribute；这些字段及其它自定义字段因此显示“无法预览”，不能把管理页看到的值当作运行时分类证据。预览也不检查凭证状态、模型能力、priority 预筛选或实际获胜的 Scheduler。最终隔离结果必须用真实请求日志中的 `auth_id` 验证。
-
-严格认证文件白名单仍推荐 `filename`，按 `/v0/management/auth-files` 返回的 `id` 写完整锚定正则，例如：
-
-```json
-{
-  "name": "tenant-a-files",
-  "field": "filename",
-  "pattern": "^(?:tenant-a/codex-01\\.json|tenant-a/codex-02\\.json)$",
-  "group": "tenant-a",
-  "enabled": true
-}
-```
-
-一般在网页或管理 API 配置即可，不必手改 state JSON。
-
-### CPA 顶层原生 Key 绑定
-
-原生 Key 绑定与插件自己发行的下游 Key 是两套独立语义：
-
-| 类型 | 谁负责鉴权 | 本插件负责什么 |
-|------|------------|----------------|
-| 插件 Key（`cpa_…` 或插件托管的自定义 `sk-…`） | `access-guard` | 模型 / Alias、RPM、额度、计费和可选凭证组 |
-| CPA 顶层 `api-keys` | CPA 原生 config API-key provider | 限制模型、认证文件组或精确 Auth ID 白名单，并可设置 RPM / 美元额度 |
-
-CPA 原生鉴权成功后会产生稳定、不可逆的 `caller_scope`。插件只保存这个 scope、脱敏预览与凭证限制，不保存顶层 Key 明文：
-
-```text
-顶层 api-key → CPA 原生鉴权 → caller_scope
-             → native binding → model_access 且（group 或 auth_ids）
-             → 只从允许范围内选择认证文件
-```
-
-要求与行为：
-
-- 需要 CLIProxyAPI **v7.2.101 或更高版本**，因为 Scheduler 必须收到 `Options.Metadata.caller_scope`。
-- 网页通过受 Management Key 保护的 `GET /v0/management/api-keys` 读取 CPA 当前顶层列表，默认以脱敏形式列出每一把 Key，包括尚未绑定的 Key；已经从宿主删除、但 state 中仍有绑定的 Key 会保留为“孤立绑定”供检查。
-- 从未绑定行直接创建时无需手动复制粘贴。卡片保持脱敏显示，点击“复制完整 Key”可复制宿主中仍存在的完整 Key；孤立绑定无法找回明文，因此不能复制。明文只在页面内存及用户发起的复制操作中使用，不写入 URL、浏览器存储或插件 state，也不会由插件 API 返回；HTTP 页面复制降级所用的临时输入框会立即清空并移除。
-- 宽卡片在右侧账号区逐行显示绑定凭据邮箱；没有邮箱时显示名称或精确凭据 ID。列表最高 240px，更多账号可滚动查看；窄卡片默认收起账号，点击后展开，支持键盘操作。分类绑定复用插件规则展示匹配名单，无法可靠预览的分组会提示暂不可展示。这份名单表示绑定或分组成员，实际请求仍受模型、状态及优先级限制。
-- Codex 账号的套餐标签来自 CPA 已有凭据信息，可识别 Free、Plus、Team、Pro、Enterprise 和 Edu；不是实时订阅查询。套餐缺失、未知或不是 Codex 账号时不显示标签；没有可靠倍率字段时不会把 Pro 猜成 Pro5x / Pro20x。
-- 手机端在页面顶部直接显示原生 Key、下游 Key、凭证归类、别名映射和模型价格五个入口，CPA 内嵌页面同样可用。原生 Key 长说明默认收起，停用绑定的关键提示保留；批量操作和卡片按钮使用适合触控的布局。
-- 仍可手动新建绑定：粘贴原生 Key 一次；明文只用于计算 scope 和预览，不会写入 state，也不会在 API 响应中回显。
-- Key 必须仍然存在于 CPA 顶层 `api-keys`；绑定本身不负责认证。
-- 已绑定且启用的 Key 如果找不到组内或直接白名单内的可用凭证，会返回 `auth_not_found`（503），不会退回限制外文件。
-- `model_access.mode: all` 允许当前及未来新增模型；`allowlist` 只允许 `models` 中精确、大小写不敏感的 `provider + 基础模型` 组合。同名模型换一个 provider 仍然不允许；CPA 末尾的 thinking 后缀（如 `(high)`）沿用基础模型权限。
-- 空模型白名单表示禁止全部模型。未勾选模型会在消耗 RPM 和选择上游凭据前返回 `model_not_allowed`（403）；候选凭据阶段还会按 provider 再校验一次，防止多 provider 路由绕过。
-- fork.13 之前没有 `model_access` 的旧绑定升级后按 `all` 处理，保持原行为。网页新建绑定默认是空白名单，必须明确勾选模型，或改成“全部模型”。
-- `caller_scope` 命中启用的原生绑定时，绑定的 group / `auth_ids` 限制优先于通用 Scheduler `group` 元数据。
-- 未绑定或禁用绑定的原生 Key 保持 CPA 原来的自由调度行为。
-- CPA 顶层配置与插件 state 不能原子更新。严格隔离的安全轮换方式是：先为新 Key 新建第二条临时绑定，再把新 Key 加入 CPA 并验证，随后删除旧顶层 Key，最后删除旧绑定。
-- 顶层 Key 应使用高熵随机值，并且不要与插件托管 Key 或其它认证来源的 principal 重用同一明文。CPA 的 `caller_scope` 标识的是 principal 文本，不包含认证 provider 名称。
-- CPA 只启用优先级最高的一个 Scheduler。必须确保 `access-guard` 是实际获胜的 Scheduler，否则文件隔离不会执行。
-- 对支持 `scheduler_across_priorities` 的 CPA，插件会取得各优先级的可用候选，先按绑定范围过滤，再选择授权池内的最高优先级。组外高优先级凭据不会再遮住已绑定的低优先级凭据。旧宿主若忽略此能力，仍有全局优先级预筛限制，需要保持兼容的优先级，或升级到支持该能力的 CPA。
-- 原生 Key 隔离只覆盖 CPA 正常的 AuthManager / `scheduler.pick` 且向 Scheduler 转发 `caller_scope` 的路径。**CPA Home 调度目前会绕过插件 Scheduler**；依赖这些绑定时不要用 `-home-jwt` 启动 CPA。直接 plugin-executor、Alpha Search（`/v1/alpha/search` 与 `/backend-api/codex/alpha/search`）、全部 Codex Live/Realtime 路由（`/v1/live*` 与 `/v1/realtime*`），以及其它绕过 `scheduler.pick` 或未转发 `caller_scope` 的路径均不受支持。
-- 必须在 CPA 顶层配置中显式设置 `quota-exceeded.antigravity-credits: false`。启用后，该 Antigravity 最终额度回退会绕过插件 Scheduler，直接枚举 Antigravity 凭证，因此请求可能落到绑定组之外；当前插件 ABI 无法在这个回退阶段强制绑定。
-- 插件被禁用、卸载或加载失败时，顶层 Key 仍可能由 CPA 原生鉴权并走默认调度；若需要“插件故障也绝不放行”的强安全边界，应让宿主增加必需策略/失败关闭机制。
-- 降级到 v0.5.0 之前的版本前必须备份 `state_file`；旧版不认识 `native_key_bindings`，重新写 state 时可能丢弃这些绑定。
-- 不要把含 `model_access.mode: allowlist` 的 state 降级到 fork.12 或更旧版本：旧版会忽略并可能抹掉模型策略，导致该绑定不再限制模型。确需降级时，先停用绑定或移除对应顶层 Key，并备份 state。
-
-日常请通过本插件管理 API 或网页创建绑定。首次启动 YAML 种子必须包含 `caller_scope`，而 CPA 通用的插件配置接口会向持有 Management Key 的调用方返回该 YAML 字段；专用绑定列表 API 和网页不会返回它。
-
-每条绑定必须选择且只能选择一种凭证限制：
-
-- **按凭证组**：使用与 Alias 相同的 group 格式。内置档写 `free` / `team` / `plus` / `supported`，自定义组写 `classify:组名`。适合多个 Key 共享、需要动态维护的凭证池。
-- **直接指定凭证**：保存一个或多个精确、区分大小写的 Scheduler Auth ID；无需创建分类规则。选择器将 Auth 目录凭据与 CPA 已配置的「AI 提供商供应」分组显示，包含 Codex API Key 服务和 OpenAI-compatible 渠道，两类凭据可一起勾选。适合凭证较少、每个 Key 单独分配的场景。多选决定允许使用的凭证范围，列表顺序不决定轮询顺序；新增凭证不会自动加入。
-
-每个原生绑定都有独立的 **轮询并发** 开关（`round_robin`，默认 `false`）。给专用翻译 Key 打开开关，并将模型白名单限制为需要的模型，请求就会在绑定范围内最高可用优先级的凭据之间轮流分配。每个调用者、供应商池和模型分别保存轮询位置；并发请求可以由多个凭据同时处理，每个请求同一时间只选一个凭据。希望所有绑定凭据平时都参与轮询时，将它们设置为相同优先级；较低优先级的绑定凭据在高优先级不可用时仍可作为后备。
-
-轮询位置跨请求保留，按下一个可用凭据 ID 继续，不因临时冷却或重试候选减少而从头开始。直接绑定模式下，新凭据需要加入绑定后才会参与；移除绑定后不再分配新请求，修改绑定本身不主动取消已经发出的请求。开关会保存到 state，轮询位置仅保存在内存中，重新加载后可以从头开始。错误分类、重试和冷却仍由 CPA 处理；CPA 的凭据重试数量限制及绑定的 RPM 限额仍可能限制故障切换。
-
-只有处于启用状态、且打开此开关的原生绑定才逐请求轮换，不按会话固定凭据，也不会把同一请求同时发给多个凭据。**关闭开关时，绑定继续按“最高优先级，同级取最小 Auth ID”选择，不会使用 CPA 原生会话粘滞选择器。** 单凭据绑定保留原有流程；不修改 CPA 的全局调度或粘滞设置，未绑定的原生 Key 仍交给 CPA 选择。插件始终明确返回绑定范围内的可用凭据，不会为了轮询退回不受绑定限制的宿主凭据池。
-
-网页从 CPA 的 `/v0/management/auth-files` 读取运行时的精确 `id`。新版 CPA 会在此目录中一并返回配置型供应，并通过 `concurrency_config: true` 标识；插件据此归入「AI 提供商供应」，以运行时的 ID、provider、状态和模型为准。配置元数据只为完全相同的 ID 补充显示名称和安全索引。不会仅凭 `runtime_only` 就把 OAuth 或其它内存凭据当成配置供应。
-
-旧版 CPA 若未在运行时目录列出配置供应，则保留原来的兼容方式：网页在隔离适配器内暂时处理 CPA 已有管理接口响应，按 CPA 的稳定 ID 算法派生精确 Scheduler Auth ID，再通过 `/v0/management/auth-files/models?name=<Auth ID>` 验证身份并读取模型。AI 提供商 API Key 不会进入组件 state、URL、浏览器存储或插件 state，也不会发送给插件后端或写入日志；不会使用可能含完整密钥的 `account` 字段作为显示名称。旧版兼容条目未能验证身份时保持可见但禁止勾选。供应目录加载失败会明确报错，不当作“尚未配置”。
-
-绑定 Codex API 供应时，先在 CPA「AI 提供商 → Codex」保存 API 密钥、服务地址和模型配置，再到插件编辑原生 Key，选择「直接指定凭证」，刷新凭证后勾选「AI 提供商供应」中的对应条目。保存插件绑定不会创建上游服务；CPA 尚无配置供应时，选择器会提示先添加。
-
-选择器不会用显示文件名、配置序号或掩码猜测身份。凭证删除、改名、移动，或 AI 提供商的 Key / base URL / proxy / prefix / headers 改变后，已保存 ID 会保留并标记为不存在，避免编辑其它字段时静默扩大或改变授权。若全部 ID 都失效，请求会失败关闭。对于 group 模式，严格文件白名单仍可创建锚定的 `filename` 归类规则；这里的 `filename` 同样匹配 Scheduler 的 **Auth ID**，可能包含相对目录，不一定等于页面显示的文件名。
-
-直接模式会在内部保留 group 中额外写入一份不受小写转换影响的精确 ID 冗余编码。不认识 `auth_ids` 的旧插件即使重写 state 并删除该字段，仍会失败关闭；修复版再次读取时还能从内部标记恢复原选择。专用管理 API 和网页不会显示这个内部值。如果 state 已经只剩旧式、不含 ID 的固定标记，插件无法凭空知道原来选了哪些凭证；网页会明确要求重新选择一次，并在修复前保持失败关闭。降级前仍应备份 `state_file`，并优先把直接模式改回普通 group；插件被禁用、卸载或加载失败时的宿主自由调度风险仍按上面的通用警告处理。
-
-模型选择器会把同一 provider 下因 free/team 等凭据档位重复出现的模型合并成一个勾选项。“全选”保存的是当前目录快照，以后新出现的模型不会自动加入；当前目录已消失的旧选择仍会显示并可删除。CPA 插件 ABI 暂时不能按原生 Key 过滤 `/v1/models`，所以该接口仍可能显示宿主全局目录；真正调用会在 `scheduler.pick` 阶段执行模型权限。
-
-#### 批量绑定与历史恢复
-
-原生 Key 页提供“批量绑定”“撤销上次批量操作”和“绑定历史”。默认选择当前全部顶层 Key，也可取消个别 Key；选择一个或多个凭据后先预览每把 Key 的前后变化，再统一替换凭据限制。
-
-- 已有绑定只修改凭据限制，保留名称、启用状态、模型限制、轮询开关、额度及实时用量。禁用的绑定仍保持禁用。
-- 原来未绑定的 Key 会创建启用的绑定，模型为全部、轮询关闭、不额外设置额度；预览会说明。孤立绑定不参与批量操作。
-- 最多保留最近 50 次批量修改和恢复记录（另设 4 MiB 历史容量上限），保存在插件 `state_file`，与绑定变更一起原子保存。历史不保存完整 Key；重启时需继续使用原来的持久化文件。旧版本不认识历史字段，降级后重写状态可能丢失历史。
-- 每条历史可预览并恢复本次操作前的凭据限制，恢复本身也产生可撤销记录。后续记录在案的批量改动可以跨越恢复；单独编辑造成冲突、Key 被轮换或删除、原凭据已不存在时，整批停止并显示原因。
-- 原来未绑定的 Key 可以恢复为未绑定；若创建绑定后又修改了模型、额度等设置，则拒绝直接删除绑定。后来新增的 Key 不受旧操作影响。
-- 恢复分类组只恢复组名，成员由当前分类规则决定；不会回退全局分类规则。预览之后数据变化时必须重新预览。
-
-网页会在提交前刷新 CPA 的 Key 和凭据目录。插件内的整批保存是原子的；CPA 配置与插件状态属于两个独立系统，仍应避免同时在其它页面轮换或删除宿主 Key、凭据。
-
-#### 批量重置额度
-
-原生 Key 页顶部新增“批量重置额度”。默认选中当前仍在 CPA 中且已配置插件绑定的全部 Key，也可搜索或取消个别 Key，确认一次即可重置。停用的绑定也可重置；未绑定 Key 和孤立绑定不参与。提交前会刷新宿主目录，选中的 Key 身份已变化时要求重新选择，不会把新出现的 Key 静默加入。
-
-只清除选中绑定在插件中的 RPM 和用量计数，包括日/周消费金额、调用次数、Token 及模型明细，保留配置的限额和策略。不会重置上游账号额度，也不会删除 CPA/CPAMP 的请求历史。用量清零无法通过“绑定历史”撤销；重置之后完成的请求会重新累计用量。
-
-从 fork.20 起，每次手动重置成功都会立即开始新的七天周额度周期，同一批次的 Key 使用相同重置时刻。无论是否发过请求，下次周期都从七天后开始，长期闲置和重启也不会改变周期；再次手动重置则以本次时间重新计时。每日用量仍在 UTC 零点重置。保存失败时，计数与周期均保持不变。升级会保留已有用量；旧版丢弃的历史手动重置时刻无法追溯恢复。
-
-后端先检查全部选中绑定，再统一保存；保存成功后才清除内存计数。包含不存在的 ID 或保存失败时整批不变。重启时继续沿用原持久化 `state_file`。
-
-### openai-compatibility 通道
-
-CPA 里配置的兼容通道，映射时 `provider` 填通道 **name**。插件路由时会对应到主机内部的 `openai-compatible-<name>`。通道配置里的 **models 列表要写全**，否则主机会报「该模型无可用 auth」。
-
----
-
-## 插件能力一览
-
-| 钩子 | 作用 |
-|------|------|
-| 前端鉴权 | 识别插件 key；校验别名、RPM、额度；写入路由与 group 元数据 |
-| 模型路由 | 别名 → provider + 目标模型 |
-| 调度 | 按档位 / `classify:` group 或精确 `auth_ids` 白名单过滤凭证 |
-| 响应拦截 | 非流式 JSON：把顶层 `model` 改回别名 |
-| 用量 | token / 按次计费写入 state |
-| 管理 API + 内嵌网页 | Key、原生 Key 绑定、别名、归类、状态 |
-
----
-
-## 编译
-
-Linux `.so` 需要 cgo：
-
-```bash
-make test
-make build-linux          # 先编前端，再编 linux amd64/arm64 .so
-# 或
-make web-build
-mkdir -p dist/linux/amd64
-GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -buildvcs=false -tags cshared \
-  -buildmode=c-shared -o dist/linux/amd64/access-guard.so ./cmd/cpa-access-guard
-```
-
-Windows 上请用 WSL/Linux 编 `.so`。`go test ./...` 可用非 cgo stub，不依赖动态库工具链。
-
-把动态库放进 CPA 对应平台目录，例如
-`plugins/linux/amd64/access-guard.so`，并在配置里启用插件。动态库 basename
-必须是 `access-guard`（也可用 `access-guard-v<版本>`）；不要把
-`_linux_amd64` 写进 basename，否则 CPA 会把它识别成另一个插件 ID，无法命中
-`plugins.configs.access-guard`。
-
----
+- **原生 Key**：当前所有顶层 Key 以打码卡片显示（需要时可复制完整 Key）；绑定编辑器带凭证和模型选择；显示账号邮箱和 Codex 套餐、7 天额度条；可从 CPA Key 备注同步名称；批量绑定支持预览、撤销和历史（保留 50 条）；批量重置额度。找不到 Key 的孤立绑定也会显示。
+- **模型价格**：LiteLLM（主）和 models.dev（补充）同步状态、搜索、手工覆盖、删除墓碑、恢复自动。
 
 ## 配置
 
-最小形态（完整示例见 [`config.example.yaml`](./config.example.yaml)）：
-
 ```yaml
 quota-exceeded:
-  # 原生 Key 的认证文件隔离必须关闭此项；Antigravity credits 回退会绕过插件 Scheduler。
   antigravity-credits: false
-
 plugins:
   enabled: true
   dir: "plugins"
   configs:
     access-guard:
       enabled: true
-      priority: 100 # 必须高于其它 Scheduler，才能执行凭证隔离
-      state_file: "cpa-access-guard-state.json"
-      pricing_file: "cpa-access-guard-model-pricing.json"
+      priority: 100
+      state_file: "/data/access-guard-state.json"
+      # pricing_file: 默认放在 state_file 旁边
+      # pricing_sync: {interval_hours: 24, litellm_url: ..., models_dev_url: ...}
 ```
 
-说明：
+- `state_file` 一旦存在，就以它为准（绑定、历史、用量）；YAML 里的 `native_key_bindings` 只在首次启动时导入（见 [`config.example.yaml`](./config.example.yaml)）。建议在页面或接口里建绑定。
+- 相对路径按 CPA 的工作目录解析。文件以 `0600` 原子写入。`GET …/status` 显示实际路径。
+- 价格在启动时和之后每 24 小时同步一次。某个来源失败时保留上次的值并标为过期。手工修改优先于两个来源。
 
-- 若已有 `state_file`，则以其中的 keys / 原生 Key 绑定 / 别名 / 归类 / 用量为准。
-- `pricing_file` 是独立的模型价格表（美元 / 百万 token）。计费优先用别名价格，未配价时回退到此表。省略则把 `cpa-access-guard-model-pricing.json` 放在 `state_file` 同目录。
-- 插件会在启动时以及之后按间隔同步两个价格源：以 [LiteLLM](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json) 为主，只有 LiteLLM 未收录的模型才由 [models.dev](https://models.dev) 回退补齐。LiteLLM 已收录但未公开价格的模型会标为“已知但未定价”，不会套用另一来源的可疑价格。
-- 可用 `pricing_sync.interval_hours`、`pricing_sync.litellm_url`、`pricing_sync.models_dev_url` 覆盖默认 24 小时和两个目录地址；旧 `pricing_sync.url` 继续作为 models.dev 地址使用。任一来源失败时会保留该来源的上次成功价格并标为陈旧，不会清空价格表。
-- 网页“模型价格”中的手工修改优先于两个远程源；删除会写入保护列表，后续同步不会复活。点“恢复自动”会清除手工值或删除保护并立即重同步。别名默认 `pricing_mode: auto`；若要固定别名表单中的价格，选择“手工固定”或配置 `pricing_mode: manual`。
-- 旧版价格文件会原位兼容读取：能与任一新来源精确对应的旧自动价格会迁移为带来源记录，无法确认的旧值继续按手工兼容值保留。图像模型价格会展示来源提供的图像 token 字段，但不会误作文本 token 费率计费。
-- 相对 `state_file` / `pricing_file` 会按 **CPA 进程当前工作目录**解析为绝对路径，不是相对插件 `.so`。生产环境建议写绝对路径，并确保 CPA 运行用户可写；可通过 `GET /v0/management/plugins/access-guard/status` 的 `state_file`、`pricing_file` 查看最终解析位置。
-- 从 `cpa-key-policy` 升级且一直使用旧版默认相对文件名时，Access Guard 会一次性把同目录中校验有效的 `cpa-key-policy-state.json` 复制为 `cpa-access-guard-state.json`；旧文件会保留作恢复备份。显式配置的 `state_file` 不会自动迁移，请先停掉 CPA，再人工、精确地复制。
-- state 目录由插件按 `0700` 创建，文件按 `0600` 原子写入。请纳入备份，不要手工写入顶层 API Key 明文。
-- 日常请用**网页**或管理 API 建 key、原生绑定和别名；YAML 种子数据主要用于首次启动。
-- 公开文档里不要写真实管理密钥、主机名或凭证内容。
+## 管理接口
 
----
+前缀 `/v0/management/plugins/access-guard`，使用 CPA 管理密钥（Bearer）。
 
-## 网页管理界面
-
-插件内嵌。加载后访问：
-
-```text
-http://<你的-cpa-主机>:<api端口>/v0/resource/plugins/access-guard/index.html
-```
-
-用 CPA **管理密钥**登录（`remote-management.secret-key` 或管理密码）。手动登录只保存在内存。同域嵌入 CPA 或 CPAMP 面板且已勾选“记住密码”时，插件可以在重新进入或刷新后复用面板已保存的登录信息，兼容旧版 `enc::v1::`，以及官方面板和 CPAMP 各自的 `enc::v2::` 格式。插件只读取已有记录，不另存或迁移密钥；CPAMP 已保存的管理员密钥通过其配置的管理代理使用。
-
-| 区域 | 用途 |
-|------|------|
-| Keys | 创建/编辑/轮换/删除 key；绑模型或别名；RPM 与额度 |
-| 映射 → 别名 | 全局多目标别名、调度方式、定价 |
-| 映射 → 凭证归类 | 自定义分组规则与命中预览 |
-| 映射 → 原生 Key 绑定 | 列出全部 CPA 顶层 Key；选择凭证组或单独的 Auth 文件 / AI 提供商凭证；查看周额度剩余；保留孤立绑定供检查 |
-| 模型价格 | LiteLLM 主源、models.dev 回退源状态；搜索、手工覆盖、删除保护与恢复自动价格 |
-| 选模型 | 提供商目录；内置档 / **自定义 · …** 子组 |
-
-启用的原生 Key 卡片仅在设置周美元上限后显示 7D 剩余额度条；周上限留空或为 0 时隐藏整个区域。余额按插件实际记账的美元用量计算：剩余大于 20% 为绿色，5%～20% 为橙色，小于 5% 为红色，耗尽显示 0%。卡片按浏览器本地时区显示下次重置日期，手动重置成功后即使零请求也立即显示；没有真实日期时显示“尚无重置时间”，不临时推算一个日期。刷新列表、保存绑定或重置额度后会更新显示。
-
-不重编 `.so` 时开发前端：
-
-```bash
-cd web
-npm install
-VITE_CPA_BASE=http://127.0.0.1:8317 npm run dev
-```
-
----
-
-## 管理 API 摘要
-
-路径为精确匹配。鉴权：CPA 管理 Bearer。
-
-**Key：** `GET/POST/PATCH/DELETE …/keys`，以及 `rotate` / `reset-rpm` / `usage` / `status`  
-
-**别名：** `GET/POST/DELETE …/aliases`  
-
-**模型价格：** `GET/POST/DELETE …/pricing`；`POST …/pricing/restore-auto`；`GET …/pricing-sync`；`POST …/pricing-sync/run`
-
-**归类：**  
-
-- `…/classify-rules`（含 reorder）  
-- `POST …/classify-preview` — 返回去重后的组并集 `groups`，以及每条规则自己的 `rule_matches`；显式 draft 规则由服务端 Go/RE2 严格校验
-- `POST …/catalog` — 前端提交 auth-file + 模型列表，返回带 `classify:` 的选择器条目  
-
-**CPA 顶层原生 Key 绑定：**
-
-- `GET/POST/PATCH/DELETE …/native-key-bindings`
-- `POST …/native-key-bindings/catalog` — 管理网页辅助接口：通过 JSON 请求体接收当前 `api_keys` 数组，按精确 `caller_scope` 关联绑定，只返回脱敏条目与孤立绑定；绝不返回传入的 Key 或 caller scope。
-- `POST …/native-key-bindings/reset-quota` — 传入 `{ "id": "binding-id" }`，重置一个绑定在插件内的额度计数。
-- `POST …/native-key-bindings/reset-quota-batch` — 传入非空 `{ "ids": ["binding-a", "binding-b"] }`（最多 4096 项），统一重置并返回 `{ "reset": true, "ids": [...], "count": N }`；ID 会规范化并去重。省略 ID 不代表重置全部。
-- `GET …/native-key-bindings/history` — 最近的批量绑定与恢复记录，按新到旧排列，只返回脱敏变更。
-- `POST …/native-key-bindings/batch-preview` / `batch` — 预览或原子提交批量替换；输入当前 `api_keys`、`selected_indices`、目标 `auth_ids`、完整目录 `available_auth_ids` 和 `catalog_complete`。提交还需预览返回的 `expected_revision`。
-- `POST …/native-key-bindings/rollback-preview` / `rollback` — 预览或提交历史恢复；以 `operation_id` 指定记录，并提交当前宿主 Key、凭据目录及提交所需的 `expected_revision`。版本冲突返回 409，整批不写入。
-
-创建绑定（Key 明文只在请求中出现一次；响应不返回明文或完整 caller scope）：
+| 路由 | 用途 |
+|---|---|
+| `GET /status` | 运行状态和实际文件路径 |
+| `GET/POST/PATCH/DELETE /native-key-bindings` | 列出 / 新建 / 修改 / 删除（`id` 放在 body 或 query） |
+| `POST /native-key-bindings/catalog` | 用当前 `api_keys` 匹配绑定，只返回打码条目和孤立绑定 |
+| `POST /native-key-bindings/sync-names` | 把 CPA Key 备注同步为绑定名称 |
+| `POST /native-key-bindings/reset-quota`、`/reset-quota-batch` | 重置单个 / 选中绑定的 RPM 和用量 |
+| `GET /native-key-bindings/history` | 批量与恢复历史 |
+| `POST /native-key-bindings/batch-preview`、`/batch` | 预览 / 提交批量替换凭证 |
+| `POST /native-key-bindings/rollback-preview`、`/rollback` | 预览 / 提交历史恢复 |
+| `GET/POST/DELETE /pricing`、`POST /pricing/restore-auto` | 模型价格表 |
+| `GET /pricing-sync`、`POST /pricing-sync/run` | 同步状态 / 立即同步 |
 
 ```bash
 curl -X POST "$CPA/v0/management/plugins/access-guard/native-key-bindings" \
-  -H "Authorization: Bearer $MANAGEMENT_KEY" \
-  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $MANAGEMENT_KEY" -H "Content-Type: application/json" \
   -d '{
-    "id": "client-a-native",
-    "name": "Client A",
-    "key": "sk-替换为已经存在于顶层-api-keys-的真实-Key",
-    "enabled": true,
-    "group": "classify:client-a",
-    "model_access": {
-      "mode": "allowlist",
-      "models": [{"provider": "codex", "model": "gpt-5.6-luna"}]
-    }
+    "id": "client-a", "name": "Client A", "enabled": true,
+    "key": "sk-an-existing-top-level-api-key",
+    "auth_ids": ["tenant-a/codex-01.json", "tenant-a/codex-02.json"],
+    "model_access": {"mode": "allowlist", "models": [{"provider": "codex", "model": "gpt-5.6-luna"}]},
+    "weekly_usd": 100
   }'
 ```
 
-直接指定凭证时，改传 `auth_ids`，不要同时传 `group`：
+`key` 只用来算 caller scope，不会返回。PATCH 时不带 `key` 就保留原来的 scope；非空的 `auth_ids` 会替换凭证。传 `group` 返回 `400 group_unsupported`。
+
+## 构建
 
 ```bash
-curl -X POST "$CPA/v0/management/plugins/access-guard/native-key-bindings" \
-  -H "Authorization: Bearer $MANAGEMENT_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "id": "client-b-native",
-    "name": "Client B",
-    "key": "sk-替换为已经存在于顶层-api-keys-的真实-Key",
-    "enabled": true,
-    "auth_ids": [
-      "tenant-b/codex-01.json",
-      "tenant-b/codex-02.json"
-    ]
-  }'
+make test
+make build-linux   # 先构建管理页，再编 linux amd64/arm64 .so
 ```
 
-轮换 Key 或修改绑定：
-
-```bash
-curl -X PATCH "$CPA/v0/management/plugins/access-guard/native-key-bindings" \
-  -H "Authorization: Bearer $MANAGEMENT_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "id": "client-a-native",
-    "key": "sk-新的顶层-Key",
-    "group": "classify:client-a",
-    "enabled": true
-  }'
-```
-
-PATCH 省略 `key` 或传空字符串时保留原 scope。传非空 `auth_ids` 会原子切换到直接模式并清除业务 group；传非空 `group` 会切回组模式并清除 `auth_ids`；两者同时非空会返回 `400`。直接替换 `key` 会立即改变绑定 scope，无法与 CPA 顶层配置原子更新；严格隔离时请改用以下顺序：
-
-1. 为新 Key 和同一 group / `auth_ids` 限制创建第二条临时绑定。
-2. 将新 Key 加入 CPA 顶层 `api-keys`。
-3. 用新 Key 发真实请求，确认最终选择的 `auth_id` 属于目标限制。
-4. 从 CPA 顶层 `api-keys` 删除旧 Key。
-5. 删除旧绑定。
-
-创建 key（`plain_key` **只返回一次**）：
-
-```bash
-curl -X POST "$CPA/v0/management/plugins/access-guard/keys" \
-  -H "Authorization: Bearer $MANAGEMENT_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "id": "team-a",
-    "name": "Team A",
-    "rpm": 60,
-    "models": [
-      {"alias":"fast","provider":"codex","target_model":"gpt-5.4-mini","group":"free"}
-    ]
-  }'
-```
-
-多目标别名示例：
-
-```bash
-curl -X POST "$CPA/v0/management/plugins/access-guard/aliases" \
-  -H "Authorization: Bearer $MANAGEMENT_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "alias": "cheap-chat",
-    "dispatch": "priority",
-    "billing_mode": "tokens",
-    "targets": [
-      {"provider":"cerebras","target_model":"gpt-oss-120b"},
-      {"provider":"codex","target_model":"gpt-5.4-mini","group":"free"}
-    ]
-  }'
-```
-
----
-
-## 客户端请求行为
-
-| 情况 | 结果 |
-|------|------|
-| 认识的 key + 允许的别名 | 鉴权通过 → 路由 → 可选 group 过滤 → 上游 |
-| 不允许的模型名 | 鉴权失败 |
-| 超 RPM / 额度 | 拒绝 |
-| 写了 group 但组内无可用凭证 | `auth_not_found` / 不可用（不串档） |
-| 已绑定原生 Key + 组内有可用凭证 | 只选择该组 Auth ID |
-| 已绑定原生 Key + 组内无可用凭证 | `auth_not_found` / 503（不回退组外） |
-| 已绑定原生 Key + 已勾选 provider/模型 | 继续执行凭证限制，允许请求上游 |
-| 已绑定原生 Key + 未勾选 provider/模型 | `model_not_allowed` / 403（不消耗额度、不访问上游） |
-| 未绑定或禁用绑定的原生 Key | 保持 CPA 原生自由调度 |
-| 不认识的 key | 插件放弃，CPA 可尝试原生 `api-keys` |
-| 非流式对话响应 | 顶层 `model` 改回别名 |
-| 流式 | v1 不改写 body |
-
-### 主端口的 `/v1/models`
-
-每 key 的 `allow_models_endpoint` 是**开关**：拒绝（401）或看**全局完整列表**。主端口无法按插件 key 过滤列表。
-
-
----
-
-## 上手清单
-
-1. 编译/安装 `.so` 到 CPA `plugins.dir`。
-2. 启用 `plugins` 与 `access-guard`，配置 `state_file`。
-3. 用管理密钥打开网页 UI。
-4. （可选）配置**凭证归类**规则。
-5. （可选）把已有 CPA 顶层原生 Key 绑定到这些组。
-6. 建**别名**（多目标/定价）和/或给 key 勾选模型（含档位或「自定义 · …」）。
-7. 创建插件 key，保存一次性 `plain_key`，发给客户。
-8. 客户：OpenAI 兼容 base URL = CPA；`Bearer cpa_…`；`model` = 别名。
-9. openai-compat 通道务必声明 models，否则会「无 auth」。
-
----
-
-## 测试
-
-```bash
-go test ./...
-cd web && npm test && npm run build
-```
+把库文件放到 `plugins/<os>/<arch>/access-guard.so`，文件名必须保持 `access-guard`，`plugins.configs.access-guard` 才能对上。`go test ./...` 使用非 cgo 的桩。前端开发：`cd web && npm install && VITE_CPA_BASE=http://127.0.0.1:8317 npm run dev`。
